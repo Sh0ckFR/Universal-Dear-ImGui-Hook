@@ -22,4 +22,7 @@ An universal Dear ImGui Hook for Directx12 D3D12 (D3D11, D3D10 and maybe Vulkan 
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details
-The original licence of the Kiero library can be found here: [LICENSE](https://github.com/Rebzzel/kiero/blob/master/LICENSE)
+
+The original licence of the Kiero library can be found here:
+
+[LICENSE](https://github.com/Rebzzel/kiero/blob/master/LICENSE)
