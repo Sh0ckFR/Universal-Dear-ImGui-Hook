@@ -1,18 +1,25 @@
-// dear imgui: Renderer for DirectX12
-// This needs to be used along with a Platform Binding (e.g. Win32)
+// dear imgui: Renderer Backend for DirectX12
+// This needs to be used along with a Platform Backend (e.g. Win32)
 
 // Implemented features:
 //  [X] Renderer: User texture binding. Use 'D3D12_GPU_DESCRIPTOR_HANDLE' as ImTextureID. Read the FAQ about ImTextureID!
 //  [X] Renderer: Support for large meshes (64k+ vertices) with 16-bit indices.
-// Issues:
-//  [ ] 64-bit only for now! (Because sizeof(ImTextureId) == sizeof(void*)). See github.com/ocornut/imgui/pull/301
 
-// You can copy and use unmodified imgui_impl_* files in your project. See main.cpp for an example of using this.
-// If you are new to dear imgui, read examples/README.txt and read the documentation at the top of imgui.cpp.
-// https://github.com/ocornut/imgui
+// Important: to compile on 32-bit systems, this backend requires code to be compiled with '#define ImTextureID ImU64'.
+// This is because we need ImTextureID to carry a 64-bit value and by default ImTextureID is defined as void*.
+// This define is set in the example .vcxproj file and need to be replicated in your app or by adding it to your imconfig.h file.
+
+// You can copy and use unmodified imgui_impl_* files in your project. See examples/ folder for examples of using this.
+// If you are new to Dear ImGui, read documentation from the docs/ folder + read the top of imgui.cpp.
+// Read online: https://github.com/ocornut/imgui/tree/master/docs
 
 // CHANGELOG
 // (minor and older changes stripped away, please see git history for details)
+//  2021-05-19: DirectX12: Replaced direct access to ImDrawCmd::TextureId with a call to ImDrawCmd::GetTexID(). (will become a requirement)
+//  2021-02-18: DirectX12: Change blending equation to preserve alpha in output buffer.
+//  2021-01-11: DirectX12: Improve Windows 7 compatibility (for D3D12On7) by loading d3d12.dll dynamically.
+//  2020-09-16: DirectX12: Avoid rendering calls with zero-sized scissor rectangle since it generates a validation layer warning.
+//  2020-09-08: DirectX12: Clarified support for building on 32-bit systems by redefining ImTextureID.
 //  2019-10-18: DirectX12: *BREAKING CHANGE* Added extra ID3D12DescriptorHeap parameter to ImGui_ImplDX12_Init() function.
 //  2019-05-29: DirectX12: Added support for large mesh (64K+ vertices), enable ImGuiBackendFlags_RendererHasVtxOffset flag.
 //  2019-04-30: DirectX12: Added support for special ImDrawCallback_ResetRenderState callback to reset render state.
@@ -36,24 +43,22 @@
 #endif
 
 // DirectX data
-static ID3D12Device*                g_pd3dDevice = NULL;
-static ID3D10Blob*                  g_pVertexShaderBlob = NULL;
-static ID3D10Blob*                  g_pPixelShaderBlob = NULL;
-static ID3D12RootSignature*         g_pRootSignature = NULL;
-static ID3D12PipelineState*         g_pPipelineState = NULL;
+static ID3D12Device* g_pd3dDevice = NULL;
+static ID3D12RootSignature* g_pRootSignature = NULL;
+static ID3D12PipelineState* g_pPipelineState = NULL;
 static DXGI_FORMAT                  g_RTVFormat = DXGI_FORMAT_UNKNOWN;
-static ID3D12Resource*              g_pFontTextureResource = NULL;
+static ID3D12Resource* g_pFontTextureResource = NULL;
 static D3D12_CPU_DESCRIPTOR_HANDLE  g_hFontSrvCpuDescHandle = {};
 static D3D12_GPU_DESCRIPTOR_HANDLE  g_hFontSrvGpuDescHandle = {};
 
 struct FrameResources
 {
-    ID3D12Resource*     IndexBuffer;
-    ID3D12Resource*     VertexBuffer;
+    ID3D12Resource* IndexBuffer;
+    ID3D12Resource* VertexBuffer;
     int                 IndexBufferSize;
     int                 VertexBufferSize;
 };
-static FrameResources*  g_pFrameResources = NULL;
+static FrameResources* g_pFrameResources = NULL;
 static UINT             g_numFramesInFlight = 0;
 static UINT             g_frameIndex = UINT_MAX;
 
@@ -82,10 +87,10 @@ static void ImGui_ImplDX12_SetupRenderState(ImDrawData* draw_data, ID3D12Graphic
         float B = draw_data->DisplayPos.y + draw_data->DisplaySize.y;
         float mvp[4][4] =
         {
-            { 2.0f/(R-L),   0.0f,           0.0f,       0.0f },
-            { 0.0f,         2.0f/(T-B),     0.0f,       0.0f },
+            { 2.0f / (R - L),   0.0f,           0.0f,       0.0f },
+            { 0.0f,         2.0f / (T - B),     0.0f,       0.0f },
             { 0.0f,         0.0f,           0.5f,       0.0f },
-            { (R+L)/(L-R),  (T+B)/(B-T),    0.5f,       1.0f },
+            { (R + L) / (L - R),  (T + B) / (B - T),    0.5f,       1.0f },
         };
         memcpy(&vertex_constant_buffer.mvp, mvp, sizeof(mvp));
     }
@@ -126,7 +131,6 @@ static void ImGui_ImplDX12_SetupRenderState(ImDrawData* draw_data, ID3D12Graphic
 }
 
 // Render function
-// (this used to be set in io.RenderDrawListsFn and called by ImGui::Render(), but you can now call this directly from your main loop)
 void ImGui_ImplDX12_RenderDrawData(ImDrawData* draw_data, ID3D12GraphicsCommandList* ctx)
 {
     // Avoid rendering when minimized
@@ -187,7 +191,7 @@ void ImGui_ImplDX12_RenderDrawData(ImDrawData* draw_data, ID3D12GraphicsCommandL
     }
 
     // Upload vertex/index data into a single contiguous GPU buffer
-    void* vtx_resource, *idx_resource;
+    void* vtx_resource, * idx_resource;
     D3D12_RANGE range;
     memset(&range, 0, sizeof(D3D12_RANGE));
     if (fr->VertexBuffer->Map(0, &range, &vtx_resource) != S_OK)
@@ -234,9 +238,14 @@ void ImGui_ImplDX12_RenderDrawData(ImDrawData* draw_data, ID3D12GraphicsCommandL
             {
                 // Apply Scissor, Bind texture, Draw
                 const D3D12_RECT r = { (LONG)(pcmd->ClipRect.x - clip_off.x), (LONG)(pcmd->ClipRect.y - clip_off.y), (LONG)(pcmd->ClipRect.z - clip_off.x), (LONG)(pcmd->ClipRect.w - clip_off.y) };
-                ctx->SetGraphicsRootDescriptorTable(1, *(D3D12_GPU_DESCRIPTOR_HANDLE*)&pcmd->TextureId);
-                ctx->RSSetScissorRects(1, &r);
-                ctx->DrawIndexedInstanced(pcmd->ElemCount, 1, pcmd->IdxOffset + global_idx_offset, pcmd->VtxOffset + global_vtx_offset, 0);
+                if (r.right > r.left && r.bottom > r.top)
+                {
+                    D3D12_GPU_DESCRIPTOR_HANDLE texture_handle = {};
+                    texture_handle.ptr = (UINT64)(intptr_t)pcmd->GetTexID();
+                    ctx->SetGraphicsRootDescriptorTable(1, texture_handle);
+                    ctx->RSSetScissorRects(1, &r);
+                    ctx->DrawIndexedInstanced(pcmd->ElemCount, 1, pcmd->IdxOffset + global_idx_offset, pcmd->VtxOffset + global_vtx_offset, 0);
+                }
             }
         }
         global_idx_offset += cmd_list->IdxBuffer.Size;
@@ -306,7 +315,7 @@ static void ImGui_ImplDX12_CreateFontsTexture()
         hr = uploadBuffer->Map(0, &range, &mapped);
         IM_ASSERT(SUCCEEDED(hr));
         for (int y = 0; y < height; y++)
-            memcpy((void*) ((uintptr_t) mapped + y * uploadPitch), pixels + y * width * 4, width * 4);
+            memcpy((void*)((uintptr_t)mapped + y * uploadPitch), pixels + y * width * 4, width * 4);
         uploadBuffer->Unmap(0, &range);
 
         D3D12_TEXTURE_COPY_LOCATION srcLocation = {};
@@ -326,10 +335,10 @@ static void ImGui_ImplDX12_CreateFontsTexture()
         D3D12_RESOURCE_BARRIER barrier = {};
         barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
         barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-        barrier.Transition.pResource   = pTexture;
+        barrier.Transition.pResource = pTexture;
         barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
         barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-        barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 
         ID3D12Fence* fence = NULL;
         hr = g_pd3dDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence));
@@ -339,8 +348,8 @@ static void ImGui_ImplDX12_CreateFontsTexture()
         IM_ASSERT(event != NULL);
 
         D3D12_COMMAND_QUEUE_DESC queueDesc = {};
-        queueDesc.Type     = D3D12_COMMAND_LIST_TYPE_DIRECT;
-        queueDesc.Flags    = D3D12_COMMAND_QUEUE_FLAG_NONE;
+        queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+        queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
         queueDesc.NodeMask = 1;
 
         ID3D12CommandQueue* cmdQueue = NULL;
@@ -361,7 +370,7 @@ static void ImGui_ImplDX12_CreateFontsTexture()
         hr = cmdList->Close();
         IM_ASSERT(SUCCEEDED(hr));
 
-        cmdQueue->ExecuteCommandLists(1, (ID3D12CommandList* const*) &cmdList);
+        cmdQueue->ExecuteCommandLists(1, (ID3D12CommandList* const*)&cmdList);
         hr = cmdQueue->Signal(fence, 1);
         IM_ASSERT(SUCCEEDED(hr));
 
@@ -384,13 +393,13 @@ static void ImGui_ImplDX12_CreateFontsTexture()
         srvDesc.Texture2D.MostDetailedMip = 0;
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         g_pd3dDevice->CreateShaderResourceView(pTexture, &srvDesc, g_hFontSrvCpuDescHandle);
-		SafeRelease(g_pFontTextureResource);
-		g_pFontTextureResource = pTexture;
+        SafeRelease(g_pFontTextureResource);
+        g_pFontTextureResource = pTexture;
     }
 
     // Store our identifier
     static_assert(sizeof(ImTextureID) >= sizeof(g_hFontSrvGpuDescHandle.ptr), "Can't pack descriptor handle into TexID, 32-bit not supported yet.");
-    io.Fonts->TexID = (ImTextureID)g_hFontSrvGpuDescHandle.ptr;
+    io.Fonts->SetTexID((ImTextureID)g_hFontSrvGpuDescHandle.ptr);
 }
 
 bool    ImGui_ImplDX12_CreateDeviceObjects()
@@ -448,8 +457,34 @@ bool    ImGui_ImplDX12_CreateDeviceObjects()
             D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
             D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
 
+        // Load d3d12.dll and D3D12SerializeRootSignature() function address dynamically to facilitate using with D3D12On7.
+        // See if any version of d3d12.dll is already loaded in the process. If so, give preference to that.
+        static HINSTANCE d3d12_dll = ::GetModuleHandleA("d3d12.dll");
+        if (d3d12_dll == NULL)
+        {
+            // Attempt to load d3d12.dll from local directories. This will only succeed if
+            // (1) the current OS is Windows 7, and
+            // (2) there exists a version of d3d12.dll for Windows 7 (D3D12On7) in one of the following directories.
+            // See https://github.com/ocornut/imgui/pull/3696 for details.
+            const char* localD3d12Paths[] = { ".\\d3d12.dll", ".\\d3d12on7\\d3d12.dll", ".\\12on7\\d3d12.dll" }; // A. current directory, B. used by some games, C. used in Microsoft D3D12On7 sample
+            for (int i = 0; i < IM_ARRAYSIZE(localD3d12Paths); i++)
+                if ((d3d12_dll = ::LoadLibraryA(localD3d12Paths[i])) != NULL)
+                    break;
+
+            // If failed, we are on Windows >= 10.
+            if (d3d12_dll == NULL)
+                d3d12_dll = ::LoadLibraryA("d3d12.dll");
+
+            if (d3d12_dll == NULL)
+                return false;
+        }
+
+        PFN_D3D12_SERIALIZE_ROOT_SIGNATURE D3D12SerializeRootSignatureFn = (PFN_D3D12_SERIALIZE_ROOT_SIGNATURE)::GetProcAddress(d3d12_dll, "D3D12SerializeRootSignature");
+        if (D3D12SerializeRootSignatureFn == NULL)
+            return false;
+
         ID3DBlob* blob = NULL;
-        if (D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, &blob, NULL) != S_OK)
+        if (D3D12SerializeRootSignatureFn(&desc, D3D_ROOT_SIGNATURE_VERSION_1, &blob, NULL) != S_OK)
             return false;
 
         g_pd3dDevice->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&g_pRootSignature));
@@ -472,6 +507,9 @@ bool    ImGui_ImplDX12_CreateDeviceObjects()
     psoDesc.RTVFormats[0] = g_RTVFormat;
     psoDesc.SampleDesc.Count = 1;
     psoDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
+
+    ID3DBlob* vertexShaderBlob;
+    ID3DBlob* pixelShaderBlob;
 
     // Create the vertex shader
     {
@@ -503,13 +541,13 @@ bool    ImGui_ImplDX12_CreateDeviceObjects()
               return output;\
             }";
 
-        D3DCompile(vertexShader, strlen(vertexShader), NULL, NULL, NULL, "main", "vs_5_0", 0, 0, &g_pVertexShaderBlob, NULL);
-        if (g_pVertexShaderBlob == NULL) // NB: Pass ID3D10Blob* pErrorBlob to D3DCompile() to get error showing in (const char*)pErrorBlob->GetBufferPointer(). Make sure to Release() the blob!
-            return false;
-        psoDesc.VS = { g_pVertexShaderBlob->GetBufferPointer(), g_pVertexShaderBlob->GetBufferSize() };
+        if (FAILED(D3DCompile(vertexShader, strlen(vertexShader), NULL, NULL, NULL, "main", "vs_5_0", 0, 0, &vertexShaderBlob, NULL)))
+            return false; // NB: Pass ID3D10Blob* pErrorBlob to D3DCompile() to get error showing in (const char*)pErrorBlob->GetBufferPointer(). Make sure to Release() the blob!
+        psoDesc.VS = { vertexShaderBlob->GetBufferPointer(), vertexShaderBlob->GetBufferSize() };
 
         // Create the input layout
-        static D3D12_INPUT_ELEMENT_DESC local_layout[] = {
+        static D3D12_INPUT_ELEMENT_DESC local_layout[] =
+        {
             { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT,   0, (UINT)IM_OFFSETOF(ImDrawVert, pos), D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
             { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,   0, (UINT)IM_OFFSETOF(ImDrawVert, uv),  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
             { "COLOR",    0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, (UINT)IM_OFFSETOF(ImDrawVert, col), D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
@@ -535,10 +573,12 @@ bool    ImGui_ImplDX12_CreateDeviceObjects()
               return out_col; \
             }";
 
-        D3DCompile(pixelShader, strlen(pixelShader), NULL, NULL, NULL, "main", "ps_5_0", 0, 0, &g_pPixelShaderBlob, NULL);
-        if (g_pPixelShaderBlob == NULL)  // NB: Pass ID3D10Blob* pErrorBlob to D3DCompile() to get error showing in (const char*)pErrorBlob->GetBufferPointer(). Make sure to Release() the blob!
-            return false;
-        psoDesc.PS = { g_pPixelShaderBlob->GetBufferPointer(), g_pPixelShaderBlob->GetBufferSize() };
+        if (FAILED(D3DCompile(pixelShader, strlen(pixelShader), NULL, NULL, NULL, "main", "ps_5_0", 0, 0, &pixelShaderBlob, NULL)))
+        {
+            vertexShaderBlob->Release();
+            return false; // NB: Pass ID3D10Blob* pErrorBlob to D3DCompile() to get error showing in (const char*)pErrorBlob->GetBufferPointer(). Make sure to Release() the blob!
+        }
+        psoDesc.PS = { pixelShaderBlob->GetBufferPointer(), pixelShaderBlob->GetBufferSize() };
     }
 
     // Create the blending setup
@@ -549,8 +589,8 @@ bool    ImGui_ImplDX12_CreateDeviceObjects()
         desc.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
         desc.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
         desc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
-        desc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
-        desc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ZERO;
+        desc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+        desc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
         desc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
         desc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
     }
@@ -583,7 +623,10 @@ bool    ImGui_ImplDX12_CreateDeviceObjects()
         desc.BackFace = desc.FrontFace;
     }
 
-    if (g_pd3dDevice->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&g_pPipelineState)) != S_OK)
+    HRESULT result_pipeline_state = g_pd3dDevice->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&g_pPipelineState));
+    vertexShaderBlob->Release();
+    pixelShaderBlob->Release();
+    if (result_pipeline_state != S_OK)
         return false;
 
     ImGui_ImplDX12_CreateFontsTexture();
@@ -596,14 +639,12 @@ void    ImGui_ImplDX12_InvalidateDeviceObjects()
     if (!g_pd3dDevice)
         return;
 
-    SafeRelease(g_pVertexShaderBlob);
-    SafeRelease(g_pPixelShaderBlob);
     SafeRelease(g_pRootSignature);
     SafeRelease(g_pPipelineState);
     SafeRelease(g_pFontTextureResource);
 
     ImGuiIO& io = ImGui::GetIO();
-    io.Fonts->TexID = NULL; // We copied g_pFontTextureView to io.Fonts->TexID so let's clear that as well.
+    io.Fonts->SetTexID(NULL); // We copied g_pFontTextureView to io.Fonts->TexID so let's clear that as well.
 
     for (UINT i = 0; i < g_numFramesInFlight; i++)
     {
@@ -614,9 +655,9 @@ void    ImGui_ImplDX12_InvalidateDeviceObjects()
 }
 
 bool ImGui_ImplDX12_Init(ID3D12Device* device, int num_frames_in_flight, DXGI_FORMAT rtv_format, ID3D12DescriptorHeap* cbv_srv_heap,
-                         D3D12_CPU_DESCRIPTOR_HANDLE font_srv_cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE font_srv_gpu_desc_handle)
+    D3D12_CPU_DESCRIPTOR_HANDLE font_srv_cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE font_srv_gpu_desc_handle)
 {
-    // Setup back-end capabilities flags
+    // Setup backend capabilities flags
     ImGuiIO& io = ImGui::GetIO();
     io.BackendRendererName = "imgui_impl_dx12";
     io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;  // We can honor the ImDrawCmd::VtxOffset field, allowing for large meshes.
