@@ -73,7 +73,7 @@
       <Filter>Sources Files\hooks\directx</Filter>
     </ClCompile>
     <ClCompile Include="imgui\imgui_tables.cpp">
-      <Filter>Sources Files</Filter>
+      <Filter>Sources Files\imgui</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
