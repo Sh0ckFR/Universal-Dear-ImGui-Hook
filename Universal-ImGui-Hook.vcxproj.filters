@@ -72,6 +72,9 @@
     <ClCompile Include="d3d12hook.cpp">
       <Filter>Sources Files\hooks\directx</Filter>
     </ClCompile>
+    <ClCompile Include="imgui\imgui_tables.cpp">
+      <Filter>Sources Files\imgui</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="stdafx.h">
