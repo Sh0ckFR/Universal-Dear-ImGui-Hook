@@ -19,6 +19,10 @@ An universal Dear ImGui Hook for Directx12 D3D12 (D3D11, D3D10 and maybe Vulkan 
 * **Rebzzel** - *Initial work* - [Rebzzel](https://github.com/Rebzzel)
 * **Sh0ckFR** | **Revan600** - *Updated version with ImGui + InputHook* - [Sh0ckFR](https://github.com/Sh0ckFR) - [Revan600](https://github.com/Revan600)
 
+## Contributors
+
+* **primemb** - *Fixed some bugs, active member* - [primemb](https://github.com/primemb)
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details
