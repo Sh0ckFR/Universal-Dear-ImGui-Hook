@@ -2,10 +2,17 @@
 
 #include <windows.h>
 #include <cstdio>
+#include <cstdint>
 
 #include <dxgi.h>
 #include <d3d12.h>
 #pragma comment(lib, "d3d12.lib")
+
+#if defined _M_X64
+typedef uint64_t uintx_t;
+#elif defined _M_IX86
+typedef uint32_t uintx_t;
+#endif
 
 #include "imgui.h"
 #include "imgui_impl_win32.h"

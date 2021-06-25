@@ -24,7 +24,7 @@ namespace d3d12hook {
 		D3D12_CPU_DESCRIPTOR_HANDLE main_render_target_descriptor;
 	};
 
-	uint32_t buffersCounts = -1;
+	uintx_t buffersCounts = -1;
 	FrameContext* frameContext;
 
 	bool shutdown = false;
