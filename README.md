@@ -5,6 +5,7 @@ An universal Dear ImGui Hook for Directx12 D3D12 (D3D11, D3D10 and maybe Vulkan 
 
 - This project is based on https://github.com/Rebzzel/kiero
 - To use it, you need to compile it and inject your dll file in an application process.
+- If you have an error about `libMinHook.x64.lib`, recompile https://github.com/TsudaKageyu/minhook in x64 and replace the old .lib file by your new one.
 
 ![alt text](https://raw.githubusercontent.com/Sh0ckFR/Universal-Dear-ImGui-Hook/master/imgui.png)
 
