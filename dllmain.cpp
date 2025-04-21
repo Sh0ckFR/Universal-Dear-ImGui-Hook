@@ -1,6 +1,6 @@
 #include "stdafx.h"
 
-unsigned long __stdcall onAttach()
+static DWORD WINAPI onAttach()
 {
 	hooks::Init();
 	return 0;
