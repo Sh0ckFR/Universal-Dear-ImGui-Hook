@@ -10,8 +10,6 @@ namespace d3d12hook {
 	ID3D12CommandQueue* d3d12CommandQueue = nullptr;
 
 	PresentD3D12 oPresentD3D12;
-	DrawInstancedD3D12 oDrawInstancedD3D12;
-	DrawIndexedInstancedD3D12 oDrawIndexedInstancedD3D12;
 
 	void(*oExecuteCommandListsD3D12)(ID3D12CommandQueue*, UINT, ID3D12CommandList*);
 	HRESULT(*oSignalD3D12)(ID3D12CommandQueue*, ID3D12Fence*, UINT64);
@@ -39,7 +37,7 @@ namespace d3d12hook {
 		if (!init) {
 			if (SUCCEEDED(pSwapChain->GetDevice(__uuidof(ID3D12Device), (void**)&d3d12Device))) {
 				ImGui::CreateContext();
-				
+
 				unsigned char* pixels;
 				int width, height;
 				ImGuiIO& io = ImGui::GetIO(); (void)io;
@@ -53,6 +51,12 @@ namespace d3d12hook {
 				DXGI_SWAP_CHAIN_DESC sdesc;
 				pSwapChain->GetDesc(&sdesc);
 				sdesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+
+				if (!globals::mainWindow)
+					pSwapChain->GetHwnd(&globals::mainWindow);
+				if (!globals::mainWindow)
+					globals::mainWindow = GetForegroundWindow();
+
 				sdesc.OutputWindow = globals::mainWindow;
 				sdesc.Windowed = ((GetWindowLongPtr(globals::mainWindow, GWL_STYLE) & WS_POPUP) != 0) ? false : true;
 
@@ -66,7 +70,7 @@ namespace d3d12hook {
 
 				if (d3d12Device->CreateDescriptorHeap(&descriptorImGuiRender, IID_PPV_ARGS(&d3d12DescriptorHeapImGuiRender)) != S_OK)
 					return false;
-				
+
 				ID3D12CommandAllocator* allocator;
 				if (d3d12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)) != S_OK)
 					return false;
@@ -153,14 +157,6 @@ namespace d3d12hook {
 		}
 
 		return oPresentD3D12(pSwapChain, SyncInterval, Flags);
-	}
-
-	void __fastcall hookkDrawInstancedD3D12(ID3D12GraphicsCommandList* dCommandList, UINT VertexCountPerInstance, UINT InstanceCount, UINT StartVertexLocation, UINT StartInstanceLocation) {
-		return oDrawInstancedD3D12(dCommandList, VertexCountPerInstance, InstanceCount, StartVertexLocation, StartInstanceLocation);
-	}
-
-	void __fastcall hookDrawIndexedInstancedD3D12(ID3D12GraphicsCommandList* dCommandList, UINT IndexCount, UINT InstanceCount, UINT StartIndex, INT BaseVertex) {
-		return oDrawIndexedInstancedD3D12(dCommandList, IndexCount, InstanceCount, StartIndex, BaseVertex);
 	}
 
 	void hookExecuteCommandListsD3D12(ID3D12CommandQueue* queue, UINT NumCommandLists, ID3D12CommandList* ppCommandLists) {
