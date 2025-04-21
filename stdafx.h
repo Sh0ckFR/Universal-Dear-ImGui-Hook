@@ -6,7 +6,7 @@
 
 #include <dxgi.h>
 #include <d3d12.h>
-#pragma comment(lib, "d3d12.lib")
+//#pragma comment(lib, "d3d12.lib")
 
 #if defined _M_X64
 typedef uint64_t uintx_t;
@@ -20,10 +20,5 @@ typedef uint32_t uintx_t;
 #include <d3d12.h>
 #include <dxgi1_4.h>
 
-#include "d3d12hook.h"
-
-#include "globals.h"
+#include "namespaces.h"
 #include "kiero.h"
-#include "inputhooks.h"
-#include "hooks.h"
-#include "menu.h"
