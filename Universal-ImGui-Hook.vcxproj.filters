@@ -5,9 +5,6 @@
       <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
       <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
     </Filter>
-    <Filter Include="Sources Files\kiero">
-      <UniqueIdentifier>{4d4ea091-2720-4dc3-a02c-67bcbbb1c0ed}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Headers Files">
       <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
       <Extensions>h;hh;hpp;hxx;hm;inl;inc;ipp;xsd</Extensions>
@@ -23,9 +20,6 @@
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
       <Filter>Sources Files</Filter>
-    </ClCompile>
-    <ClCompile Include="kiero.cpp">
-      <Filter>Sources Files\kiero</Filter>
     </ClCompile>
     <ClCompile Include="imgui\imgui.cpp">
       <Filter>Sources Files\imgui</Filter>
@@ -65,9 +59,6 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="kiero.h">
-      <Filter>Sources Files\kiero</Filter>
-    </ClInclude>
     <ClInclude Include="imgui\imconfig.h">
       <Filter>Sources Files\imgui</Filter>
     </ClInclude>
