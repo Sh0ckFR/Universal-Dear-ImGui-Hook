@@ -1,6 +1,10 @@
 # Universal-Dear-ImGui-Hook
 An universal Dear ImGui Hook for Directx12 D3D12 (D3D11, D3D10 and maybe Vulkan will be added later)
 
+# Important
+
+[24/04/2025] I'm actually doing a full rework of this code so it will not work actually, it will be stable in fews days or the next weeks, I will edit this message when everything will be stable.
+
 ## Getting Started
 
 - This project is based on https://github.com/Rebzzel/kiero
