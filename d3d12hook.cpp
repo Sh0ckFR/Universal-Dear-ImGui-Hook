@@ -167,14 +167,24 @@ namespace d3d12hook {
     }
 
     HRESULT STDMETHODCALLTYPE hookSignalD3D12(
-        ID3D12CommandQueue * _this,
-        ID3D12Fence * pFence,
-        UINT64              Value) {
-        if (gCommandQueue && _this == gCommandQueue) {
-            gFence = pFence;
+        ID3D12CommandQueue* _this,
+        ID3D12Fence*        pFence,
+        UINT64              Value)
+    {
+        if (gCommandQueue && _this == gCommandQueue)
+        {
+            if (pFence && pFence != gFence)
+            {
+                if (gFence)
+                    gFence->Release();
+                gFence = pFence;
+                gFence->AddRef();
+            }
+
             gFenceValue = Value;
             DebugLog("[d3d12hook] Captured Fence=%p, Value=%llu\n", pFence, Value);
         }
+
         return oSignalD3D12(_this, pFence, Value);
     }
 
@@ -187,7 +197,11 @@ namespace d3d12hook {
         for (UINT i = 0; i < gBufferCount; ++i) {
             if (gFrameContexts[i].renderTarget) gFrameContexts[i].renderTarget->Release();
         }
-        if (gFence) gFence->Release();
+        if (gFence)
+        {
+            gFence->Release();
+            gFence = nullptr;
+        }
         if (gDevice) gDevice->Release();
         delete[] gFrameContexts;
 
