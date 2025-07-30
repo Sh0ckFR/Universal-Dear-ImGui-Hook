@@ -67,6 +67,16 @@ namespace d3d12hook {
             gFrameContexts = new FrameContext[gBufferCount];
             ZeroMemory(gFrameContexts, sizeof(FrameContext) * gBufferCount);
 
+            // Create command allocator for each frame
+            for (UINT i = 0; i < gBufferCount; ++i) {
+                if (FAILED(gDevice->CreateCommandAllocator(
+                        D3D12_COMMAND_LIST_TYPE_DIRECT,
+                        IID_PPV_ARGS(&gFrameContexts[i].allocator)))) {
+                    LogHRESULT("CreateCommandAllocator", E_FAIL);
+                    return oPresentD3D12(pSwapChain, SyncInterval, Flags);
+                }
+            }
+
             // Create RTVs for each back buffer
             UINT rtvSize = gDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
             auto rtvHandle = gHeapRTV->GetCPUDescriptorHandleForHeapStart();
@@ -109,18 +119,15 @@ namespace d3d12hook {
             UINT frameIdx = pSwapChain->GetCurrentBackBufferIndex();
             FrameContext& ctx = gFrameContexts[frameIdx];
 
-            // Reset allocator and command list
-            static ID3D12CommandAllocator* allocator = nullptr;
-            if (!allocator) {
-                gDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator));
-            }
-            allocator->Reset();
+            // Reset allocator and command list using frame-specific allocator
+            ctx.allocator->Reset();
 
             if (!gCommandList) {
-                gDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, nullptr, IID_PPV_ARGS(&gCommandList));
+                gDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
+                    ctx.allocator, nullptr, IID_PPV_ARGS(&gCommandList));
                 gCommandList->Close();
             }
-            gCommandList->Reset(allocator, nullptr);
+            gCommandList->Reset(ctx.allocator, nullptr);
 
             // Transition to render target
             D3D12_RESOURCE_BARRIER barrier = {};
@@ -185,6 +192,7 @@ namespace d3d12hook {
         if (gHeapRTV) gHeapRTV->Release();
         if (gHeapSRV) gHeapSRV->Release();
         for (UINT i = 0; i < gBufferCount; ++i) {
+            if (gFrameContexts[i].allocator) gFrameContexts[i].allocator->Release();
             if (gFrameContexts[i].renderTarget) gFrameContexts[i].renderTarget->Release();
         }
         if (gFence) gFence->Release();
