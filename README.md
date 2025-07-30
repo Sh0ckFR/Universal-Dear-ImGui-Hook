@@ -16,7 +16,7 @@ An universal Dear ImGui Hook for Directx12 D3D12 (D3D11, D3D10 and maybe Vulkan 
 ## Built With
 
 * [ImGui](https://github.com/ocornut/imgui) - Dear ImGui: Bloat-free Immediate Mode Graphical User interface for C++ with minimal dependencies
-* [Kiero](https://github.com/Rebzzel/kiero) - Kiero: Universal graphical hook for a D3D9-D3D12, OpenGL and Vulcan based games.
+* [Kiero](https://github.com/Rebzzel/kiero) - Kiero: Universal graphical hook for a D3D9-D3D12, OpenGL and Vulkan based games.
 * [MinHook](https://github.com/TsudaKageyu/minhook) - The Minimalistic x86/x64 API Hooking Library for Windows
 
 ## Authors
