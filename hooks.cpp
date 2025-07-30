@@ -108,7 +108,7 @@ namespace hooks {
 
         MH_STATUS mh;
 
-        // --- Hook Present sur SwapChain (vTable index 8) ---
+        // --- Hook Present on SwapChain (vTable index 8) ---
         auto scVTable = *reinterpret_cast<uintptr_t**>(pSwapChain.Get());
         mh = MH_CreateHook(
             reinterpret_cast<LPVOID>(scVTable[8]),
@@ -117,6 +117,15 @@ namespace hooks {
         );
         if (mh != MH_OK)
             DebugLog("[hooks] MH_CreateHook Present failed: %s\n", MH_StatusToString(mh));
+
+        // --- Hook ResizeBuffers (index 13) ---
+        mh = MH_CreateHook(
+            reinterpret_cast<LPVOID>(scVTable[13]),
+            reinterpret_cast<LPVOID>(d3d12hook::hookResizeBuffersD3D12),
+            reinterpret_cast<LPVOID*>(&d3d12hook::oResizeBuffersD3D12)
+        );
+        if (mh != MH_OK)
+            DebugLog("[hooks] MH_CreateHook ResizeBuffers failed: %s\n", MH_StatusToString(mh));
 
         // --- Hook ExecuteCommandLists (index 10) ---
         auto cqVTable = *reinterpret_cast<uintptr_t**>(pCommandQueue.Get());
@@ -143,8 +152,9 @@ namespace hooks {
             DebugLog("[hooks] MH_EnableHook failed: %s\n", MH_StatusToString(mh));
         else
             DebugLog(
-                "[hooks] Hooks enabled. Present@%p, Exec@%p, Signal@%p\n",
+                "[hooks] Hooks enabled. Present@%p, Resize@%p, Exec@%p, Signal@%p\n",
                 reinterpret_cast<LPVOID>(scVTable[8]),
+                reinterpret_cast<LPVOID>(scVTable[13]),
                 reinterpret_cast<LPVOID>(cqVTable[10]),
                 reinterpret_cast<LPVOID>(cqVTable[14])
             );
