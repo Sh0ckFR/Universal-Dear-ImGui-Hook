@@ -4,6 +4,7 @@ namespace d3d12hook {
     PresentD3D12            oPresentD3D12 = nullptr;
     ExecuteCommandListsFn   oExecuteCommandListsD3D12 = nullptr;
     SignalFn                oSignalD3D12 = nullptr;
+    ResizeBuffersFn         oResizeBuffersD3D12 = nullptr;
 
     static ID3D12Device* gDevice = nullptr;
     static ID3D12CommandQueue* gCommandQueue = nullptr;
@@ -193,6 +194,62 @@ namespace d3d12hook {
         }
 
         return oSignalD3D12(_this, pFence, Value);
+    }
+
+    HRESULT STDMETHODCALLTYPE hookResizeBuffersD3D12(
+        IDXGISwapChain3* pSwapChain,
+        UINT BufferCount,
+        UINT Width,
+        UINT Height,
+        DXGI_FORMAT NewFormat,
+        UINT SwapChainFlags)
+    {
+        DebugLog("[d3d12hook] ResizeBuffers called: %ux%u Buffers=%u\n",
+            Width, Height, BufferCount);
+
+        if (gInitialized)
+        {
+            DebugLog("[d3d12hook] Releasing resources for resize\n");
+
+            if (gCommandList)
+            {
+                gCommandList->Release();
+                gCommandList = nullptr;
+            }
+            if (gHeapRTV)
+            {
+                gHeapRTV->Release();
+                gHeapRTV = nullptr;
+            }
+            if (gHeapSRV)
+            {
+                gHeapSRV->Release();
+                gHeapSRV = nullptr;
+            }
+
+            for (UINT i = 0; i < gBufferCount; ++i)
+            {
+                if (gFrameContexts[i].renderTarget)
+                {
+                    gFrameContexts[i].renderTarget->Release();
+                    gFrameContexts[i].renderTarget = nullptr;
+                }
+                if (gFrameContexts[i].allocator)
+                {
+                    gFrameContexts[i].allocator->Release();
+                    gFrameContexts[i].allocator = nullptr;
+                }
+            }
+
+            delete[] gFrameContexts;
+            gFrameContexts = nullptr;
+            gBufferCount = 0;
+
+            gInitialized = false;
+        }
+
+        return oResizeBuffersD3D12(
+            pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags);
     }
 
     void release() {

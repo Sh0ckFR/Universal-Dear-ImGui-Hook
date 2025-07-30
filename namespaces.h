@@ -24,11 +24,28 @@ namespace d3d12hook {
 
 	typedef void(STDMETHODCALLTYPE* ExecuteCommandListsFn)(
 		ID3D12CommandQueue * _this, UINT NumCommandLists, ID3D12CommandList* const* ppCommandLists);
-	extern ExecuteCommandListsFn oExecuteCommandListsD3D12;
+        extern ExecuteCommandListsFn oExecuteCommandListsD3D12;
 
-	typedef HRESULT(STDMETHODCALLTYPE* SignalFn)(
-		ID3D12CommandQueue * _this, ID3D12Fence* pFence, UINT64 Value);
-	extern SignalFn oSignalD3D12;
+        typedef HRESULT(STDMETHODCALLTYPE* SignalFn)(
+                ID3D12CommandQueue * _this, ID3D12Fence* pFence, UINT64 Value);
+        extern SignalFn oSignalD3D12;
+
+        typedef HRESULT(STDMETHODCALLTYPE* ResizeBuffersFn)(
+                IDXGISwapChain3* pSwapChain,
+                UINT BufferCount,
+                UINT Width,
+                UINT Height,
+                DXGI_FORMAT NewFormat,
+                UINT SwapChainFlags);
+        extern ResizeBuffersFn oResizeBuffersD3D12;
+
+        extern HRESULT STDMETHODCALLTYPE hookResizeBuffersD3D12(
+                IDXGISwapChain3* pSwapChain,
+                UINT BufferCount,
+                UINT Width,
+                UINT Height,
+                DXGI_FORMAT NewFormat,
+                UINT SwapChainFlags);
 
 	extern long __fastcall hookPresentD3D12(IDXGISwapChain3* pSwapChain, UINT SyncInterval, UINT Flags);
 	extern void STDMETHODCALLTYPE hookExecuteCommandListsD3D12(
