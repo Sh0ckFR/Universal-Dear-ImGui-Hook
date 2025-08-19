@@ -6,6 +6,7 @@
 #include <windows.h>
 #include <cstdio>
 #include <cstdint>
+#include <cstddef>
 #include <cstdarg>
 
 #include <dxgi1_4.h>
