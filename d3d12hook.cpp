@@ -255,6 +255,9 @@ namespace d3d12hook {
     void release() {
         DebugLog("[d3d12hook] Releasing resources.\n");
         gShutdown = true;
+        if (globals::mainWindow) {
+            inputhook::Remove(globals::mainWindow);
+        }
         if (gCommandList) gCommandList->Release();
         if (gHeapRTV) gHeapRTV->Release();
         if (gHeapSRV) gHeapSRV->Release();
