@@ -316,7 +316,16 @@ namespace d3d12hook {
         delete[] gFrameContexts;
 
         // Unhook
-        MH_DisableHook(MH_ALL_HOOKS);
-        DebugLog("[d3d12hook] Hooks disabled.\n");
+        MH_STATUS mh = MH_DisableHook(MH_ALL_HOOKS);
+        if (mh != MH_OK)
+            DebugLog("[d3d12hook] MH_DisableHook failed: %s\n", MH_StatusToString(mh));
+        else
+            DebugLog("[d3d12hook] Hooks disabled.\n");
+
+        mh = MH_RemoveHook(MH_ALL_HOOKS);
+        if (mh != MH_OK)
+            DebugLog("[d3d12hook] MH_RemoveHook failed: %s\n", MH_StatusToString(mh));
+        else
+            DebugLog("[d3d12hook] Hooks removed.\n");
     }
 }
