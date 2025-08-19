@@ -3,6 +3,22 @@
 using Microsoft::WRL::ComPtr;
 
 namespace hooks {
+    template<typename T, typename M>
+    static constexpr size_t GetIndex(M T::* method) {
+        union { M T::* m; size_t i; } caster{ method };
+        return caster.i / sizeof(void*);
+    }
+
+    template<typename T, typename M>
+    static constexpr void* GetAddress(M T::* method) {
+        union { M T::* m; void* addr; } caster{ method };
+        return caster.addr;
+    }
+
+    static constexpr size_t kPresentIndex = GetIndex(&IDXGISwapChain3::Present);
+    static constexpr size_t kResizeBuffersIndex = GetIndex(&IDXGISwapChain3::ResizeBuffers);
+    static constexpr size_t kExecuteCommandListsIndex = GetIndex(&ID3D12CommandQueue::ExecuteCommandLists);
+    static constexpr size_t kSignalIndex = GetIndex(&ID3D12CommandQueue::Signal);
     // Dummy objects pour extraire les v-tables
     static ComPtr<IDXGISwapChain3>       pSwapChain = nullptr;
     static ComPtr<ID3D12Device>          pDevice = nullptr;
@@ -100,6 +116,9 @@ namespace hooks {
 
     void Init() {
         DebugLog("[hooks] Init starting\n");
+        DebugLog(
+            "[hooks] VTable indices - Present:%zu ResizeBuffers:%zu ExecuteCmdLists:%zu Signal:%zu\n",
+            kPresentIndex, kResizeBuffersIndex, kExecuteCommandListsIndex, kSignalIndex);
 
         if (FAILED(CreateDeviceAndSwapChain())) {
             DebugLog("[hooks] Failed to create dummy device/swapchain.\n");
@@ -108,38 +127,46 @@ namespace hooks {
 
         MH_STATUS mh;
 
-        // --- Hook Present on SwapChain (vTable index 8) ---
+        // --- Hook Present on SwapChain ---
         auto scVTable = *reinterpret_cast<uintptr_t**>(pSwapChain.Get());
+        if (scVTable[kPresentIndex] != GetAddress(&IDXGISwapChain3::Present))
+            DebugLog("[hooks] Warning: Present index %zu may be incorrect\n", kPresentIndex);
+        if (scVTable[kResizeBuffersIndex] != GetAddress(&IDXGISwapChain3::ResizeBuffers))
+            DebugLog("[hooks] Warning: ResizeBuffers index %zu may be incorrect\n", kResizeBuffersIndex);
         mh = MH_CreateHook(
-            reinterpret_cast<LPVOID>(scVTable[8]),
+            reinterpret_cast<LPVOID>(scVTable[kPresentIndex]),
             reinterpret_cast<LPVOID>(d3d12hook::hookPresentD3D12),
             reinterpret_cast<LPVOID*>(&d3d12hook::oPresentD3D12)
         );
         if (mh != MH_OK)
             DebugLog("[hooks] MH_CreateHook Present failed: %s\n", MH_StatusToString(mh));
 
-        // --- Hook ResizeBuffers (index 13) ---
+        // --- Hook ResizeBuffers ---
         mh = MH_CreateHook(
-            reinterpret_cast<LPVOID>(scVTable[13]),
+            reinterpret_cast<LPVOID>(scVTable[kResizeBuffersIndex]),
             reinterpret_cast<LPVOID>(d3d12hook::hookResizeBuffersD3D12),
             reinterpret_cast<LPVOID*>(&d3d12hook::oResizeBuffersD3D12)
         );
         if (mh != MH_OK)
             DebugLog("[hooks] MH_CreateHook ResizeBuffers failed: %s\n", MH_StatusToString(mh));
 
-        // --- Hook ExecuteCommandLists (index 10) ---
+        // --- Hook ExecuteCommandLists ---
         auto cqVTable = *reinterpret_cast<uintptr_t**>(pCommandQueue.Get());
+        if (cqVTable[kExecuteCommandListsIndex] != GetAddress(&ID3D12CommandQueue::ExecuteCommandLists))
+            DebugLog("[hooks] Warning: ExecuteCommandLists index %zu may be incorrect\n", kExecuteCommandListsIndex);
+        if (cqVTable[kSignalIndex] != GetAddress(&ID3D12CommandQueue::Signal))
+            DebugLog("[hooks] Warning: Signal index %zu may be incorrect\n", kSignalIndex);
         mh = MH_CreateHook(
-            reinterpret_cast<LPVOID>(cqVTable[10]),
+            reinterpret_cast<LPVOID>(cqVTable[kExecuteCommandListsIndex]),
             reinterpret_cast<LPVOID>(d3d12hook::hookExecuteCommandListsD3D12),
             reinterpret_cast<LPVOID*>(&d3d12hook::oExecuteCommandListsD3D12)
         );
         if (mh != MH_OK)
             DebugLog("[hooks] MH_CreateHook ExecuteCommandLists failed: %s\n", MH_StatusToString(mh));
 
-        // --- Hook Signal (index 14) ---
+        // --- Hook Signal ---
         mh = MH_CreateHook(
-            reinterpret_cast<LPVOID>(cqVTable[14]),
+            reinterpret_cast<LPVOID>(cqVTable[kSignalIndex]),
             reinterpret_cast<LPVOID>(d3d12hook::hookSignalD3D12),
             reinterpret_cast<LPVOID*>(&d3d12hook::oSignalD3D12)
         );
@@ -152,11 +179,11 @@ namespace hooks {
             DebugLog("[hooks] MH_EnableHook failed: %s\n", MH_StatusToString(mh));
         else
             DebugLog(
-                "[hooks] Hooks enabled. Present@%p, Resize@%p, Exec@%p, Signal@%p\n",
-                reinterpret_cast<LPVOID>(scVTable[8]),
-                reinterpret_cast<LPVOID>(scVTable[13]),
-                reinterpret_cast<LPVOID>(cqVTable[10]),
-                reinterpret_cast<LPVOID>(cqVTable[14])
+                "[hooks] Hooks enabled. Present@%p (idx=%zu), Resize@%p (idx=%zu), Exec@%p (idx=%zu), Signal@%p (idx=%zu)\n",
+                reinterpret_cast<LPVOID>(scVTable[kPresentIndex]), kPresentIndex,
+                reinterpret_cast<LPVOID>(scVTable[kResizeBuffersIndex]), kResizeBuffersIndex,
+                reinterpret_cast<LPVOID>(cqVTable[kExecuteCommandListsIndex]), kExecuteCommandListsIndex,
+                reinterpret_cast<LPVOID>(cqVTable[kSignalIndex]), kSignalIndex
             );
     }
 }
