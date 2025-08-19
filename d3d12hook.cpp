@@ -29,6 +29,80 @@ namespace d3d12hook {
         DebugLog("[d3d12hook] %s: hr=0x%08X\n", label, hr);
     }
 
+    static void InitializeImGuiD3D12(IDXGISwapChain3* pSwapChain) {
+        DebugLog("[d3d12hook] Initializing ImGui.\n");
+        if (!gDevice) {
+            if (FAILED(pSwapChain->GetDevice(__uuidof(ID3D12Device), (void**)&gDevice))) {
+                LogHRESULT("GetDevice", E_FAIL);
+                return;
+            }
+        }
+
+        DXGI_SWAP_CHAIN_DESC desc = {};
+        pSwapChain->GetDesc(&desc);
+        gBufferCount = desc.BufferCount;
+        DebugLog("[d3d12hook] BufferCount=%u\n", gBufferCount);
+
+        // Create descriptor heaps
+        D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
+        heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+        heapDesc.NumDescriptors = gBufferCount;
+        if (FAILED(gDevice->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&gHeapRTV)))) {
+            LogHRESULT("CreateDescriptorHeap RTV", E_FAIL);
+            return;
+        }
+
+        heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+        heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        if (FAILED(gDevice->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&gHeapSRV)))) {
+            LogHRESULT("CreateDescriptorHeap SRV", E_FAIL);
+            return;
+        }
+
+        // Allocate frame contexts
+        gFrameContexts = new FrameContext[gBufferCount];
+        ZeroMemory(gFrameContexts, sizeof(FrameContext) * gBufferCount);
+
+        // Create command allocator for each frame
+        for (UINT i = 0; i < gBufferCount; ++i) {
+            if (FAILED(gDevice->CreateCommandAllocator(
+                    D3D12_COMMAND_LIST_TYPE_DIRECT,
+                    IID_PPV_ARGS(&gFrameContexts[i].allocator)))) {
+                LogHRESULT("CreateCommandAllocator", E_FAIL);
+                return;
+            }
+        }
+
+        // Create RTVs for each back buffer
+        UINT rtvSize = gDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+        auto rtvHandle = gHeapRTV->GetCPUDescriptorHandleForHeapStart();
+        for (UINT i = 0; i < gBufferCount; ++i) {
+            ID3D12Resource* back;
+            pSwapChain->GetBuffer(i, IID_PPV_ARGS(&back));
+            gDevice->CreateRenderTargetView(back, nullptr, rtvHandle);
+            gFrameContexts[i].renderTarget = back;
+            gFrameContexts[i].rtvHandle = rtvHandle;
+            rtvHandle.ptr += rtvSize;
+        }
+
+        // ImGui setup
+        ImGui::CreateContext();
+        ImGuiIO& io = ImGui::GetIO(); (void)io;
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+        ImGui::StyleColorsDark();
+        ImGui_ImplWin32_Init(desc.OutputWindow);
+        ImGui_ImplDX12_Init(gDevice, gBufferCount,
+            desc.BufferDesc.Format,
+            gHeapSRV,
+            gHeapSRV->GetCPUDescriptorHandleForHeapStart(),
+            gHeapSRV->GetGPUDescriptorHandleForHeapStart());
+        DebugLog("[d3d12hook] ImGui initialized.\n");
+
+        inputhook::Init(desc.OutputWindow);
+
+        gInitialized = true;
+    }
+
     long __fastcall hookPresentD3D12(IDXGISwapChain3* pSwapChain, UINT SyncInterval, UINT Flags) {
         if (GetAsyncKeyState(globals::openMenuKey) & 1) {
             menu::isOpen = !menu::isOpen;
@@ -36,77 +110,9 @@ namespace d3d12hook {
         }
 
         if (!gInitialized) {
-            DebugLog("[d3d12hook] Initializing ImGui on first Present.\n");
-            if (FAILED(pSwapChain->GetDevice(__uuidof(ID3D12Device), (void**)&gDevice))) {
-                LogHRESULT("GetDevice", E_FAIL);
+            InitializeImGuiD3D12(pSwapChain);
+            if (!gInitialized)
                 return oPresentD3D12(pSwapChain, SyncInterval, Flags);
-            }
-
-            // Swap Chain description
-            DXGI_SWAP_CHAIN_DESC desc = {};
-            pSwapChain->GetDesc(&desc);
-            gBufferCount = desc.BufferCount;
-            DebugLog("[d3d12hook] BufferCount=%u\n", gBufferCount);
-
-            // Create descriptor heaps
-            D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
-            heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-            heapDesc.NumDescriptors = gBufferCount;
-            if (FAILED(gDevice->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&gHeapRTV)))) {
-                LogHRESULT("CreateDescriptorHeap RTV", E_FAIL);
-                return oPresentD3D12(pSwapChain, SyncInterval, Flags);
-            }
-
-            heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-            heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-            if (FAILED(gDevice->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&gHeapSRV)))) {
-                LogHRESULT("CreateDescriptorHeap SRV", E_FAIL);
-                return oPresentD3D12(pSwapChain, SyncInterval, Flags);
-            }
-
-            // Allocate frame contexts
-            gFrameContexts = new FrameContext[gBufferCount];
-            ZeroMemory(gFrameContexts, sizeof(FrameContext) * gBufferCount);
-
-            // Create command allocator for each frame
-            for (UINT i = 0; i < gBufferCount; ++i) {
-                if (FAILED(gDevice->CreateCommandAllocator(
-                        D3D12_COMMAND_LIST_TYPE_DIRECT,
-                        IID_PPV_ARGS(&gFrameContexts[i].allocator)))) {
-                    LogHRESULT("CreateCommandAllocator", E_FAIL);
-                    return oPresentD3D12(pSwapChain, SyncInterval, Flags);
-                }
-            }
-
-            // Create RTVs for each back buffer
-            UINT rtvSize = gDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-            auto rtvHandle = gHeapRTV->GetCPUDescriptorHandleForHeapStart();
-            for (UINT i = 0; i < gBufferCount; ++i) {
-                ID3D12Resource* back;
-                pSwapChain->GetBuffer(i, IID_PPV_ARGS(&back));
-                gDevice->CreateRenderTargetView(back, nullptr, rtvHandle);
-                gFrameContexts[i].renderTarget = back;
-                gFrameContexts[i].rtvHandle = rtvHandle;
-                rtvHandle.ptr += rtvSize;
-            }
-
-            // ImGui setup
-            ImGui::CreateContext();
-            ImGuiIO& io = ImGui::GetIO(); (void)io;
-            io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-            ImGui::StyleColorsDark();
-            ImGui_ImplWin32_Init(desc.OutputWindow);
-            ImGui_ImplDX12_Init(gDevice, gBufferCount,
-                desc.BufferDesc.Format,
-                gHeapSRV,
-                gHeapSRV->GetCPUDescriptorHandleForHeapStart(),
-                gHeapSRV->GetGPUDescriptorHandleForHeapStart());
-            DebugLog("[d3d12hook] ImGui initialized.\n");
-
-            inputhook::Init(desc.OutputWindow);
-
-            // Hook CommandQueue and Fence are already captured by minhook
-            gInitialized = true;
         }
 
         if (!gShutdown) {
@@ -209,6 +215,10 @@ namespace d3d12hook {
 
         if (gInitialized)
         {
+            ImGui_ImplDX12_Shutdown();
+            ImGui_ImplWin32_Shutdown();
+            ImGui::DestroyContext();
+
             DebugLog("[d3d12hook] Releasing resources for resize\n");
 
             if (gCommandList)
@@ -248,13 +258,21 @@ namespace d3d12hook {
             gInitialized = false;
         }
 
-        return oResizeBuffersD3D12(
+        HRESULT hr = oResizeBuffersD3D12(
             pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags);
+
+        if (SUCCEEDED(hr))
+            InitializeImGuiD3D12(pSwapChain);
+
+        return hr;
     }
 
     void release() {
         DebugLog("[d3d12hook] Releasing resources.\n");
         gShutdown = true;
+        ImGui_ImplDX12_Shutdown();
+        ImGui_ImplWin32_Shutdown();
+        ImGui::DestroyContext();
         if (gCommandList) gCommandList->Release();
         if (gHeapRTV) gHeapRTV->Release();
         if (gHeapSRV) gHeapSRV->Release();
