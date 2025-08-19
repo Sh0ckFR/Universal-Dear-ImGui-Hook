@@ -128,7 +128,7 @@ namespace hooks {
         MH_STATUS mh;
 
         // --- Hook Present on SwapChain ---
-        auto scVTable = *reinterpret_cast<uintptr_t**>(pSwapChain.Get());
+        auto scVTable = *reinterpret_cast<void***>(pSwapChain.Get());
         if (scVTable[kPresentIndex] != GetAddress(&IDXGISwapChain3::Present))
             DebugLog("[hooks] Warning: Present index %zu may be incorrect\n", kPresentIndex);
         if (scVTable[kResizeBuffersIndex] != GetAddress(&IDXGISwapChain3::ResizeBuffers))
@@ -151,7 +151,7 @@ namespace hooks {
             DebugLog("[hooks] MH_CreateHook ResizeBuffers failed: %s\n", MH_StatusToString(mh));
 
         // --- Hook ExecuteCommandLists ---
-        auto cqVTable = *reinterpret_cast<uintptr_t**>(pCommandQueue.Get());
+        auto cqVTable = *reinterpret_cast<void***>(pCommandQueue.Get());
         if (cqVTable[kExecuteCommandListsIndex] != GetAddress(&ID3D12CommandQueue::ExecuteCommandLists))
             DebugLog("[hooks] Warning: ExecuteCommandLists index %zu may be incorrect\n", kExecuteCommandListsIndex);
         if (cqVTable[kSignalIndex] != GetAddress(&ID3D12CommandQueue::Signal))
