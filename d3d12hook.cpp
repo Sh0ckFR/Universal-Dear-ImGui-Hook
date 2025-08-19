@@ -144,14 +144,26 @@ namespace d3d12hook {
             }
 
             // Reset allocator and command list using frame-specific allocator
-            ctx.allocator->Reset();
+            HRESULT hr = ctx.allocator->Reset();
+            if (FAILED(hr)) {
+                LogHRESULT("CommandAllocator->Reset", hr);
+                return oPresentD3D12(pSwapChain, SyncInterval, Flags);
+            }
 
             if (!gCommandList) {
-                gDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
+                hr = gDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
                     ctx.allocator, nullptr, IID_PPV_ARGS(&gCommandList));
+                if (FAILED(hr)) {
+                    LogHRESULT("CreateCommandList", hr);
+                    return oPresentD3D12(pSwapChain, SyncInterval, Flags);
+                }
                 gCommandList->Close();
             }
-            gCommandList->Reset(ctx.allocator, nullptr);
+            hr = gCommandList->Reset(ctx.allocator, nullptr);
+            if (FAILED(hr)) {
+                LogHRESULT("CommandList->Reset", hr);
+                return oPresentD3D12(pSwapChain, SyncInterval, Flags);
+            }
 
             // Transition to render target
             D3D12_RESOURCE_BARRIER barrier = {};
