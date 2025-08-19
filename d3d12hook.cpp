@@ -255,6 +255,11 @@ namespace d3d12hook {
         {
             DebugLog("[d3d12hook] Releasing resources for resize\n");
 
+            ImGui_ImplDX12_Shutdown();
+            ImGui_ImplWin32_Shutdown();
+            ImGui::DestroyContext();
+            inputhook::Remove(globals::mainWindow);
+
             if (gCommandList)
             {
                 gCommandList->Release();
