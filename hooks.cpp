@@ -4,21 +4,19 @@ using Microsoft::WRL::ComPtr;
 
 namespace hooks {
     template<typename T, typename M>
-    static constexpr size_t GetIndex(M T::* method) {
-        union { M T::* m; size_t i; } caster{ method };
-        return caster.i / sizeof(void*);
+    static size_t GetIndex(M T::* method) {
+        return reinterpret_cast<size_t&>(method) / sizeof(void*);
     }
 
     template<typename T, typename M>
-    static constexpr void* GetAddress(M T::* method) {
-        union { M T::* m; void* addr; } caster{ method };
-        return caster.addr;
+    static void* GetAddress(M T::* method) {
+        return reinterpret_cast<void*&>(method);
     }
 
-    static constexpr size_t kPresentIndex = GetIndex(&IDXGISwapChain3::Present);
-    static constexpr size_t kResizeBuffersIndex = GetIndex(&IDXGISwapChain3::ResizeBuffers);
-    static constexpr size_t kExecuteCommandListsIndex = GetIndex(&ID3D12CommandQueue::ExecuteCommandLists);
-    static constexpr size_t kSignalIndex = GetIndex(&ID3D12CommandQueue::Signal);
+    static size_t kPresentIndex = GetIndex(&IDXGISwapChain3::Present);
+    static size_t kResizeBuffersIndex = GetIndex(&IDXGISwapChain3::ResizeBuffers);
+    static size_t kExecuteCommandListsIndex = GetIndex(&ID3D12CommandQueue::ExecuteCommandLists);
+    static size_t kSignalIndex = GetIndex(&ID3D12CommandQueue::Signal);
     // Dummy objects pour extraire les v-tables
     static ComPtr<IDXGISwapChain3>       pSwapChain = nullptr;
     static ComPtr<ID3D12Device>          pDevice = nullptr;
