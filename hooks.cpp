@@ -26,6 +26,21 @@ namespace hooks {
     static HWND                          hDummyWindow = nullptr;
     static const wchar_t* dummyClassName = L"DummyWndClass";
 
+    static void CleanupDummyObjects()
+    {
+        if (hDummyWindow)
+        {
+            DestroyWindow(hDummyWindow);
+            hDummyWindow = nullptr;
+        }
+
+        UnregisterClassW(dummyClassName, GetModuleHandle(nullptr));
+
+        pSwapChain.Reset();
+        pDevice.Reset();
+        pCommandQueue.Reset();
+    }
+
     // Create hidden Window + device + DX12 swapchain
     static HRESULT CreateDeviceAndSwapChain() {
         // 1) Register dummy window
@@ -119,6 +134,10 @@ namespace hooks {
         DebugLog(
             "[hooks] VTable indices - Present:%zu ResizeBuffers:%zu ExecuteCmdLists:%zu Signal:%zu\n",
             kPresentIndex, kResizeBuffersIndex, kExecuteCommandListsIndex, kSignalIndex);
+
+        struct CleanupGuard {
+            ~CleanupGuard() { CleanupDummyObjects(); }
+        } cleanup;
 
         if (FAILED(CreateDeviceAndSwapChain())) {
             DebugLog("[hooks] Failed to create dummy device/swapchain.\n");
