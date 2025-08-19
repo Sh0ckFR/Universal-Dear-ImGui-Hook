@@ -294,7 +294,7 @@ namespace d3d12hook {
     }
 
     void release() {
-        DebugLog("[d3d12hook] Releasing resources.\n");
+        DebugLog("[d3d12hook] Releasing resources and hooks.\n");
         gShutdown = true;
         if (globals::mainWindow) {
             inputhook::Remove(globals::mainWindow);
