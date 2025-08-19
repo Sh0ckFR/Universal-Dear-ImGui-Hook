@@ -179,7 +179,7 @@ namespace d3d12hook {
                 DebugLog("[d3d12hook] CommandQueue not set, skipping ExecuteCommandLists.\n");
             }
             else {
-                gCommandQueue->ExecuteCommandLists(1, reinterpret_cast<ID3D12CommandList* const*>(&gCommandList));
+                oExecuteCommandListsD3D12(gCommandQueue, 1, reinterpret_cast<ID3D12CommandList* const*>(&gCommandList));
                 if (gFence) {
                     HRESULT hr = gCommandQueue->Signal(gFence, ++gFenceValue);
                     if (FAILED(hr)) {
