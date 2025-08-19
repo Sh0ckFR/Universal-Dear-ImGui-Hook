@@ -3,20 +3,12 @@
 using Microsoft::WRL::ComPtr;
 
 namespace hooks {
-    template<typename T, typename M>
-    static size_t GetIndex(M T::* method) {
-        return reinterpret_cast<size_t&>(method) / sizeof(void*);
-    }
-
-    template<typename T, typename M>
-    static void* GetAddress(M T::* method) {
-        return reinterpret_cast<void*&>(method);
-    }
-
-    static size_t kPresentIndex = GetIndex(&IDXGISwapChain3::Present);
-    static size_t kResizeBuffersIndex = GetIndex(&IDXGISwapChain3::ResizeBuffers);
-    static size_t kExecuteCommandListsIndex = GetIndex(&ID3D12CommandQueue::ExecuteCommandLists);
-    static size_t kSignalIndex = GetIndex(&ID3D12CommandQueue::Signal);
+    // VTable indices derived from the official DirectX interface order.
+    // These values are stable across Windows versions and SDKs.
+    constexpr size_t kPresentIndex = 8;            // IDXGISwapChain::Present
+    constexpr size_t kResizeBuffersIndex = 13;     // IDXGISwapChain::ResizeBuffers
+    constexpr size_t kExecuteCommandListsIndex = 10; // ID3D12CommandQueue::ExecuteCommandLists
+    constexpr size_t kSignalIndex = 14;            // ID3D12CommandQueue::Signal
     // Dummy objects pour extraire les v-tables
     static ComPtr<IDXGISwapChain3>       pSwapChain = nullptr;
     static ComPtr<ID3D12Device>          pDevice = nullptr;
@@ -146,10 +138,6 @@ namespace hooks {
 
         // --- Hook Present on SwapChain ---
         auto scVTable = *reinterpret_cast<void***>(pSwapChain.Get());
-        if (scVTable[kPresentIndex] != GetAddress(&IDXGISwapChain3::Present))
-            DebugLog("[hooks] Warning: Present index %zu may be incorrect\n", kPresentIndex);
-        if (scVTable[kResizeBuffersIndex] != GetAddress(&IDXGISwapChain3::ResizeBuffers))
-            DebugLog("[hooks] Warning: ResizeBuffers index %zu may be incorrect\n", kResizeBuffersIndex);
         mh = MH_CreateHook(
             reinterpret_cast<LPVOID>(scVTable[kPresentIndex]),
             reinterpret_cast<LPVOID>(d3d12hook::hookPresentD3D12),
@@ -169,10 +157,6 @@ namespace hooks {
 
         // --- Hook ExecuteCommandLists ---
         auto cqVTable = *reinterpret_cast<void***>(pCommandQueue.Get());
-        if (cqVTable[kExecuteCommandListsIndex] != GetAddress(&ID3D12CommandQueue::ExecuteCommandLists))
-            DebugLog("[hooks] Warning: ExecuteCommandLists index %zu may be incorrect\n", kExecuteCommandListsIndex);
-        if (cqVTable[kSignalIndex] != GetAddress(&ID3D12CommandQueue::Signal))
-            DebugLog("[hooks] Warning: Signal index %zu may be incorrect\n", kSignalIndex);
         mh = MH_CreateHook(
             reinterpret_cast<LPVOID>(cqVTable[kExecuteCommandListsIndex]),
             reinterpret_cast<LPVOID>(d3d12hook::hookExecuteCommandListsD3D12),
