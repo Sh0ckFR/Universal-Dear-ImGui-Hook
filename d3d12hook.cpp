@@ -12,6 +12,7 @@ namespace d3d12hook {
     static ID3D12DescriptorHeap* gHeapSRV = nullptr;
     static ID3D12GraphicsCommandList* gCommandList = nullptr;
     static ID3D12Fence* gFence = nullptr;
+    static HANDLE                   gFenceEvent = nullptr;
     static UINT64                  gFenceValue = 0;
     static uintx_t                 gBufferCount = 0;
 
@@ -105,6 +106,13 @@ namespace d3d12hook {
 
             inputhook::Init(desc.OutputWindow);
 
+            if (!gFenceEvent) {
+                gFenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+                if (!gFenceEvent) {
+                    DebugLog("[d3d12hook] Failed to create fence event: %lu\n", GetLastError());
+                }
+            }
+
             // Hook CommandQueue and Fence are already captured by minhook
             gInitialized = true;
         }
@@ -119,6 +127,21 @@ namespace d3d12hook {
 
             UINT frameIdx = pSwapChain->GetCurrentBackBufferIndex();
             FrameContext& ctx = gFrameContexts[frameIdx];
+
+            // Wait for the GPU to finish with the previous frame
+            if (gFence && gFenceEvent) {
+                if (gFence->GetCompletedValue() < gFenceValue) {
+                    HRESULT hr = gFence->SetEventOnCompletion(gFenceValue, gFenceEvent);
+                    if (SUCCEEDED(hr)) {
+                        DWORD waitRes = WaitForSingleObject(gFenceEvent, INFINITE);
+                        if (waitRes != WAIT_OBJECT_0) {
+                            DebugLog("[d3d12hook] WaitForSingleObject failed: %lu\n", GetLastError());
+                        }
+                    } else {
+                        LogHRESULT("SetEventOnCompletion", hr);
+                    }
+                }
+            }
 
             // Reset allocator and command list using frame-specific allocator
             ctx.allocator->Reset();
@@ -157,6 +180,12 @@ namespace d3d12hook {
             }
             else {
                 gCommandQueue->ExecuteCommandLists(1, reinterpret_cast<ID3D12CommandList* const*>(&gCommandList));
+                if (gFence) {
+                    HRESULT hr = gCommandQueue->Signal(gFence, ++gFenceValue);
+                    if (FAILED(hr)) {
+                        LogHRESULT("Signal", hr);
+                    }
+                }
             }
         }
 
@@ -266,6 +295,12 @@ namespace d3d12hook {
         {
             gFence->Release();
             gFence = nullptr;
+        }
+
+        if (gFenceEvent)
+        {
+            CloseHandle(gFenceEvent);
+            gFenceEvent = nullptr;
         }
 
         if (gDevice) gDevice->Release();
