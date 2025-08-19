@@ -129,17 +129,20 @@ namespace d3d12hook {
             FrameContext& ctx = gFrameContexts[frameIdx];
 
             // Wait for the GPU to finish with the previous frame
-            if (gFence && gFenceEvent) {
-                if (gFence->GetCompletedValue() < gFenceValue) {
-                    HRESULT hr = gFence->SetEventOnCompletion(gFenceValue, gFenceEvent);
-                    if (SUCCEEDED(hr)) {
-                        DWORD waitRes = WaitForSingleObject(gFenceEvent, INFINITE);
-                        if (waitRes != WAIT_OBJECT_0) {
-                            DebugLog("[d3d12hook] WaitForSingleObject failed: %lu\n", GetLastError());
-                        }
-                    } else {
-                        LogHRESULT("SetEventOnCompletion", hr);
+            if (!gFence || !gFenceEvent) {
+                // Missing synchronization objects, skip waiting
+            } else if (gFence->GetCompletedValue() < gFenceValue) {
+                HRESULT hr = gFence->SetEventOnCompletion(gFenceValue, gFenceEvent);
+                if (SUCCEEDED(hr)) {
+                    const DWORD waitTimeoutMs = 1000; // 1 second timeout
+                    DWORD waitRes = WaitForSingleObject(gFenceEvent, waitTimeoutMs);
+                    if (waitRes == WAIT_TIMEOUT) {
+                        DebugLog("[d3d12hook] WaitForSingleObject timeout\n");
+                    } else if (waitRes != WAIT_OBJECT_0) {
+                        DebugLog("[d3d12hook] WaitForSingleObject failed: %lu\n", GetLastError());
                     }
+                } else {
+                    LogHRESULT("SetEventOnCompletion", hr);
                 }
             }
 
