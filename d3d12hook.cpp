@@ -347,5 +347,9 @@ namespace d3d12hook {
             DebugLog("[d3d12hook] MH_RemoveHook failed: %s\n", MH_StatusToString(mh));
         else
             DebugLog("[d3d12hook] Hooks removed.\n");
+
+        // Uninitialize MinHook
+        MH_Uninitialize();
+        DebugLog("[DllMain] MinHook uninitialized.\n");
     }
 }

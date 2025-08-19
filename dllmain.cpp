@@ -47,10 +47,6 @@ BOOL WINAPI DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved
         DebugLog("[DllMain] DLL_PROCESS_DETACH. Releasing hooks and uninitializing MinHook.\n");
         // Release DirectX resources and hooks
         d3d12hook::release();
-
-        // Uninitialize MinHook
-        MH_Uninitialize();
-        DebugLog("[DllMain] MinHook uninitialized.\n");
         break;
     }
     return TRUE;
