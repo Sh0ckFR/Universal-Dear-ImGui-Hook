@@ -211,6 +211,8 @@ namespace d3d12hook {
             else {
                 oExecuteCommandListsD3D12(gCommandQueue, 1, reinterpret_cast<ID3D12CommandList* const*>(&gCommandList));
                 if (gOverlayFence) {
+                    // Use the original Signal implementation so our hook does not
+                    // intercept the synchronization used for the internal overlay.
                     HRESULT hr = oSignalD3D12(gCommandQueue, gOverlayFence, ++gOverlayFenceValue);
                     if (FAILED(hr)) {
                         LogHRESULT("Signal", hr);
@@ -400,6 +402,8 @@ namespace d3d12hook {
             else {
                 oExecuteCommandListsD3D12(gCommandQueue, 1, reinterpret_cast<ID3D12CommandList* const*>(&gCommandList));
                 if (gOverlayFence) {
+                    // Use the original Signal implementation so our hook does not
+                    // intercept the synchronization used for the internal overlay.
                     HRESULT hr = oSignalD3D12(gCommandQueue, gOverlayFence, ++gOverlayFenceValue);
                     if (FAILED(hr)) {
                         LogHRESULT("Signal", hr);
@@ -422,11 +426,16 @@ namespace d3d12hook {
         oExecuteCommandListsD3D12(_this, NumCommandLists, ppCommandLists);
     }
 
-    HRESULT STDMETHODCALLTYPE hookSignalD3D12(
+HRESULT STDMETHODCALLTYPE hookSignalD3D12(
         ID3D12CommandQueue* _this,
         ID3D12Fence*        pFence,
         UINT64              Value)
     {
+        // When we signal using our internal overlay fence, skip any capture logic
+        // by immediately calling the original Signal implementation.
+        if (pFence == gOverlayFence)
+            return oSignalD3D12(_this, pFence, Value);
+
         return oSignalD3D12(_this, pFence, Value);
     }
 
