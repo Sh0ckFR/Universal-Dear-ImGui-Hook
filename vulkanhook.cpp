@@ -100,6 +100,40 @@ namespace hooks_vk {
         vkCreateRenderPass(gDevice, &rp_info, nullptr, &gRenderPass);
     }
 
+    static void DestroyFrameResources()
+    {
+        if (gDevice == VK_NULL_HANDLE || gCommandPool == VK_NULL_HANDLE)
+        {
+            gFrames.clear();
+            return;
+        }
+
+        std::vector<VkCommandBuffer> cmds;
+        cmds.reserve(gFrames.size());
+        for (auto& fr : gFrames)
+        {
+            if (fr.fence)
+            {
+                vkDestroyFence(gDevice, fr.fence, nullptr);
+                fr.fence = VK_NULL_HANDLE;
+            }
+            if (fr.fb)
+            {
+                vkDestroyFramebuffer(gDevice, fr.fb, nullptr);
+                fr.fb = VK_NULL_HANDLE;
+            }
+            if (fr.cmd)
+            {
+                cmds.push_back(fr.cmd);
+                fr.cmd = VK_NULL_HANDLE;
+            }
+        }
+        if (!cmds.empty())
+            vkFreeCommandBuffers(gDevice, gCommandPool, (uint32_t)cmds.size(), cmds.data());
+        gFrames.clear();
+        gFrameIndex = 0;
+    }
+
     static void CreateFrameResources(uint32_t count)
     {
         gFrames.resize(count);
@@ -112,9 +146,6 @@ namespace hooks_vk {
         vkAllocateCommandBuffers(gDevice, &alloc_info, cmds.data());
         for (uint32_t i = 0; i < count; ++i)
         {
-            if (gFrames[i].fb)
-                vkDestroyFramebuffer(gDevice, gFrames[i].fb, nullptr);
-            gFrames[i].fb  = VK_NULL_HANDLE;
             gFrames[i].cmd = cmds[i];
             VkFenceCreateInfo fence_info{};
             fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
@@ -204,7 +235,6 @@ namespace hooks_vk {
 
         CreateDescriptorPool();
         CreateCommandPool();
-        CreateFrameResources(2);
         DebugLog("[vulkanhook] Device initialized.\n");
         return res;
     }
@@ -232,6 +262,7 @@ namespace hooks_vk {
             }
             if (!gUseDynamicRendering)
                 CreateRenderPass();
+            DestroyFrameResources();
             CreateFrameResources(gImageCount);
 
             ImGui::CreateContext();
@@ -423,11 +454,7 @@ namespace hooks_vk {
         if (gDevice != VK_NULL_HANDLE)
         {
             vkDeviceWaitIdle(gDevice);
-            for (auto& fr : gFrames)
-            {
-                if (fr.fence) vkDestroyFence(gDevice, fr.fence, nullptr);
-                if (fr.fb)    vkDestroyFramebuffer(gDevice, fr.fb, nullptr);
-            }
+            DestroyFrameResources();
             if (gCommandPool) vkDestroyCommandPool(gDevice, gCommandPool, nullptr);
             if (gDescriptorPool) vkDestroyDescriptorPool(gDevice, gDescriptorPool, nullptr);
             for (auto view : gImageViews)
@@ -435,7 +462,6 @@ namespace hooks_vk {
             if (gRenderPass) vkDestroyRenderPass(gDevice, gRenderPass, nullptr);
         }
 
-        gFrames.clear();
         gImageViews.clear();
         gSwapchainImages.clear();
         gDescriptorPool = VK_NULL_HANDLE;
