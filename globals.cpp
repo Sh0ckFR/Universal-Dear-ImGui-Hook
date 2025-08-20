@@ -9,12 +9,15 @@ namespace globals {
     int uninjectKey = VK_F12;
     // Key to open/close the ImGui menu (INSERT by default)
     int openMenuKey = VK_INSERT;
+    // Currently active rendering backend
+    Backend activeBackend = Backend::None;
 }
 
 // Log initial global values for debugging
 static void LogGlobals() {
-    DebugLog("[Globals] mainModule=%p, mainWindow=%p, uninjectKey=0x%X, openMenuKey=0x%X\n",
-        globals::mainModule, globals::mainWindow, globals::uninjectKey, globals::openMenuKey);
+    DebugLog("[Globals] mainModule=%p, mainWindow=%p, uninjectKey=0x%X, openMenuKey=0x%X, backend=%d\n",
+        globals::mainModule, globals::mainWindow, globals::uninjectKey, globals::openMenuKey,
+        static_cast<int>(globals::activeBackend));
 }
 
 // Ensure we log when the DLL is loaded
