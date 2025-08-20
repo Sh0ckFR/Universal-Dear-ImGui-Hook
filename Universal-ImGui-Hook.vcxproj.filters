@@ -39,6 +39,9 @@
     <ClCompile Include="imgui\imgui_impl_win32.cpp">
       <Filter>Sources Files\imgui</Filter>
     </ClCompile>
+    <ClCompile Include="imgui\backends\imgui_impl_dx10.cpp">
+      <Filter>Sources Files\imgui</Filter>
+    </ClCompile>
     <ClCompile Include="imgui\imgui_tables.cpp">
       <Filter>Sources Files\imgui</Filter>
     </ClCompile>
@@ -52,6 +55,9 @@
       <Filter>Sources Files</Filter>
     </ClCompile>
     <ClCompile Include="d3d12hook.cpp">
+      <Filter>Sources Files</Filter>
+    </ClCompile>
+    <ClCompile Include="d3d10hook.cpp">
       <Filter>Sources Files</Filter>
     </ClCompile>
     <ClCompile Include="d3d9hook.cpp">
@@ -80,6 +86,9 @@
     <ClInclude Include="imgui\imgui_impl_win32.h">
       <Filter>Sources Files\imgui</Filter>
     </ClInclude>
+    <ClInclude Include="imgui\backends\imgui_impl_dx10.h">
+      <Filter>Sources Files\imgui</Filter>
+    </ClInclude>
     <ClInclude Include="imgui\imgui_internal.h">
       <Filter>Sources Files\imgui</Filter>
     </ClInclude>
@@ -93,6 +102,9 @@
       <Filter>Sources Files\imgui</Filter>
     </ClInclude>
     <ClInclude Include="d3d9hook.h">
+      <Filter>Sources Files</Filter>
+    </ClInclude>
+    <ClInclude Include="d3d10hook.h">
       <Filter>Sources Files</Filter>
     </ClInclude>
     <ClInclude Include="stdafx.h">
