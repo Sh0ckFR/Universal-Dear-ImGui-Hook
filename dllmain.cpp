@@ -1,4 +1,69 @@
 #include "stdafx.h"
+#include <cstring>
+
+// Pointers to original LoadLibrary functions
+using LoadLibraryA_t = HMODULE(WINAPI*)(LPCSTR);
+using LoadLibraryW_t = HMODULE(WINAPI*)(LPCWSTR);
+static LoadLibraryA_t oLoadLibraryA = nullptr;
+static LoadLibraryW_t oLoadLibraryW = nullptr;
+
+// Helper: check loaded module name and initialize hooks if needed
+static void InitForModule(const char* name)
+{
+    if (!name || globals::activeBackend != globals::Backend::None)
+        return;
+
+    const char* base = strrchr(name, '\\');
+    base = base ? base + 1 : name;
+
+    if (_stricmp(base, "d3d9.dll") == 0) {
+        DebugLog("[DllMain] LoadLibrary detected d3d9.dll, initializing DX9 hooks.\n");
+        d3d9hook::Init();
+        globals::activeBackend = globals::Backend::DX9;
+    }
+    else if (_stricmp(base, "d3d10.dll") == 0) {
+        DebugLog("[DllMain] LoadLibrary detected d3d10.dll, initializing DX10 hooks.\n");
+        hooks_dx10::Init();
+        globals::activeBackend = globals::Backend::DX10;
+    }
+    else if (_stricmp(base, "d3d11.dll") == 0) {
+        DebugLog("[DllMain] LoadLibrary detected d3d11.dll, initializing DX11 hooks.\n");
+        hooks_dx11::Init();
+        globals::activeBackend = globals::Backend::DX11;
+    }
+    else if (_stricmp(base, "d3d12.dll") == 0 || _stricmp(base, "dxgi.dll") == 0) {
+        DebugLog("[DllMain] LoadLibrary detected DX12/dxgi module, initializing DX12 hooks.\n");
+        hooks::Init();
+        globals::activeBackend = globals::Backend::DX12;
+    }
+    else if (_stricmp(base, "vulkan-1.dll") == 0) {
+        DebugLog("[DllMain] LoadLibrary detected vulkan-1.dll, initializing Vulkan hooks.\n");
+        hooks_vk::Init();
+        globals::activeBackend = globals::Backend::Vulkan;
+    }
+}
+
+// Hooked LoadLibraryA
+static HMODULE WINAPI hookLoadLibraryA(LPCSTR lpLibFileName)
+{
+    HMODULE mod = oLoadLibraryA(lpLibFileName);
+    if (mod)
+        InitForModule(lpLibFileName);
+    return mod;
+}
+
+// Hooked LoadLibraryW
+static HMODULE WINAPI hookLoadLibraryW(LPCWSTR lpLibFileName)
+{
+    HMODULE mod = oLoadLibraryW(lpLibFileName);
+    if (mod && lpLibFileName)
+    {
+        char name[MAX_PATH];
+        WideCharToMultiByte(CP_ACP, 0, lpLibFileName, -1, name, MAX_PATH, nullptr, nullptr);
+        InitForModule(name);
+    }
+    return mod;
+}
 
 // Thread entry: initialize MinHook and start hook setup
 static DWORD WINAPI onAttach(LPVOID lpParameter)
@@ -45,6 +110,23 @@ static DWORD WINAPI onAttach(LPVOID lpParameter)
     }
     else {
         DebugLog("[DllMain] No supported rendering backend detected.\n");
+    }
+
+    // Hook LoadLibraryA/W to catch backends loaded after injection
+    HMODULE k32 = GetModuleHandleA("kernel32.dll");
+    if (k32) {
+        LPVOID addrA = GetProcAddress(k32, "LoadLibraryA");
+        LPVOID addrW = GetProcAddress(k32, "LoadLibraryW");
+        if (addrA) {
+            MH_CreateHook(addrA, reinterpret_cast<LPVOID>(hookLoadLibraryA), reinterpret_cast<LPVOID*>(&oLoadLibraryA));
+            MH_EnableHook(addrA);
+            DebugLog("[DllMain] Hooked LoadLibraryA@%p\n", addrA);
+        }
+        if (addrW) {
+            MH_CreateHook(addrW, reinterpret_cast<LPVOID>(hookLoadLibraryW), reinterpret_cast<LPVOID*>(&oLoadLibraryW));
+            MH_EnableHook(addrW);
+            DebugLog("[DllMain] Hooked LoadLibraryW@%p\n", addrW);
+        }
     }
 
     DebugLog("[DllMain] Hook initialization completed.\n");
