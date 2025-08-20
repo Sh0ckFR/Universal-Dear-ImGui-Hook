@@ -157,6 +157,9 @@ namespace hooks_vk {
 }
 
 namespace menu {
-	extern bool isOpen;
-	extern void Init();
+        extern bool isOpen;
+        extern void Init();
 }
+
+// Helper to unload the DLL and remove all hooks
+void Uninject();

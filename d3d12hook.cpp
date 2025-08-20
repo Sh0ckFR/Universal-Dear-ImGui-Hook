@@ -37,6 +37,11 @@ namespace d3d12hook {
             DebugLog("[d3d12hook] Toggle menu: isOpen=%d\n", menu::isOpen);
         }
 
+        if (GetAsyncKeyState(globals::uninjectKey) & 1) {
+            Uninject();
+            return oPresentD3D12(pSwapChain, SyncInterval, Flags);
+        }
+
         if (!gInitialized) {
             DebugLog("[d3d12hook] Initializing ImGui on first Present.\n");
             if (FAILED(pSwapChain->GetDevice(__uuidof(ID3D12Device), (void**)&gDevice))) {
@@ -212,6 +217,11 @@ namespace d3d12hook {
         if (GetAsyncKeyState(globals::openMenuKey) & 1) {
             menu::isOpen = !menu::isOpen;
             DebugLog("[d3d12hook] Toggle menu: isOpen=%d\n", menu::isOpen);
+        }
+
+        if (GetAsyncKeyState(globals::uninjectKey) & 1) {
+            Uninject();
+            return oPresent1D3D12(pSwapChain, SyncInterval, Flags, pParams);
         }
 
         if (!gInitialized) {

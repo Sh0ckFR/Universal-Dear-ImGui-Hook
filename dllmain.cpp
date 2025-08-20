@@ -119,6 +119,48 @@ static HMODULE WINAPI hookLoadLibraryW(LPCWSTR lpLibFileName)
     return mod;
 }
 
+// Thread routine that performs cleanup and unloads the DLL
+static DWORD WINAPI UninjectThread(LPVOID)
+{
+    DebugLog("[DllMain] Uninject thread starting.\n");
+
+    switch (globals::activeBackend)
+    {
+    case globals::Backend::DX9:
+        d3d9hook::release();
+        break;
+    case globals::Backend::DX10:
+        hooks_dx10::release();
+        break;
+    case globals::Backend::DX11:
+        hooks_dx11::release();
+        break;
+    case globals::Backend::DX12:
+        d3d12hook::release();
+        break;
+    case globals::Backend::Vulkan:
+        hooks_vk::release();
+        break;
+    default:
+        break;
+    }
+
+    // Ensure MinHook is uninitialized (release() may already do this)
+    MH_Uninitialize();
+
+    DebugLog("[DllMain] Unloading module and exiting thread.\n");
+    FreeLibraryAndExitThread(globals::mainModule, 0);
+    return 0; // not reached
+}
+
+// Public helper to begin uninjecting the DLL
+void Uninject()
+{
+    HANDLE hThread = CreateThread(nullptr, 0, UninjectThread, nullptr, 0, nullptr);
+    if (hThread)
+        CloseHandle(hThread);
+}
+
 // Thread entry: initialize MinHook and start hook setup
 static DWORD WINAPI onAttach(LPVOID lpParameter)
 {

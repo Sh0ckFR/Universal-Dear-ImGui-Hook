@@ -300,6 +300,12 @@ namespace hooks_vk {
             DebugLog("[vulkanhook] Toggle menu: %d\n", menu::isOpen);
         }
 
+        if (GetAsyncKeyState(globals::uninjectKey) & 1)
+        {
+            Uninject();
+            return oQueuePresentKHR(queue, pPresentInfo);
+        }
+
         if (gInitialized && pPresentInfo && pPresentInfo->pImageIndices)
         {
             uint32_t image_index = pPresentInfo->pImageIndices[0];
