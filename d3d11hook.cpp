@@ -18,8 +18,20 @@ namespace hooks_dx11 {
         ID3D11Texture2D* pBackBuffer = nullptr;
         if (gSwapChain && SUCCEEDED(gSwapChain->GetBuffer(0, IID_PPV_ARGS(&pBackBuffer))))
         {
-            gDevice->CreateRenderTargetView(pBackBuffer, nullptr, &gRTV);
+            HRESULT hr = gDevice->CreateRenderTargetView(pBackBuffer, nullptr, &gRTV);
             pBackBuffer->Release();
+            if (SUCCEEDED(hr))
+            {
+                DebugLog("[d3d11hook] CreateRenderTarget success RTV@%p\n", gRTV);
+            }
+            else
+            {
+                DebugLog("[d3d11hook] CreateRenderTarget failed: 0x%08X\n", hr);
+            }
+        }
+        else
+        {
+            DebugLog("[d3d11hook] CreateRenderTarget failed: swapchain buffer unavailable\n");
         }
     }
 
@@ -34,6 +46,13 @@ namespace hooks_dx11 {
 
     static void RenderFrame(IDXGISwapChain* pSwapChain)
     {
+        static bool loggedPresent = false;
+        if (!loggedPresent)
+        {
+            DebugLog("[d3d11hook] RenderFrame via Present hook %p\n", oPresentD3D11);
+            loggedPresent = true;
+        }
+
         if (!gInitialized)
         {
             gSwapChain = pSwapChain;
@@ -79,7 +98,14 @@ namespace hooks_dx11 {
             ImGui::EndFrame();
             ImGui::Render();
             gContext->OMSetRenderTargets(1, &gRTV, nullptr);
-            ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+            if (gContext)
+            {
+                ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+            }
+            else
+            {
+                DebugLog("[d3d11hook] Render skipped: device context invalid\n");
+            }
         }
     }
 
@@ -113,6 +139,7 @@ namespace hooks_dx11 {
 
         if (gInitialized)
         {
+            DebugLog("[d3d11hook] ResizeBuffers: recreating render target\n");
             CreateRenderTarget();
             ImGui_ImplDX11_CreateDeviceObjects();
         }
