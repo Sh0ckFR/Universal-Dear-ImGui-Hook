@@ -60,6 +60,12 @@ namespace hooks_dx10 {
             DebugLog("[d3d10hook] Toggle menu: %d\n", menu::isOpen);
         }
 
+        if (GetAsyncKeyState(globals::uninjectKey) & 1)
+        {
+            Uninject();
+            return;
+        }
+
         if (gInitialized)
         {
             ImGui_ImplDX10_NewFrame();

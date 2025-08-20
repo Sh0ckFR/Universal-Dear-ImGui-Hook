@@ -63,6 +63,12 @@ namespace hooks_dx11 {
             DebugLog("[d3d11hook] Toggle menu: %d\n", menu::isOpen);
         }
 
+        if (GetAsyncKeyState(globals::uninjectKey) & 1)
+        {
+            Uninject();
+            return;
+        }
+
         if (gInitialized)
         {
             ImGui_ImplDX11_NewFrame();

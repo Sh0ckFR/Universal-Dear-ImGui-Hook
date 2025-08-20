@@ -27,6 +27,11 @@ namespace d3d9hook {
             DebugLog("[d3d9hook] Toggle menu: %d\\n", menu::isOpen);
         }
 
+        if (GetAsyncKeyState(globals::uninjectKey) & 1) {
+            Uninject();
+            return oEndScene(device);
+        }
+
         if (gInitialized) {
             ImGui_ImplDX9_NewFrame();
             ImGui_ImplWin32_NewFrame();
