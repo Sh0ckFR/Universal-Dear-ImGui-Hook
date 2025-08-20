@@ -1,14 +1,25 @@
 #pragma once
 
 namespace globals {
-	extern HMODULE mainModule;
-	extern HWND mainWindow;
-	extern int uninjectKey;
-	extern int openMenuKey;
+        extern HMODULE mainModule;
+        extern HWND mainWindow;
+        extern int uninjectKey;
+        extern int openMenuKey;
+
+        // Rendering backend currently in use
+        enum class Backend {
+                None,
+                DX9,
+                DX10,
+                DX11,
+                DX12,
+                Vulkan
+        };
+        extern Backend activeBackend;
 }
 
 namespace hooks {
-	extern void Init();
+        extern void Init();
 }
 
 namespace inputhook {
@@ -58,7 +69,25 @@ namespace d3d12hook {
 		ID3D12Fence* pFence,
 		UINT64              Value);
 
-	extern void release();
+        extern void release();
+}
+
+// Forward declarations for other rendering backends
+namespace hooks_dx9 {
+        void Init();
+        void release();
+}
+namespace hooks_dx10 {
+        void Init();
+        void release();
+}
+namespace hooks_dx11 {
+        void Init();
+        void release();
+}
+namespace hooks_vk {
+        void Init();
+        void release();
 }
 
 namespace menu {
