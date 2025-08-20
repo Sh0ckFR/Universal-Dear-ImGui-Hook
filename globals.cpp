@@ -11,6 +11,8 @@ namespace globals {
     int openMenuKey = VK_INSERT;
     // Currently active rendering backend
     Backend activeBackend = Backend::None;
+    // Preferred backend to hook (None = auto fallback)
+    Backend preferredBackend = Backend::None;
     // Flag controlling runtime debug logging
     bool enableDebugLog = true;
 }
@@ -23,9 +25,9 @@ namespace globals {
 
 // Log initial global values for debugging
 static void LogGlobals() {
-    DebugLog("[Globals] mainModule=%p, mainWindow=%p, uninjectKey=0x%X, openMenuKey=0x%X, backend=%d\n",
+    DebugLog("[Globals] mainModule=%p, mainWindow=%p, uninjectKey=0x%X, openMenuKey=0x%X, activeBackend=%d, preferredBackend=%d\n",
         globals::mainModule, globals::mainWindow, globals::uninjectKey, globals::openMenuKey,
-        static_cast<int>(globals::activeBackend));
+        static_cast<int>(globals::activeBackend), static_cast<int>(globals::preferredBackend));
 }
 
 // Ensure we log when the DLL is loaded

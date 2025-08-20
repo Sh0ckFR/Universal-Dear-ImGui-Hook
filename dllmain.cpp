@@ -172,6 +172,9 @@ static void InitForModule(const char* name)
         return;
     }
 
+    if (globals::preferredBackend != globals::Backend::None && detected != globals::preferredBackend)
+        return;
+
     if (GetBackendPriority(detected) <= GetBackendPriority(globals::activeBackend))
         return;
 
@@ -186,7 +189,10 @@ static void InitForModule(const char* name)
     }
 
     globals::activeBackend = globals::Backend::None;
-    TryInitializeFrom(detected);
+    if (globals::preferredBackend != globals::Backend::None)
+        TryInitBackend(globals::preferredBackend);
+    else
+        TryInitializeFrom(detected);
 }
 
 // Hooked LoadLibraryA
@@ -272,7 +278,10 @@ static DWORD WINAPI onAttach(LPVOID lpParameter)
     }
 
     // Detect loaded rendering backends and initialize hooks accordingly
-    TryInitializeFrom(globals::Backend::Vulkan);
+    if (globals::preferredBackend != globals::Backend::None)
+        TryInitBackend(globals::preferredBackend);
+    else
+        TryInitializeFrom(globals::Backend::Vulkan);
 
     // Hook LoadLibraryA/W to catch backends loaded after injection
     HMODULE k32 = GetModuleHandleA("kernel32.dll");
