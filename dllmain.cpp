@@ -12,11 +12,11 @@ static int GetBackendPriority(globals::Backend backend)
 {
     switch (backend)
     {
-    case globals::Backend::DX12:   return 5;
-    case globals::Backend::DX11:   return 4;
-    case globals::Backend::DX10:   return 3;
-    case globals::Backend::DX9:    return 2;
-    case globals::Backend::Vulkan: return 1;
+    case globals::Backend::Vulkan: return 5;
+    case globals::Backend::DX12:   return 4;
+    case globals::Backend::DX11:   return 3;
+    case globals::Backend::DX10:   return 2;
+    case globals::Backend::DX9:    return 1;
     default:                       return 0;
     }
 }
@@ -30,7 +30,10 @@ static void InitForModule(const char* name)
     base = base ? base + 1 : name;
 
     globals::Backend detected = globals::Backend::None;
-    if (_stricmp(base, "d3d12.dll") == 0 || _stricmp(base, "dxgi.dll") == 0) {
+    if (_stricmp(base, "vulkan-1.dll") == 0) {
+        detected = globals::Backend::Vulkan;
+    }
+    else if (_stricmp(base, "d3d12.dll") == 0 || _stricmp(base, "dxgi.dll") == 0) {
         detected = globals::Backend::DX12;
     }
     else if (_stricmp(base, "d3d11.dll") == 0) {
@@ -41,9 +44,6 @@ static void InitForModule(const char* name)
     }
     else if (_stricmp(base, "d3d9.dll") == 0) {
         detected = globals::Backend::DX9;
-    }
-    else if (_stricmp(base, "vulkan-1.dll") == 0) {
-        detected = globals::Backend::Vulkan;
     }
     else {
         return;
@@ -73,7 +73,11 @@ static void InitForModule(const char* name)
         break;
     }
 
-    if (detected == globals::Backend::DX12) {
+    if (detected == globals::Backend::Vulkan) {
+        DebugLog("[DllMain] LoadLibrary detected vulkan-1.dll, initializing Vulkan hooks.\n");
+        hooks_vk::Init();
+    }
+    else if (detected == globals::Backend::DX12) {
         DebugLog("[DllMain] LoadLibrary detected DX12/dxgi module, initializing DX12 hooks.\n");
         hooks::Init();
     }
@@ -88,10 +92,6 @@ static void InitForModule(const char* name)
     else if (detected == globals::Backend::DX9) {
         DebugLog("[DllMain] LoadLibrary detected d3d9.dll, initializing DX9 hooks.\n");
         d3d9hook::Init();
-    }
-    else if (detected == globals::Backend::Vulkan) {
-        DebugLog("[DllMain] LoadLibrary detected vulkan-1.dll, initializing Vulkan hooks.\n");
-        hooks_vk::Init();
     }
 
     globals::activeBackend = detected;
@@ -137,7 +137,12 @@ static DWORD WINAPI onAttach(LPVOID lpParameter)
 
     // Detect loaded rendering backends and initialize hooks accordingly
     HMODULE mod = nullptr;
-    if ((mod = GetModuleHandleA("d3d12.dll")) || (mod = GetModuleHandleA("dxgi.dll"))) {
+    if ((mod = GetModuleHandleA("vulkan-1.dll"))) {
+        DebugLog("[DllMain] Detected vulkan-1.dll (%p). Initializing Vulkan hooks.\n", mod);
+        hooks_vk::Init();
+        globals::activeBackend = globals::Backend::Vulkan;
+    }
+    else if ((mod = GetModuleHandleA("d3d12.dll")) || (mod = GetModuleHandleA("dxgi.dll"))) {
         DebugLog("[DllMain] Detected DX12/dxgi module (%p). Initializing DX12 hooks.\n", mod);
         hooks::Init();
         globals::activeBackend = globals::Backend::DX12;
@@ -156,11 +161,6 @@ static DWORD WINAPI onAttach(LPVOID lpParameter)
         DebugLog("[DllMain] Detected d3d9.dll (%p). Initializing DX9 hooks.\n", mod);
         d3d9hook::Init();
         globals::activeBackend = globals::Backend::DX9;
-    }
-    else if ((mod = GetModuleHandleA("vulkan-1.dll"))) {
-        DebugLog("[DllMain] Detected vulkan-1.dll (%p). Initializing Vulkan hooks.\n", mod);
-        hooks_vk::Init();
-        globals::activeBackend = globals::Backend::Vulkan;
     }
     else {
         DebugLog("[DllMain] No supported rendering backend detected.\n");
