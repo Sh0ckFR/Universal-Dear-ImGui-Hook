@@ -69,11 +69,14 @@
     <ClCompile Include="globals.cpp">
       <Filter>Sources Files</Filter>
     </ClCompile>
-    <ClCompile Include="imgui\\backends\\imgui_impl_dx9.cpp">
-      <Filter>Sources Files</Filter>
+    <ClCompile Include="imgui\imgui_impl_dx9.cpp">
+      <Filter>Sources Files\imgui</Filter>
     </ClCompile>
-    <ClCompile Include="imgui\\backends\\imgui_impl_dx10.cpp">
-      <Filter>Sources Files</Filter>
+    <ClCompile Include="imgui\imgui_impl_dx10.cpp">
+      <Filter>Sources Files\imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="imgui\imgui_impl_vulkan.cpp">
+      <Filter>Sources Files\imgui</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -115,6 +118,15 @@
     </ClInclude>
     <ClInclude Include="imgui\\backends\\imgui_impl_dx10.h">
       <Filter>Headers Files</Filter>
+    </ClInclude>
+    <ClInclude Include="imgui\imgui_impl_dx9.h">
+      <Filter>Sources Files\imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="imgui\imgui_impl_dx10.h">
+      <Filter>Sources Files\imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="imgui\imgui_impl_vulkan.h">
+      <Filter>Sources Files\imgui</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
