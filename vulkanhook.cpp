@@ -476,5 +476,10 @@ namespace hooks_vk {
         MH_RemoveHook(MH_ALL_HOOKS);
         MH_Uninitialize();
     }
+
+    bool IsInitialized()
+    {
+        return gInitialized;
+    }
 }
 

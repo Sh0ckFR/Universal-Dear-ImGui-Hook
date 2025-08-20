@@ -70,12 +70,13 @@ namespace d3d12hook {
 		UINT                          NumCommandLists,
 		ID3D12CommandList* const* ppCommandLists);
 
-	extern HRESULT STDMETHODCALLTYPE hookSignalD3D12(
-		ID3D12CommandQueue* _this,
-		ID3D12Fence* pFence,
-		UINT64              Value);
+        extern HRESULT STDMETHODCALLTYPE hookSignalD3D12(
+                ID3D12CommandQueue* _this,
+                ID3D12Fence* pFence,
+                UINT64              Value);
 
         extern void release();
+        bool IsInitialized();
 }
 
 // Forward declarations for other rendering backends
@@ -91,6 +92,7 @@ namespace d3d9hook {
 
     void Init();
     void release();
+    bool IsInitialized();
 }
 
 namespace hooks_dx10 {
@@ -114,6 +116,7 @@ namespace hooks_dx10 {
 
     void Init();
     void release();
+    bool IsInitialized();
 }
 
 namespace hooks_dx11 {
@@ -137,6 +140,7 @@ namespace hooks_dx11 {
 
     void Init();
     void release();
+    bool IsInitialized();
 }
 
 namespace hooks_vk {
@@ -156,6 +160,7 @@ namespace hooks_vk {
 
     void Init();
     void release();
+    bool IsInitialized();
 }
 
 namespace menu {

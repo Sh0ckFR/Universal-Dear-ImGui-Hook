@@ -113,4 +113,9 @@ namespace d3d9hook {
         MH_RemoveHook(MH_ALL_HOOKS);
         MH_Uninitialize();
     }
+
+    bool IsInitialized()
+    {
+        return gInitialized;
+    }
 }

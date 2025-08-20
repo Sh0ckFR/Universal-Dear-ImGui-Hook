@@ -1,6 +1,129 @@
 #include "stdafx.h"
 #include <cstring>
 
+// Utility helpers for backend initialization checks
+using IsInitFn = bool (*)();
+
+static bool WaitForInitialization(IsInitFn fn, int attempts = 50, int sleepMs = 100)
+{
+    for (int i = 0; i < attempts; ++i)
+    {
+        if (fn())
+            return true;
+        Sleep(sleepMs);
+    }
+    return fn();
+}
+
+static bool TryInitBackend(globals::Backend backend)
+{
+    switch (backend)
+    {
+    case globals::Backend::Vulkan:
+        if (GetModuleHandleA("vulkan-1.dll"))
+        {
+            DebugLog("[DllMain] Attempting Vulkan initialization.\n");
+            hooks_vk::Init();
+            if (WaitForInitialization(hooks_vk::IsInitialized))
+            {
+                DebugLog("[DllMain] Vulkan initialization succeeded.\n");
+                globals::activeBackend = globals::Backend::Vulkan;
+                return true;
+            }
+            DebugLog("[DllMain] Vulkan initialization failed, falling back.\n");
+            hooks_vk::release();
+        }
+        break;
+    case globals::Backend::DX12:
+        if (GetModuleHandleA("d3d12.dll") || GetModuleHandleA("dxgi.dll"))
+        {
+            DebugLog("[DllMain] Attempting DX12 initialization.\n");
+            hooks::Init();
+            if (WaitForInitialization(d3d12hook::IsInitialized))
+            {
+                DebugLog("[DllMain] DX12 initialization succeeded.\n");
+                globals::activeBackend = globals::Backend::DX12;
+                return true;
+            }
+            DebugLog("[DllMain] DX12 initialization failed, falling back.\n");
+            d3d12hook::release();
+        }
+        break;
+    case globals::Backend::DX11:
+        if (GetModuleHandleA("d3d11.dll"))
+        {
+            DebugLog("[DllMain] Attempting DX11 initialization.\n");
+            hooks_dx11::Init();
+            if (WaitForInitialization(hooks_dx11::IsInitialized))
+            {
+                DebugLog("[DllMain] DX11 initialization succeeded.\n");
+                globals::activeBackend = globals::Backend::DX11;
+                return true;
+            }
+            DebugLog("[DllMain] DX11 initialization failed, falling back.\n");
+            hooks_dx11::release();
+        }
+        break;
+    case globals::Backend::DX10:
+        if (GetModuleHandleA("d3d10.dll"))
+        {
+            DebugLog("[DllMain] Attempting DX10 initialization.\n");
+            hooks_dx10::Init();
+            if (WaitForInitialization(hooks_dx10::IsInitialized))
+            {
+                DebugLog("[DllMain] DX10 initialization succeeded.\n");
+                globals::activeBackend = globals::Backend::DX10;
+                return true;
+            }
+            DebugLog("[DllMain] DX10 initialization failed, falling back.\n");
+            hooks_dx10::release();
+        }
+        break;
+    case globals::Backend::DX9:
+        if (GetModuleHandleA("d3d9.dll"))
+        {
+            DebugLog("[DllMain] Attempting DX9 initialization.\n");
+            d3d9hook::Init();
+            if (WaitForInitialization(d3d9hook::IsInitialized))
+            {
+                DebugLog("[DllMain] DX9 initialization succeeded.\n");
+                globals::activeBackend = globals::Backend::DX9;
+                return true;
+            }
+            DebugLog("[DllMain] DX9 initialization failed, falling back.\n");
+            d3d9hook::release();
+        }
+        break;
+    default:
+        break;
+    }
+    return false;
+}
+
+static bool TryInitializeFrom(globals::Backend start)
+{
+    const globals::Backend order[] = {
+        globals::Backend::Vulkan,
+        globals::Backend::DX12,
+        globals::Backend::DX11,
+        globals::Backend::DX10,
+        globals::Backend::DX9
+    };
+    int idx = 0;
+    for (; idx < 5; ++idx)
+    {
+        if (order[idx] == start)
+            break;
+    }
+    for (; idx < 5; ++idx)
+    {
+        if (TryInitBackend(order[idx]))
+            return true;
+    }
+    DebugLog("[DllMain] All backend initialization attempts failed.\n");
+    return false;
+}
+
 // Pointers to original LoadLibrary functions
 using LoadLibraryA_t = HMODULE(WINAPI*)(LPCSTR);
 using LoadLibraryW_t = HMODULE(WINAPI*)(LPCWSTR);
@@ -54,47 +177,16 @@ static void InitForModule(const char* name)
 
     switch (globals::activeBackend)
     {
-    case globals::Backend::DX9:
-        d3d9hook::release();
-        break;
-    case globals::Backend::DX10:
-        hooks_dx10::release();
-        break;
-    case globals::Backend::DX11:
-        hooks_dx11::release();
-        break;
-    case globals::Backend::DX12:
-        d3d12hook::release();
-        break;
-    case globals::Backend::Vulkan:
-        hooks_vk::release();
-        break;
-    default:
-        break;
+    case globals::Backend::DX9:    d3d9hook::release(); break;
+    case globals::Backend::DX10:   hooks_dx10::release(); break;
+    case globals::Backend::DX11:   hooks_dx11::release(); break;
+    case globals::Backend::DX12:   d3d12hook::release(); break;
+    case globals::Backend::Vulkan: hooks_vk::release(); break;
+    default: break;
     }
 
-    if (detected == globals::Backend::Vulkan) {
-        DebugLog("[DllMain] LoadLibrary detected vulkan-1.dll, initializing Vulkan hooks.\n");
-        hooks_vk::Init();
-    }
-    else if (detected == globals::Backend::DX12) {
-        DebugLog("[DllMain] LoadLibrary detected DX12/dxgi module, initializing DX12 hooks.\n");
-        hooks::Init();
-    }
-    else if (detected == globals::Backend::DX11) {
-        DebugLog("[DllMain] LoadLibrary detected d3d11.dll, initializing DX11 hooks.\n");
-        hooks_dx11::Init();
-    }
-    else if (detected == globals::Backend::DX10) {
-        DebugLog("[DllMain] LoadLibrary detected d3d10.dll, initializing DX10 hooks.\n");
-        hooks_dx10::Init();
-    }
-    else if (detected == globals::Backend::DX9) {
-        DebugLog("[DllMain] LoadLibrary detected d3d9.dll, initializing DX9 hooks.\n");
-        d3d9hook::Init();
-    }
-
-    globals::activeBackend = detected;
+    globals::activeBackend = globals::Backend::None;
+    TryInitializeFrom(detected);
 }
 
 // Hooked LoadLibraryA
@@ -178,35 +270,7 @@ static DWORD WINAPI onAttach(LPVOID lpParameter)
     }
 
     // Detect loaded rendering backends and initialize hooks accordingly
-    HMODULE mod = nullptr;
-    if ((mod = GetModuleHandleA("vulkan-1.dll"))) {
-        DebugLog("[DllMain] Detected vulkan-1.dll (%p). Initializing Vulkan hooks.\n", mod);
-        hooks_vk::Init();
-        globals::activeBackend = globals::Backend::Vulkan;
-    }
-    else if ((mod = GetModuleHandleA("d3d12.dll")) || (mod = GetModuleHandleA("dxgi.dll"))) {
-        DebugLog("[DllMain] Detected DX12/dxgi module (%p). Initializing DX12 hooks.\n", mod);
-        hooks::Init();
-        globals::activeBackend = globals::Backend::DX12;
-    }
-    else if ((mod = GetModuleHandleA("d3d11.dll"))) {
-        DebugLog("[DllMain] Detected d3d11.dll (%p). Initializing DX11 hooks.\n", mod);
-        hooks_dx11::Init();
-        globals::activeBackend = globals::Backend::DX11;
-    }
-    else if ((mod = GetModuleHandleA("d3d10.dll"))) {
-        DebugLog("[DllMain] Detected d3d10.dll (%p). Initializing DX10 hooks.\n", mod);
-        hooks_dx10::Init();
-        globals::activeBackend = globals::Backend::DX10;
-    }
-    else if ((mod = GetModuleHandleA("d3d9.dll"))) {
-        DebugLog("[DllMain] Detected d3d9.dll (%p). Initializing DX9 hooks.\n", mod);
-        d3d9hook::Init();
-        globals::activeBackend = globals::Backend::DX9;
-    }
-    else {
-        DebugLog("[DllMain] No supported rendering backend detected.\n");
-    }
+    TryInitializeFrom(globals::Backend::Vulkan);
 
     // Hook LoadLibraryA/W to catch backends loaded after injection
     HMODULE k32 = GetModuleHandleA("kernel32.dll");

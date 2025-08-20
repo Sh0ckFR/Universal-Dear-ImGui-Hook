@@ -203,4 +203,9 @@ namespace hooks_dx10 {
         MH_RemoveHook(MH_ALL_HOOKS);
         MH_Uninitialize();
     }
+
+    bool IsInitialized()
+    {
+        return gInitialized;
+    }
 }
