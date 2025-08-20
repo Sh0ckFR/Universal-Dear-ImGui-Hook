@@ -61,11 +61,11 @@ namespace d3d9hook {
             return;
         }
 
-        WNDCLASSEX wc{ sizeof(WNDCLASSEX), CS_CLASSDC, DefWindowProc, 0L, 0L,
+        WNDCLASSEXA wc{ sizeof(WNDCLASSEXA), CS_CLASSDC, DefWindowProcA, 0L, 0L,
             GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr,
-            L"DummyD3D9", nullptr };
-        RegisterClassEx(&wc);
-        HWND hwnd = CreateWindow(wc.lpszClassName, L"", WS_OVERLAPPEDWINDOW,
+            "DummyD3D9", nullptr };
+        RegisterClassExA(&wc);
+        HWND hwnd = CreateWindowA(wc.lpszClassName, "", WS_OVERLAPPEDWINDOW,
             0, 0, 100, 100, nullptr, nullptr, wc.hInstance, nullptr);
 
         D3DPRESENT_PARAMETERS d3dpp{};
@@ -89,7 +89,7 @@ namespace d3d9hook {
         }
 
         DestroyWindow(hwnd);
-        UnregisterClass(wc.lpszClassName, wc.hInstance);
+        UnregisterClassA(wc.lpszClassName, wc.hInstance);
         d3d->Release();
     }
 
