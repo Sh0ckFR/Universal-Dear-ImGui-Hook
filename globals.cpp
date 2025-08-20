@@ -11,6 +11,14 @@ namespace globals {
     int openMenuKey = VK_INSERT;
     // Currently active rendering backend
     Backend activeBackend = Backend::None;
+    // Flag controlling runtime debug logging
+    bool enableDebugLog = true;
+}
+
+namespace globals {
+    void SetDebugLogging(bool enable) {
+        enableDebugLog = enable;
+    }
 }
 
 // Log initial global values for debugging
