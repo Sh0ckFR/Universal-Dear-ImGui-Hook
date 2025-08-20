@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include <vector>
+#include <cstring>
 #include "imgui/backends/imgui_impl_vulkan.h"
 #include "vulkanhook.h"
 
@@ -11,6 +12,7 @@ namespace hooks_vk {
     static PFN_vkGetDeviceQueue oGetDeviceQueue = nullptr;
     static PFN_vkCmdBeginRenderingKHR fpBeginRendering = nullptr;
     static PFN_vkCmdEndRenderingKHR   fpEndRendering   = nullptr;
+    static bool                      gUseDynamicRendering = false;
 
     static VkInstance       gInstance       = VK_NULL_HANDLE;
     static VkPhysicalDevice gPhysicalDevice = VK_NULL_HANDLE;
@@ -21,10 +23,12 @@ namespace hooks_vk {
     static VkCommandPool    gCommandPool    = VK_NULL_HANDLE;
     static VkSwapchainKHR   gSwapchain      = VK_NULL_HANDLE;
     static bool             gInitialized    = false;
+    static VkRenderPass     gRenderPass     = VK_NULL_HANDLE;
 
     struct FrameData {
         VkCommandBuffer cmd = VK_NULL_HANDLE;
         VkFence         fence = VK_NULL_HANDLE;
+        VkFramebuffer   fb   = VK_NULL_HANDLE;
     };
     static std::vector<VkImage>      gSwapchainImages;
     static std::vector<VkImageView>  gImageViews;
@@ -65,6 +69,37 @@ namespace hooks_vk {
         vkCreateCommandPool(gDevice, &info, nullptr, &gCommandPool);
     }
 
+    static void CreateRenderPass()
+    {
+        if (gRenderPass)
+            return;
+        VkAttachmentDescription attachment{};
+        attachment.format = VK_FORMAT_B8G8R8A8_UNORM;
+        attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        attachment.initialLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+        VkAttachmentReference color_ref{};
+        color_ref.attachment = 0;
+        color_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+        VkSubpassDescription subpass{};
+        subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        subpass.colorAttachmentCount = 1;
+        subpass.pColorAttachments = &color_ref;
+
+        VkRenderPassCreateInfo rp_info{};
+        rp_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        rp_info.attachmentCount = 1;
+        rp_info.pAttachments = &attachment;
+        rp_info.subpassCount = 1;
+        rp_info.pSubpasses = &subpass;
+
+        vkCreateRenderPass(gDevice, &rp_info, nullptr, &gRenderPass);
+    }
+
     static void CreateFrameResources(uint32_t count)
     {
         gFrames.resize(count);
@@ -77,6 +112,9 @@ namespace hooks_vk {
         vkAllocateCommandBuffers(gDevice, &alloc_info, cmds.data());
         for (uint32_t i = 0; i < count; ++i)
         {
+            if (gFrames[i].fb)
+                vkDestroyFramebuffer(gDevice, gFrames[i].fb, nullptr);
+            gFrames[i].fb  = VK_NULL_HANDLE;
             gFrames[i].cmd = cmds[i];
             VkFenceCreateInfo fence_info{};
             fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
@@ -102,10 +140,44 @@ namespace hooks_vk {
                                            const VkAllocationCallbacks* pAllocator,
                                            VkDevice* pDevice)
     {
-        VkResult res = oCreateDevice(physicalDevice, pCreateInfo, pAllocator, pDevice);
+        bool has_dynamic = false;
+        for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; ++i)
+        {
+            if (strcmp(pCreateInfo->ppEnabledExtensionNames[i], "VK_KHR_dynamic_rendering") == 0)
+            {
+                has_dynamic = true;
+                break;
+            }
+        }
+
+        std::vector<const char*> extensions;
+        VkDeviceCreateInfo create_info = *pCreateInfo;
+        if (!has_dynamic)
+        {
+            uint32_t ext_count = 0;
+            vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &ext_count, nullptr);
+            std::vector<VkExtensionProperties> props(ext_count);
+            vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &ext_count, props.data());
+            for (const auto& e : props)
+            {
+                if (strcmp(e.extensionName, "VK_KHR_dynamic_rendering") == 0)
+                {
+                    has_dynamic = true;
+                    extensions.assign(pCreateInfo->ppEnabledExtensionNames,
+                                      pCreateInfo->ppEnabledExtensionNames + pCreateInfo->enabledExtensionCount);
+                    extensions.push_back("VK_KHR_dynamic_rendering");
+                    create_info.enabledExtensionCount = (uint32_t)extensions.size();
+                    create_info.ppEnabledExtensionNames = extensions.data();
+                    break;
+                }
+            }
+        }
+
+        VkResult res = oCreateDevice(physicalDevice, &create_info, pAllocator, pDevice);
         if (res != VK_SUCCESS)
             return res;
 
+        gUseDynamicRendering = has_dynamic;
         gDevice = *pDevice;
         gPhysicalDevice = physicalDevice;
         gQueueFamily = pCreateInfo->pQueueCreateInfos[0].queueFamilyIndex;
@@ -117,8 +189,11 @@ namespace hooks_vk {
         if (oGetDeviceQueue)
             oGetDeviceQueue(gDevice, gQueueFamily, 0, &gQueue);
 
-        fpBeginRendering = (PFN_vkCmdBeginRenderingKHR)oGetDeviceProcAddr(gDevice, "vkCmdBeginRenderingKHR");
-        fpEndRendering   = (PFN_vkCmdEndRenderingKHR)oGetDeviceProcAddr(gDevice, "vkCmdEndRenderingKHR");
+        if (gUseDynamicRendering)
+        {
+            fpBeginRendering = (PFN_vkCmdBeginRenderingKHR)oGetDeviceProcAddr(gDevice, "vkCmdBeginRenderingKHR");
+            fpEndRendering   = (PFN_vkCmdEndRenderingKHR)oGetDeviceProcAddr(gDevice, "vkCmdEndRenderingKHR");
+        }
 
         oQueuePresentKHR = (PFN_vkQueuePresentKHR)oGetDeviceProcAddr(gDevice, "vkQueuePresentKHR");
         if (oQueuePresentKHR)
@@ -155,6 +230,8 @@ namespace hooks_vk {
                 view_info.subresourceRange.layerCount = 1;
                 vkCreateImageView(gDevice, &view_info, nullptr, &gImageViews[i]);
             }
+            if (!gUseDynamicRendering)
+                CreateRenderPass();
             CreateFrameResources(gImageCount);
 
             ImGui::CreateContext();
@@ -173,12 +250,17 @@ namespace hooks_vk {
             init_info.MinImageCount = gImageCount;
             init_info.ImageCount = gImageCount;
             init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
-            init_info.UseDynamicRendering = true;
+            init_info.UseDynamicRendering = gUseDynamicRendering;
+            if (!gUseDynamicRendering)
+                init_info.RenderPass = gRenderPass;
 #ifdef IMGUI_IMPL_VULKAN_HAS_DYNAMIC_RENDERING
-            VkFormat color_format = VK_FORMAT_B8G8R8A8_UNORM;
-            init_info.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-            init_info.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
-            init_info.PipelineRenderingCreateInfo.pColorAttachmentFormats = &color_format;
+            if (gUseDynamicRendering)
+            {
+                VkFormat color_format = VK_FORMAT_B8G8R8A8_UNORM;
+                init_info.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+                init_info.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
+                init_info.PipelineRenderingCreateInfo.pColorAttachmentFormats = &color_format;
+            }
 #endif
             ImGui_ImplVulkan_Init(&init_info);
             gInitialized = true;
@@ -212,52 +294,78 @@ namespace hooks_vk {
             begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
             vkBeginCommandBuffer(fr.cmd, &begin_info);
 #ifdef IMGUI_IMPL_VULKAN_HAS_DYNAMIC_RENDERING
-            VkImageMemoryBarrier barrier{};
-            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            barrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-            barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-            barrier.srcAccessMask = 0;
-            barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-            barrier.image = gSwapchainImages[image_index];
-            barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            barrier.subresourceRange.levelCount = 1;
-            barrier.subresourceRange.layerCount = 1;
-            vkCmdPipelineBarrier(fr.cmd,
-                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-            VkRenderingAttachmentInfo color_attachment{};
-            color_attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-            color_attachment.imageView = gImageViews[image_index];
-            color_attachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-            color_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-            color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-
-            VkRenderingInfo render_info{};
-            render_info.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
-            render_info.renderArea.extent.width = (uint32_t)ImGui::GetDrawData()->DisplaySize.x;
-            render_info.renderArea.extent.height = (uint32_t)ImGui::GetDrawData()->DisplaySize.y;
-            render_info.layerCount = 1;
-            render_info.colorAttachmentCount = 1;
-            render_info.pColorAttachments = &color_attachment;
-
-            if (fpBeginRendering && fpEndRendering)
+            if (gUseDynamicRendering && fpBeginRendering && fpEndRendering)
             {
+                VkImageMemoryBarrier barrier{};
+                barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+                barrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+                barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                barrier.srcAccessMask = 0;
+                barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+                barrier.image = gSwapchainImages[image_index];
+                barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                barrier.subresourceRange.levelCount = 1;
+                barrier.subresourceRange.layerCount = 1;
+                vkCmdPipelineBarrier(fr.cmd,
+                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+                VkRenderingAttachmentInfo color_attachment{};
+                color_attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+                color_attachment.imageView = gImageViews[image_index];
+                color_attachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                color_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+                color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+                VkRenderingInfo render_info{};
+                render_info.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+                render_info.renderArea.extent.width = (uint32_t)ImGui::GetDrawData()->DisplaySize.x;
+                render_info.renderArea.extent.height = (uint32_t)ImGui::GetDrawData()->DisplaySize.y;
+                render_info.layerCount = 1;
+                render_info.colorAttachmentCount = 1;
+                render_info.pColorAttachments = &color_attachment;
+
                 fpBeginRendering(fr.cmd, &render_info);
                 ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), fr.cmd);
                 fpEndRendering(fr.cmd);
-            }
 
-            barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-            barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-            barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-            barrier.dstAccessMask = 0;
-            vkCmdPipelineBarrier(fr.cmd,
-                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-                0, 0, nullptr, 0, nullptr, 1, &barrier);
+                barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+                barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+                barrier.dstAccessMask = 0;
+                vkCmdPipelineBarrier(fr.cmd,
+                    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                    0, 0, nullptr, 0, nullptr, 1, &barrier);
+            }
+            else
 #endif
+            {
+                if (gFrames[image_index].fb == VK_NULL_HANDLE)
+                {
+                    VkImageView attachment = gImageViews[image_index];
+                    VkFramebufferCreateInfo fb_info{};
+                    fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+                    fb_info.renderPass = gRenderPass;
+                    fb_info.attachmentCount = 1;
+                    fb_info.pAttachments = &attachment;
+                    fb_info.width = (uint32_t)ImGui::GetDrawData()->DisplaySize.x;
+                    fb_info.height = (uint32_t)ImGui::GetDrawData()->DisplaySize.y;
+                    fb_info.layers = 1;
+                    vkCreateFramebuffer(gDevice, &fb_info, nullptr, &gFrames[image_index].fb);
+                }
+
+                VkRenderPassBeginInfo rp_begin{};
+                rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+                rp_begin.renderPass = gRenderPass;
+                rp_begin.framebuffer = gFrames[image_index].fb;
+                rp_begin.renderArea.extent.width = (uint32_t)ImGui::GetDrawData()->DisplaySize.x;
+                rp_begin.renderArea.extent.height = (uint32_t)ImGui::GetDrawData()->DisplaySize.y;
+                vkCmdBeginRenderPass(fr.cmd, &rp_begin, VK_SUBPASS_CONTENTS_INLINE);
+                ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), fr.cmd);
+                vkCmdEndRenderPass(fr.cmd);
+            }
             vkEndCommandBuffer(fr.cmd);
 
             VkSubmitInfo submit{};
@@ -318,11 +426,13 @@ namespace hooks_vk {
             for (auto& fr : gFrames)
             {
                 if (fr.fence) vkDestroyFence(gDevice, fr.fence, nullptr);
+                if (fr.fb)    vkDestroyFramebuffer(gDevice, fr.fb, nullptr);
             }
             if (gCommandPool) vkDestroyCommandPool(gDevice, gCommandPool, nullptr);
             if (gDescriptorPool) vkDestroyDescriptorPool(gDevice, gDescriptorPool, nullptr);
             for (auto view : gImageViews)
                 vkDestroyImageView(gDevice, view, nullptr);
+            if (gRenderPass) vkDestroyRenderPass(gDevice, gRenderPass, nullptr);
         }
 
         gFrames.clear();
@@ -330,6 +440,7 @@ namespace hooks_vk {
         gSwapchainImages.clear();
         gDescriptorPool = VK_NULL_HANDLE;
         gCommandPool = VK_NULL_HANDLE;
+        gRenderPass = VK_NULL_HANDLE;
         gDevice = VK_NULL_HANDLE;
         gInstance = VK_NULL_HANDLE;
 
