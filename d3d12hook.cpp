@@ -144,21 +144,31 @@ namespace d3d12hook {
             FrameContext& ctx = gFrameContexts[frameIdx];
 
             // Wait for the GPU to finish with the previous frame
+            bool canRender = true;
             if (!gOverlayFence || !gFenceEvent) {
                 // Missing synchronization objects, skip waiting
             } else if (gOverlayFence->GetCompletedValue() < gOverlayFenceValue) {
                 HRESULT hr = gOverlayFence->SetEventOnCompletion(gOverlayFenceValue, gFenceEvent);
                 if (SUCCEEDED(hr)) {
-                    const DWORD waitTimeoutMs = 1000; // 1 second timeout
+                    const DWORD waitTimeoutMs = 2000; // Extended timeout
                     DWORD waitRes = WaitForSingleObject(gFenceEvent, waitTimeoutMs);
                     if (waitRes == WAIT_TIMEOUT) {
                         DebugLog("[d3d12hook] WaitForSingleObject timeout\n");
+                        canRender = false;
                     } else if (waitRes != WAIT_OBJECT_0) {
                         DebugLog("[d3d12hook] WaitForSingleObject failed: %lu\n", GetLastError());
+                        canRender = false;
                     }
                 } else {
                     LogHRESULT("SetEventOnCompletion", hr);
+                    canRender = false;
                 }
+            }
+
+            if (!canRender) {
+                DebugLog("[d3d12hook] Skipping ImGui render for this frame\n");
+                ImGui::EndFrame();
+                return oPresentD3D12(pSwapChain, SyncInterval, Flags);
             }
 
             // Reset allocator and command list using frame-specific allocator
@@ -335,21 +345,31 @@ namespace d3d12hook {
             FrameContext& ctx = gFrameContexts[frameIdx];
 
             // Wait for the GPU to finish with the previous frame
+            bool canRender = true;
             if (!gOverlayFence || !gFenceEvent) {
                 // Missing synchronization objects, skip waiting
             } else if (gOverlayFence->GetCompletedValue() < gOverlayFenceValue) {
                 HRESULT hr = gOverlayFence->SetEventOnCompletion(gOverlayFenceValue, gFenceEvent);
                 if (SUCCEEDED(hr)) {
-                    const DWORD waitTimeoutMs = 1000; // 1 second timeout
+                    const DWORD waitTimeoutMs = 2000; // Extended timeout
                     DWORD waitRes = WaitForSingleObject(gFenceEvent, waitTimeoutMs);
                     if (waitRes == WAIT_TIMEOUT) {
                         DebugLog("[d3d12hook] WaitForSingleObject timeout\n");
+                        canRender = false;
                     } else if (waitRes != WAIT_OBJECT_0) {
                         DebugLog("[d3d12hook] WaitForSingleObject failed: %lu\n", GetLastError());
+                        canRender = false;
                     }
                 } else {
                     LogHRESULT("SetEventOnCompletion", hr);
+                    canRender = false;
                 }
+            }
+
+            if (!canRender) {
+                DebugLog("[d3d12hook] Skipping ImGui render for this frame\n");
+                ImGui::EndFrame();
+                return oPresent1D3D12(pSwapChain, SyncInterval, Flags, pParams);
             }
 
             // Reset allocator and command list using frame-specific allocator
