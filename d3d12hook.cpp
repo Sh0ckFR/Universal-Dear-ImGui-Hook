@@ -540,4 +540,9 @@ namespace d3d12hook {
         MH_Uninitialize();
         DebugLog("[DllMain] MinHook uninitialized.\n");
     }
+
+    bool IsInitialized()
+    {
+        return gInitialized;
+    }
 }

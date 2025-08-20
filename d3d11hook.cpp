@@ -242,4 +242,9 @@ namespace hooks_dx11 {
         MH_RemoveHook(MH_ALL_HOOKS);
         MH_Uninitialize();
     }
+
+    bool IsInitialized()
+    {
+        return gInitialized;
+    }
 }
