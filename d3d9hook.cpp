@@ -3,7 +3,8 @@
 namespace d3d9hook {
     EndSceneFn oEndScene = nullptr;
     ResetFn    oReset    = nullptr;
-
+    static void* pEndSceneTarget = nullptr;
+    static void* pResetTarget   = nullptr;
     static bool gInitialized = false;
 
     HRESULT __stdcall hookEndScene(IDirect3DDevice9* device) {
@@ -83,11 +84,13 @@ namespace d3d9hook {
             D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &device);
         if (SUCCEEDED(hr)) {
             void** vtbl = *reinterpret_cast<void***>(device);
-            MH_CreateHook(vtbl[42], reinterpret_cast<void*>(hookEndScene), reinterpret_cast<void**>(&oEndScene));
-            MH_CreateHook(vtbl[16], reinterpret_cast<void*>(hookReset), reinterpret_cast<void**>(&oReset));
-            MH_EnableHook(vtbl[42]);
-            MH_EnableHook(vtbl[16]);
-            DebugLog("[d3d9hook] Hooks placed EndScene@%p Reset@%p\\n", vtbl[42], vtbl[16]);
+            pEndSceneTarget = vtbl[42];
+            pResetTarget   = vtbl[16];
+            MH_CreateHook(pEndSceneTarget, reinterpret_cast<void*>(hookEndScene), reinterpret_cast<void**>(&oEndScene));
+            MH_CreateHook(pResetTarget,   reinterpret_cast<void*>(hookReset),    reinterpret_cast<void**>(&oReset));
+            MH_EnableHook(pEndSceneTarget);
+            MH_EnableHook(pResetTarget);
+            DebugLog("[d3d9hook] Hooks placed EndScene@%p Reset@%p\\n", pEndSceneTarget, pResetTarget);
             device->Release();
         } else {
             DebugLog("[d3d9hook] CreateDevice failed: 0x%08X\\n", hr);
@@ -109,9 +112,16 @@ namespace d3d9hook {
             ImGui::DestroyContext();
             gInitialized = false;
         }
-        MH_DisableHook(MH_ALL_HOOKS);
-        MH_RemoveHook(MH_ALL_HOOKS);
-        MH_Uninitialize();
+        if (pEndSceneTarget) {
+            MH_DisableHook(pEndSceneTarget);
+            MH_RemoveHook(pEndSceneTarget);
+            pEndSceneTarget = nullptr;
+        }
+        if (pResetTarget) {
+            MH_DisableHook(pResetTarget);
+            MH_RemoveHook(pResetTarget);
+            pResetTarget = nullptr;
+        }
     }
 
     bool IsInitialized()

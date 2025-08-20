@@ -17,6 +17,12 @@ namespace hooks {
     static HWND                          hDummyWindow = nullptr;
     static const wchar_t* dummyClassName = L"DummyWndClass";
 
+    static LPVOID pPresentTarget = nullptr;
+    static LPVOID pPresent1Target = nullptr;
+    static LPVOID pResizeBuffersTarget = nullptr;
+    static LPVOID pExecuteCommandListsTarget = nullptr;
+    static LPVOID pSignalTarget = nullptr;
+
     static void CleanupDummyObjects()
     {
         if (hDummyWindow)
@@ -139,16 +145,18 @@ namespace hooks {
 
         // --- Hook Present on SwapChain ---
         auto scVTable = *reinterpret_cast<void***>(pSwapChain.Get());
+        pPresentTarget = reinterpret_cast<LPVOID>(scVTable[kPresentIndex]);
         mh = MH_CreateHook(
-            reinterpret_cast<LPVOID>(scVTable[kPresentIndex]),
+            pPresentTarget,
             reinterpret_cast<LPVOID>(d3d12hook::hookPresentD3D12),
             reinterpret_cast<LPVOID*>(&d3d12hook::oPresentD3D12)
         );
         if (mh != MH_OK)
             DebugLog("[hooks] MH_CreateHook Present failed: %s\n", MH_StatusToString(mh));
 
+        pPresent1Target = reinterpret_cast<LPVOID>(scVTable[kPresent1Index]);
         mh = MH_CreateHook(
-            reinterpret_cast<LPVOID>(scVTable[kPresent1Index]),
+            pPresent1Target,
             reinterpret_cast<LPVOID>(d3d12hook::hookPresent1D3D12),
             reinterpret_cast<LPVOID*>(&d3d12hook::oPresent1D3D12)
         );
@@ -156,8 +164,9 @@ namespace hooks {
             DebugLog("[hooks] MH_CreateHook Present1 failed: %s\n", MH_StatusToString(mh));
 
         // --- Hook ResizeBuffers ---
+        pResizeBuffersTarget = reinterpret_cast<LPVOID>(scVTable[kResizeBuffersIndex]);
         mh = MH_CreateHook(
-            reinterpret_cast<LPVOID>(scVTable[kResizeBuffersIndex]),
+            pResizeBuffersTarget,
             reinterpret_cast<LPVOID>(d3d12hook::hookResizeBuffersD3D12),
             reinterpret_cast<LPVOID*>(&d3d12hook::oResizeBuffersD3D12)
         );
@@ -166,8 +175,9 @@ namespace hooks {
 
         // --- Hook ExecuteCommandLists ---
         auto cqVTable = *reinterpret_cast<void***>(pCommandQueue.Get());
+        pExecuteCommandListsTarget = reinterpret_cast<LPVOID>(cqVTable[kExecuteCommandListsIndex]);
         mh = MH_CreateHook(
-            reinterpret_cast<LPVOID>(cqVTable[kExecuteCommandListsIndex]),
+            pExecuteCommandListsTarget,
             reinterpret_cast<LPVOID>(d3d12hook::hookExecuteCommandListsD3D12),
             reinterpret_cast<LPVOID*>(&d3d12hook::oExecuteCommandListsD3D12)
         );
@@ -175,8 +185,9 @@ namespace hooks {
             DebugLog("[hooks] MH_CreateHook ExecuteCommandLists failed: %s\n", MH_StatusToString(mh));
 
         // --- Hook Signal ---
+        pSignalTarget = reinterpret_cast<LPVOID>(cqVTable[kSignalIndex]);
         mh = MH_CreateHook(
-            reinterpret_cast<LPVOID>(cqVTable[kSignalIndex]),
+            pSignalTarget,
             reinterpret_cast<LPVOID>(d3d12hook::hookSignalD3D12),
             reinterpret_cast<LPVOID*>(&d3d12hook::oSignalD3D12)
         );
@@ -196,5 +207,34 @@ namespace hooks {
                 reinterpret_cast<LPVOID>(cqVTable[kExecuteCommandListsIndex]), kExecuteCommandListsIndex,
                 reinterpret_cast<LPVOID>(cqVTable[kSignalIndex]), kSignalIndex
             );
+    }
+
+    void Remove()
+    {
+        if (pPresentTarget) {
+            MH_DisableHook(pPresentTarget);
+            MH_RemoveHook(pPresentTarget);
+            pPresentTarget = nullptr;
+        }
+        if (pPresent1Target) {
+            MH_DisableHook(pPresent1Target);
+            MH_RemoveHook(pPresent1Target);
+            pPresent1Target = nullptr;
+        }
+        if (pResizeBuffersTarget) {
+            MH_DisableHook(pResizeBuffersTarget);
+            MH_RemoveHook(pResizeBuffersTarget);
+            pResizeBuffersTarget = nullptr;
+        }
+        if (pExecuteCommandListsTarget) {
+            MH_DisableHook(pExecuteCommandListsTarget);
+            MH_RemoveHook(pExecuteCommandListsTarget);
+            pExecuteCommandListsTarget = nullptr;
+        }
+        if (pSignalTarget) {
+            MH_DisableHook(pSignalTarget);
+            MH_RemoveHook(pSignalTarget);
+            pSignalTarget = nullptr;
+        }
     }
 }

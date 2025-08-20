@@ -6,6 +6,9 @@ namespace hooks_dx11 {
     PresentFn       oPresentD3D11 = nullptr;
     Present1Fn      oPresent1D3D11 = nullptr;
     ResizeBuffersFn oResizeBuffersD3D11 = nullptr;
+    static void* pPresentTarget = nullptr;
+    static void* pPresent1Target = nullptr;
+    static void* pResizeBuffersTarget = nullptr;
 
     static ID3D11Device*            gDevice = nullptr;
     static ID3D11DeviceContext*     gContext = nullptr;
@@ -181,8 +184,10 @@ namespace hooks_dx11 {
         if (SUCCEEDED(hr))
         {
             void** vtbl = *reinterpret_cast<void***>(swapChain);
-            MH_CreateHook(vtbl[8], hookPresentD3D11, reinterpret_cast<void**>(&oPresentD3D11));
-            MH_CreateHook(vtbl[13], hookResizeBuffersD3D11, reinterpret_cast<void**>(&oResizeBuffersD3D11));
+            pPresentTarget = vtbl[8];
+            pResizeBuffersTarget = vtbl[13];
+            MH_CreateHook(pPresentTarget, hookPresentD3D11, reinterpret_cast<void**>(&oPresentD3D11));
+            MH_CreateHook(pResizeBuffersTarget, hookResizeBuffersD3D11, reinterpret_cast<void**>(&oResizeBuffersD3D11));
 
             IDXGISwapChain1* swapChain1 = nullptr;
             void* present1Addr = nullptr;
@@ -190,14 +195,15 @@ namespace hooks_dx11 {
             {
                 void** vtbl1 = *reinterpret_cast<void***>(swapChain1);
                 present1Addr = vtbl1[22];
-                MH_CreateHook(vtbl1[22], hookPresent1D3D11, reinterpret_cast<void**>(&oPresent1D3D11));
-                MH_EnableHook(vtbl1[22]);
+                pPresent1Target = vtbl1[22];
+                MH_CreateHook(pPresent1Target, hookPresent1D3D11, reinterpret_cast<void**>(&oPresent1D3D11));
+                MH_EnableHook(pPresent1Target);
                 swapChain1->Release();
             }
 
-            MH_EnableHook(vtbl[8]);
-            MH_EnableHook(vtbl[13]);
-            DebugLog("[d3d11hook] Hooks placed Present@%p Present1@%p ResizeBuffers@%p\n", vtbl[8], present1Addr, vtbl[13]);
+            MH_EnableHook(pPresentTarget);
+            MH_EnableHook(pResizeBuffersTarget);
+            DebugLog("[d3d11hook] Hooks placed Present@%p Present1@%p ResizeBuffers@%p\n", pPresentTarget, present1Addr, pResizeBuffersTarget);
             swapChain->Release();
             device->Release();
             context->Release();
@@ -238,9 +244,21 @@ namespace hooks_dx11 {
             gInitialized = false;
         }
 
-        MH_DisableHook(MH_ALL_HOOKS);
-        MH_RemoveHook(MH_ALL_HOOKS);
-        MH_Uninitialize();
+        if (pPresentTarget) {
+            MH_DisableHook(pPresentTarget);
+            MH_RemoveHook(pPresentTarget);
+            pPresentTarget = nullptr;
+        }
+        if (pPresent1Target) {
+            MH_DisableHook(pPresent1Target);
+            MH_RemoveHook(pPresent1Target);
+            pPresent1Target = nullptr;
+        }
+        if (pResizeBuffersTarget) {
+            MH_DisableHook(pResizeBuffersTarget);
+            MH_RemoveHook(pResizeBuffersTarget);
+            pResizeBuffersTarget = nullptr;
+        }
     }
 
     bool IsInitialized()
