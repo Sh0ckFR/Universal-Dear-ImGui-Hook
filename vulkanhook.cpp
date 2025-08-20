@@ -1,8 +1,4 @@
 #include "stdafx.h"
-#include <vector>
-#include <cstring>
-#include "imgui/backends/imgui_impl_vulkan.h"
-#include "vulkanhook.h"
 
 namespace hooks_vk {
     PFN_vkCreateInstance  oCreateInstance  = nullptr;

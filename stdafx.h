@@ -6,8 +6,11 @@
 #pragma comment(lib, "d3d10.lib")
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "d3d12.lib")
+#pragma comment(lib, "vulkan-1.lib")
 
 #include <windows.h>
+#include <vector>
+#include <cstring>
 #include <cstdio>
 #include <cstdint>
 #include <cstddef>
@@ -20,6 +23,7 @@
 #include <d3d10.h>
 #include <d3d11.h>
 #include <d3d12.h>
+#include <vulkan/vulkan.h>
 
 #include <wrl/client.h>
 
@@ -35,6 +39,7 @@ typedef uint32_t uintx_t;
 #include "imgui/imgui_impl_dx10.h"
 #include "imgui/imgui_impl_dx11.h"
 #include "imgui/imgui_impl_dx12.h"
+#include "imgui/imgui_impl_vulkan.h"
 
 #include "minhook/include/MinHook.h"
 
