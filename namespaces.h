@@ -16,6 +16,8 @@ namespace globals {
                 Vulkan
         };
         extern Backend activeBackend;
+        // Preferred backend to hook. None means auto with fallback order
+        extern Backend preferredBackend;
         extern bool enableDebugLog;
         void SetDebugLogging(bool enable);
 }
