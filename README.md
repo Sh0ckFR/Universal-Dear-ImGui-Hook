@@ -1,19 +1,19 @@
 # Universal-Dear-ImGui-Hook
 An universal Dear ImGui Hook for Directx12 D3D12 (D3D11, D3D10 and maybe Vulkan will be added later)
 
-# Important
-
-[19/08/2025] The project is actually stable for directx12, I must fix some potential issues and add the others directx engines but you can actually use it, I tested few games and applications without issues but you can debug it with DebugView if you have some problems, I added logs to directly know what is wrong.
-
-Here is the last stable commit: https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook/commit/ca3d843057ff8647f40a94ba46034a7cca8b2084
-
 ## Getting Started
 
 - To use it, you need to compile it and inject your dll file in an application process.
+- Do not forget to select your engine in `globals.cpp`: https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook/blob/master/globals.cpp#L13
+- Disable debug logs if you don't need to use them.
 - If you have an error about `libMinHook.x64.lib`, recompile https://github.com/TsudaKageyu/minhook in x64 and replace the old .lib file by your new one.
 - If you have some issues with the `vulkan-1.lib` download the lastest Vulkan SDK and replace the existing file by the new one from the SDK's lib directory `ex: C:\VulkanSDK\YOURVERSION\Lib\vulkan-1.lib`
 
 ![alt text](https://raw.githubusercontent.com/Sh0ckFR/Universal-Dear-ImGui-Hook/master/imgui.png)
+
+## Know bugs
+
+- There is a bug with some games based on directx12 actually, I will fix it in few days (20/08/2025).
 
 ## Built With
 
@@ -32,6 +32,7 @@ Here is the last stable commit: https://github.com/Sh0ckFR/Universal-Dear-ImGui-
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details
+
 
 
 
