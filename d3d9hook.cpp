@@ -1,9 +1,4 @@
 #include "stdafx.h"
-#include <d3d9.h>
-#include "imgui/backends/imgui_impl_dx9.h"
-#include "d3d9hook.h"
-
-#pragma comment(lib, "d3d9.lib")
 
 namespace d3d9hook {
     EndSceneFn oEndScene = nullptr;

@@ -1,6 +1,10 @@
 #pragma once
 #pragma comment(lib, "minhook/lib/libMinHook.x64.lib")
+
 #pragma comment(lib, "dxgi.lib")
+#pragma comment(lib, "d3d9.lib")
+#pragma comment(lib, "d3d10.lib")
+#pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "d3d12.lib")
 
 #include <windows.h>
@@ -9,7 +13,11 @@
 #include <cstddef>
 #include <cstdarg>
 
+#include <dxgi.h>
 #include <dxgi1_4.h>
+#include <d3d9.h>
+#include <d3d10.h>
+#include <d3d11.h>
 #include <d3d12.h>
 
 #include <wrl/client.h>
@@ -22,7 +30,11 @@ typedef uint32_t uintx_t;
 
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_win32.h"
+#include "imgui/imgui_impl_dx9.h"
+#include "imgui/imgui_impl_dx10.h"
+#include "imgui/imgui_impl_dx11.h"
 #include "imgui/imgui_impl_dx12.h"
+
 #include "minhook/include/MinHook.h"
 
 #include "namespaces.h"

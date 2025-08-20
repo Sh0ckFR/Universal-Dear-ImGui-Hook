@@ -74,17 +74,59 @@ namespace d3d12hook {
 
 // Forward declarations for other rendering backends
 namespace d3d9hook {
-        void Init();
-        void release();
+    using EndSceneFn = HRESULT(__stdcall*)(IDirect3DDevice9*);
+    using ResetFn = HRESULT(__stdcall*)(IDirect3DDevice9*, D3DPRESENT_PARAMETERS*);
+
+    extern EndSceneFn oEndScene;
+    extern ResetFn    oReset;
+
+    HRESULT __stdcall hookEndScene(IDirect3DDevice9* device);
+    HRESULT __stdcall hookReset(IDirect3DDevice9* device, D3DPRESENT_PARAMETERS* params);
+
+    void Init();
+    void release();
 }
+
 namespace hooks_dx10 {
-        void Init();
-        void release();
+    using PresentFn = HRESULT(__stdcall*)(IDXGISwapChain*, UINT, UINT);
+    using ResizeBuffersFn = HRESULT(__stdcall*)(IDXGISwapChain*, UINT, UINT, UINT, DXGI_FORMAT, UINT);
+
+    extern PresentFn       oPresentD3D10;
+    extern ResizeBuffersFn oResizeBuffersD3D10;
+
+    HRESULT __stdcall hookPresentD3D10(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags);
+    HRESULT __stdcall hookResizeBuffersD3D10(
+        IDXGISwapChain* pSwapChain,
+        UINT BufferCount,
+        UINT Width,
+        UINT Height,
+        DXGI_FORMAT NewFormat,
+        UINT SwapChainFlags);
+
+    void Init();
+    void release();
 }
+
 namespace hooks_dx11 {
-        void Init();
-        void release();
+    using PresentFn = HRESULT(__stdcall*)(IDXGISwapChain*, UINT, UINT);
+    using ResizeBuffersFn = HRESULT(__stdcall*)(IDXGISwapChain*, UINT, UINT, UINT, DXGI_FORMAT, UINT);
+
+    extern PresentFn       oPresentD3D11;
+    extern ResizeBuffersFn oResizeBuffersD3D11;
+
+    HRESULT __stdcall hookPresentD3D11(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags);
+    HRESULT __stdcall hookResizeBuffersD3D11(
+        IDXGISwapChain* pSwapChain,
+        UINT BufferCount,
+        UINT Width,
+        UINT Height,
+        DXGI_FORMAT NewFormat,
+        UINT SwapChainFlags);
+
+    void Init();
+    void release();
 }
+
 namespace hooks_vk {
         void Init();
         void release();

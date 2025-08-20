@@ -1,7 +1,4 @@
 #include "stdafx.h"
-#include <d3d10.h>
-#include "imgui/backends/imgui_impl_dx10.h"
-#pragma comment(lib, "d3d10.lib")
 
 namespace hooks_dx10 {
     using Microsoft::WRL::ComPtr;

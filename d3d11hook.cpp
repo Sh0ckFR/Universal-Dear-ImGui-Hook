@@ -1,9 +1,4 @@
 #include "stdafx.h"
-#include <d3d11.h>
-#include "imgui/backends/imgui_impl_dx11.h"
-#include "d3d11hook.h"
-
-#pragma comment(lib, "d3d11.lib")
 
 namespace hooks_dx11 {
     using Microsoft::WRL::ComPtr;
