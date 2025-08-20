@@ -1,5 +1,5 @@
-<?xml version="1.0" encoding="utf-8"?>
-<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<?xml version='1.0' encoding='utf-8'?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build" ToolsVersion="15.0">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
       <Configuration>Debug</Configuration>
@@ -122,6 +122,7 @@
   <ItemGroup>
     <ClCompile Include="d3d9hook.cpp" />
     <ClCompile Include="d3d10hook.cpp" />
+    <ClCompile Include="d3d11hook.cpp" />
     <ClCompile Include="d3d12hook.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="globals.cpp" />
@@ -137,8 +138,10 @@
     <ClCompile Include="imgui\imgui_widgets.cpp" />
     <ClCompile Include="inputhooks.cpp" />
     <ClCompile Include="menu.cpp" />
+    <ClCompile Include="imgui\backends\imgui_impl_dx11.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="imgui\backends\imgui_impl_dx11.h" />
     <ClInclude Include="imgui\imconfig.h" />
     <ClInclude Include="imgui\imgui.h" />
     <ClInclude Include="imgui\imgui_impl_dx12.h" />
@@ -151,6 +154,7 @@
     <ClInclude Include="imgui\imstb_truetype.h" />
     <ClInclude Include="d3d9hook.h" />
     <ClInclude Include="d3d10hook.h" />
+    <ClInclude Include="d3d11hook.h" />
     <ClInclude Include="namespaces.h" />
     <ClInclude Include="stdafx.h" />
   </ItemGroup>
