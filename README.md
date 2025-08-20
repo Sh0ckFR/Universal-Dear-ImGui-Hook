@@ -1,5 +1,5 @@
 # Universal-Dear-ImGui-Hook
-An universal Dear ImGui Hook for Directx12 D3D12 (D3D11, D3D10 and maybe Vulkan will be added later)
+An universal Dear ImGui Hook for Directx12, 11, 10, 9 and Vulkan.
 
 ## Getting Started
 
@@ -32,6 +32,7 @@ An universal Dear ImGui Hook for Directx12 D3D12 (D3D11, D3D10 and maybe Vulkan 
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details
+
 
 
 
