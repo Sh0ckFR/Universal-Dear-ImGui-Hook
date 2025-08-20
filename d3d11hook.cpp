@@ -4,6 +4,7 @@ namespace hooks_dx11 {
     using Microsoft::WRL::ComPtr;
 
     PresentFn       oPresentD3D11 = nullptr;
+    Present1Fn      oPresent1D3D11 = nullptr;
     ResizeBuffersFn oResizeBuffersD3D11 = nullptr;
 
     static ID3D11Device*            gDevice = nullptr;
@@ -31,7 +32,7 @@ namespace hooks_dx11 {
         }
     }
 
-    HRESULT __stdcall hookPresentD3D11(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags)
+    static void RenderFrame(IDXGISwapChain* pSwapChain)
     {
         if (!gInitialized)
         {
@@ -74,8 +75,18 @@ namespace hooks_dx11 {
             gContext->OMSetRenderTargets(1, &gRTV, nullptr);
             ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
         }
+    }
 
+    HRESULT __stdcall hookPresentD3D11(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags)
+    {
+        RenderFrame(pSwapChain);
         return oPresentD3D11(pSwapChain, SyncInterval, Flags);
+    }
+
+    HRESULT __stdcall hookPresent1D3D11(IDXGISwapChain1* pSwapChain, UINT SyncInterval, UINT Flags, const DXGI_PRESENT_PARAMETERS* pPresentParameters)
+    {
+        RenderFrame(pSwapChain);
+        return oPresent1D3D11(pSwapChain, SyncInterval, Flags, pPresentParameters);
     }
 
     HRESULT __stdcall hookResizeBuffersD3D11(
@@ -139,9 +150,21 @@ namespace hooks_dx11 {
             void** vtbl = *reinterpret_cast<void***>(swapChain);
             MH_CreateHook(vtbl[8], hookPresentD3D11, reinterpret_cast<void**>(&oPresentD3D11));
             MH_CreateHook(vtbl[13], hookResizeBuffersD3D11, reinterpret_cast<void**>(&oResizeBuffersD3D11));
+
+            IDXGISwapChain1* swapChain1 = nullptr;
+            void* present1Addr = nullptr;
+            if (SUCCEEDED(swapChain->QueryInterface(__uuidof(IDXGISwapChain1), (void**)&swapChain1)))
+            {
+                void** vtbl1 = *reinterpret_cast<void***>(swapChain1);
+                present1Addr = vtbl1[22];
+                MH_CreateHook(vtbl1[22], hookPresent1D3D11, reinterpret_cast<void**>(&oPresent1D3D11));
+                MH_EnableHook(vtbl1[22]);
+                swapChain1->Release();
+            }
+
             MH_EnableHook(vtbl[8]);
             MH_EnableHook(vtbl[13]);
-            DebugLog("[d3d11hook] Hooks placed Present@%p ResizeBuffers@%p\n", vtbl[8], vtbl[13]);
+            DebugLog("[d3d11hook] Hooks placed Present@%p Present1@%p ResizeBuffers@%p\n", vtbl[8], present1Addr, vtbl[13]);
             swapChain->Release();
             device->Release();
             context->Release();

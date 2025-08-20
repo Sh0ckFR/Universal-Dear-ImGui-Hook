@@ -29,9 +29,12 @@ namespace inputhook {
 }
 
 namespace d3d12hook {
-	typedef HRESULT(STDMETHODCALLTYPE* PresentD3D12)(
-		IDXGISwapChain3 * pSwapChain, UINT SyncInterval, UINT Flags);
-	extern PresentD3D12 oPresentD3D12;
+        typedef HRESULT(STDMETHODCALLTYPE* PresentD3D12)(
+                IDXGISwapChain3 * pSwapChain, UINT SyncInterval, UINT Flags);
+        typedef HRESULT(STDMETHODCALLTYPE* Present1Fn)(
+                IDXGISwapChain3 * pSwapChain, UINT SyncInterval, UINT Flags, const DXGI_PRESENT_PARAMETERS* pParams);
+        extern PresentD3D12 oPresentD3D12;
+        extern Present1Fn   oPresent1D3D12;
 
 	typedef void(STDMETHODCALLTYPE* ExecuteCommandListsFn)(
 		ID3D12CommandQueue * _this, UINT NumCommandLists, ID3D12CommandList* const* ppCommandLists);
@@ -58,7 +61,8 @@ namespace d3d12hook {
                 DXGI_FORMAT NewFormat,
                 UINT SwapChainFlags);
 
-	extern long __fastcall hookPresentD3D12(IDXGISwapChain3* pSwapChain, UINT SyncInterval, UINT Flags);
+        extern long __fastcall hookPresentD3D12(IDXGISwapChain3* pSwapChain, UINT SyncInterval, UINT Flags);
+        extern long __fastcall hookPresent1D3D12(IDXGISwapChain3* pSwapChain, UINT SyncInterval, UINT Flags, const DXGI_PRESENT_PARAMETERS* pParams);
 	extern void STDMETHODCALLTYPE hookExecuteCommandListsD3D12(
 		ID3D12CommandQueue* _this,
 		UINT                          NumCommandLists,
@@ -108,13 +112,16 @@ namespace hooks_dx10 {
 }
 
 namespace hooks_dx11 {
-    using PresentFn = HRESULT(__stdcall*)(IDXGISwapChain*, UINT, UINT);
+    using PresentFn   = HRESULT(__stdcall*)(IDXGISwapChain*, UINT, UINT);
+    using Present1Fn  = HRESULT(__stdcall*)(IDXGISwapChain1*, UINT, UINT, const DXGI_PRESENT_PARAMETERS*);
     using ResizeBuffersFn = HRESULT(__stdcall*)(IDXGISwapChain*, UINT, UINT, UINT, DXGI_FORMAT, UINT);
 
     extern PresentFn       oPresentD3D11;
+    extern Present1Fn      oPresent1D3D11;
     extern ResizeBuffersFn oResizeBuffersD3D11;
 
     HRESULT __stdcall hookPresentD3D11(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags);
+    HRESULT __stdcall hookPresent1D3D11(IDXGISwapChain1* pSwapChain, UINT SyncInterval, UINT Flags, const DXGI_PRESENT_PARAMETERS* pPresentParameters);
     HRESULT __stdcall hookResizeBuffersD3D11(
         IDXGISwapChain* pSwapChain,
         UINT BufferCount,
