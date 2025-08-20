@@ -16,6 +16,8 @@ namespace globals {
                 Vulkan
         };
         extern Backend activeBackend;
+        extern bool enableDebugLog;
+        void SetDebugLogging(bool enable);
 }
 
 namespace hooks {

@@ -47,6 +47,9 @@ typedef uint32_t uintx_t;
 
 // Helper macro for debug logging via DebugView
 inline void DebugLog(const char* fmt, ...) {
+    if (!globals::enableDebugLog) {
+        return;
+    }
     char buf[512];
     va_list args;
     va_start(args, fmt);
