@@ -14,9 +14,9 @@ namespace d3d12hook {
     static ID3D12DescriptorHeap* gHeapRTV = nullptr;
     static ID3D12DescriptorHeap* gHeapSRV = nullptr;
     static ID3D12GraphicsCommandList* gCommandList = nullptr;
-    static ID3D12Fence* gFence = nullptr;
+    static ID3D12Fence* gOverlayFence = nullptr;
     static HANDLE                   gFenceEvent = nullptr;
-    static UINT64                  gFenceValue = 0;
+    static UINT64                  gOverlayFenceValue = 0;
     static uintx_t                 gBufferCount = 0;
 
     struct FrameContext {
@@ -114,6 +114,13 @@ namespace d3d12hook {
 
             inputhook::Init(desc.OutputWindow);
 
+            if (!gOverlayFence) {
+                if (FAILED(gDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&gOverlayFence)))) {
+                    LogHRESULT("CreateFence", E_FAIL);
+                    return oPresentD3D12(pSwapChain, SyncInterval, Flags);
+                }
+            }
+
             if (!gFenceEvent) {
                 gFenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
                 if (!gFenceEvent) {
@@ -137,10 +144,10 @@ namespace d3d12hook {
             FrameContext& ctx = gFrameContexts[frameIdx];
 
             // Wait for the GPU to finish with the previous frame
-            if (!gFence || !gFenceEvent) {
+            if (!gOverlayFence || !gFenceEvent) {
                 // Missing synchronization objects, skip waiting
-            } else if (gFence->GetCompletedValue() < gFenceValue) {
-                HRESULT hr = gFence->SetEventOnCompletion(gFenceValue, gFenceEvent);
+            } else if (gOverlayFence->GetCompletedValue() < gOverlayFenceValue) {
+                HRESULT hr = gOverlayFence->SetEventOnCompletion(gOverlayFenceValue, gFenceEvent);
                 if (SUCCEEDED(hr)) {
                     const DWORD waitTimeoutMs = 1000; // 1 second timeout
                     DWORD waitRes = WaitForSingleObject(gFenceEvent, waitTimeoutMs);
@@ -203,8 +210,8 @@ namespace d3d12hook {
             }
             else {
                 oExecuteCommandListsD3D12(gCommandQueue, 1, reinterpret_cast<ID3D12CommandList* const*>(&gCommandList));
-                if (gFence) {
-                    HRESULT hr = gCommandQueue->Signal(gFence, ++gFenceValue);
+                if (gOverlayFence) {
+                    HRESULT hr = oSignalD3D12(gCommandQueue, gOverlayFence, ++gOverlayFenceValue);
                     if (FAILED(hr)) {
                         LogHRESULT("Signal", hr);
                     }
@@ -296,6 +303,13 @@ namespace d3d12hook {
 
             inputhook::Init(desc.OutputWindow);
 
+            if (!gOverlayFence) {
+                if (FAILED(gDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&gOverlayFence)))) {
+                    LogHRESULT("CreateFence", E_FAIL);
+                    return oPresent1D3D12(pSwapChain, SyncInterval, Flags, pParams);
+                }
+            }
+
             if (!gFenceEvent) {
                 gFenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
                 if (!gFenceEvent) {
@@ -319,10 +333,10 @@ namespace d3d12hook {
             FrameContext& ctx = gFrameContexts[frameIdx];
 
             // Wait for the GPU to finish with the previous frame
-            if (!gFence || !gFenceEvent) {
+            if (!gOverlayFence || !gFenceEvent) {
                 // Missing synchronization objects, skip waiting
-            } else if (gFence->GetCompletedValue() < gFenceValue) {
-                HRESULT hr = gFence->SetEventOnCompletion(gFenceValue, gFenceEvent);
+            } else if (gOverlayFence->GetCompletedValue() < gOverlayFenceValue) {
+                HRESULT hr = gOverlayFence->SetEventOnCompletion(gOverlayFenceValue, gFenceEvent);
                 if (SUCCEEDED(hr)) {
                     const DWORD waitTimeoutMs = 1000; // 1 second timeout
                     DWORD waitRes = WaitForSingleObject(gFenceEvent, waitTimeoutMs);
@@ -385,8 +399,8 @@ namespace d3d12hook {
             }
             else {
                 oExecuteCommandListsD3D12(gCommandQueue, 1, reinterpret_cast<ID3D12CommandList* const*>(&gCommandList));
-                if (gFence) {
-                    HRESULT hr = gCommandQueue->Signal(gFence, ++gFenceValue);
+                if (gOverlayFence) {
+                    HRESULT hr = oSignalD3D12(gCommandQueue, gOverlayFence, ++gOverlayFenceValue);
                     if (FAILED(hr)) {
                         LogHRESULT("Signal", hr);
                     }
@@ -413,20 +427,6 @@ namespace d3d12hook {
         ID3D12Fence*        pFence,
         UINT64              Value)
     {
-        if (gCommandQueue && _this == gCommandQueue)
-        {
-            if (pFence && pFence != gFence)
-            {
-                if (gFence)
-                    gFence->Release();
-                gFence = pFence;
-                gFence->AddRef();
-            }
-
-            gFenceValue = Value;
-            DebugLog("[d3d12hook] Captured Fence=%p, Value=%llu\n", pFence, Value);
-        }
-
         return oSignalD3D12(_this, pFence, Value);
     }
 
@@ -510,10 +510,10 @@ namespace d3d12hook {
         for (UINT i = 0; i < gBufferCount; ++i) {
             if (gFrameContexts[i].renderTarget) gFrameContexts[i].renderTarget->Release();
         }
-        if (gFence)
+        if (gOverlayFence)
         {
-            gFence->Release();
-            gFence = nullptr;
+            gOverlayFence->Release();
+            gOverlayFence = nullptr;
         }
 
         if (gFenceEvent)
