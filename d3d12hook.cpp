@@ -1,5 +1,7 @@
 #include "stdafx.h"
 
+namespace hooks { void Remove(); }
+
 namespace d3d12hook {
     PresentD3D12            oPresentD3D12 = nullptr;
     Present1Fn              oPresent1D3D12 = nullptr;
@@ -523,22 +525,8 @@ namespace d3d12hook {
         if (gDevice) gDevice->Release();
         delete[] gFrameContexts;
 
-        // Unhook
-        MH_STATUS mh = MH_DisableHook(MH_ALL_HOOKS);
-        if (mh != MH_OK)
-            DebugLog("[d3d12hook] MH_DisableHook failed: %s\n", MH_StatusToString(mh));
-        else
-            DebugLog("[d3d12hook] Hooks disabled.\n");
-
-        mh = MH_RemoveHook(MH_ALL_HOOKS);
-        if (mh != MH_OK)
-            DebugLog("[d3d12hook] MH_RemoveHook failed: %s\n", MH_StatusToString(mh));
-        else
-            DebugLog("[d3d12hook] Hooks removed.\n");
-
-        // Uninitialize MinHook
-        MH_Uninitialize();
-        DebugLog("[DllMain] MinHook uninitialized.\n");
+        // Disable hooks installed for D3D12
+        hooks::Remove();
     }
 
     bool IsInitialized()

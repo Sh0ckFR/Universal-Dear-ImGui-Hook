@@ -472,9 +472,21 @@ namespace hooks_vk {
         gDevice = VK_NULL_HANDLE;
         gInstance = VK_NULL_HANDLE;
 
-        MH_DisableHook(MH_ALL_HOOKS);
-        MH_RemoveHook(MH_ALL_HOOKS);
-        MH_Uninitialize();
+        if (oQueuePresentKHR) {
+            MH_DisableHook((void*)oQueuePresentKHR);
+            MH_RemoveHook((void*)oQueuePresentKHR);
+            oQueuePresentKHR = nullptr;
+        }
+        if (oCreateInstance) {
+            MH_DisableHook((void*)oCreateInstance);
+            MH_RemoveHook((void*)oCreateInstance);
+            oCreateInstance = nullptr;
+        }
+        if (oCreateDevice) {
+            MH_DisableHook((void*)oCreateDevice);
+            MH_RemoveHook((void*)oCreateDevice);
+            oCreateDevice = nullptr;
+        }
     }
 
     bool IsInitialized()

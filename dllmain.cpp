@@ -237,7 +237,9 @@ static DWORD WINAPI UninjectThread(LPVOID)
         break;
     }
 
-    // Ensure MinHook is uninitialized (release() may already do this)
+    // Disable and remove all hooks, then uninitialize MinHook
+    MH_DisableHook(MH_ALL_HOOKS);
+    MH_RemoveHook(MH_ALL_HOOKS);
     MH_Uninitialize();
 
     DebugLog("[DllMain] Unloading module and exiting thread.\n");
@@ -334,6 +336,9 @@ BOOL WINAPI DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved
         default:
             break;
         }
+        MH_DisableHook(MH_ALL_HOOKS);
+        MH_RemoveHook(MH_ALL_HOOKS);
+        MH_Uninitialize();
         break;
     }
     return TRUE;
