@@ -9,12 +9,12 @@ namespace globals {
     int uninjectKey = VK_F12;
     // Key to open/close the ImGui menu (INSERT by default)
     int openMenuKey = VK_INSERT;
-    // Currently active rendering backend
-    Backend activeBackend = Backend::None;
-    // Preferred backend to hook (None = auto fallback)
+    // Preferred backend to hook (None = auto fallback -> Not recommanded, specify your engine here)
     Backend preferredBackend = Backend::None;
     // Flag controlling runtime debug logging
     bool enableDebugLog = true;
+    // Currently active rendering backend
+    Backend activeBackend = Backend::None; // DO NOT MODIFY THIS LINE.
 }
 
 namespace globals {
