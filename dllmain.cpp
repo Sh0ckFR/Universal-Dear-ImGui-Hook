@@ -8,39 +8,93 @@ static LoadLibraryA_t oLoadLibraryA = nullptr;
 static LoadLibraryW_t oLoadLibraryW = nullptr;
 
 // Helper: check loaded module name and initialize hooks if needed
+static int GetBackendPriority(globals::Backend backend)
+{
+    switch (backend)
+    {
+    case globals::Backend::DX12:   return 5;
+    case globals::Backend::DX11:   return 4;
+    case globals::Backend::DX10:   return 3;
+    case globals::Backend::DX9:    return 2;
+    case globals::Backend::Vulkan: return 1;
+    default:                       return 0;
+    }
+}
+
 static void InitForModule(const char* name)
 {
-    if (!name || globals::activeBackend != globals::Backend::None)
+    if (!name)
         return;
 
     const char* base = strrchr(name, '\\');
     base = base ? base + 1 : name;
 
+    globals::Backend detected = globals::Backend::None;
     if (_stricmp(base, "d3d12.dll") == 0 || _stricmp(base, "dxgi.dll") == 0) {
-        DebugLog("[DllMain] LoadLibrary detected DX12/dxgi module, initializing DX12 hooks.\n");
-        hooks::Init();
-        globals::activeBackend = globals::Backend::DX12;
+        detected = globals::Backend::DX12;
     }
     else if (_stricmp(base, "d3d11.dll") == 0) {
-        DebugLog("[DllMain] LoadLibrary detected d3d11.dll, initializing DX11 hooks.\n");
-        hooks_dx11::Init();
-        globals::activeBackend = globals::Backend::DX11;
+        detected = globals::Backend::DX11;
     }
     else if (_stricmp(base, "d3d10.dll") == 0) {
-        DebugLog("[DllMain] LoadLibrary detected d3d10.dll, initializing DX10 hooks.\n");
-        hooks_dx10::Init();
-        globals::activeBackend = globals::Backend::DX10;
+        detected = globals::Backend::DX10;
     }
     else if (_stricmp(base, "d3d9.dll") == 0) {
-        DebugLog("[DllMain] LoadLibrary detected d3d9.dll, initializing DX9 hooks.\n");
-        d3d9hook::Init();
-        globals::activeBackend = globals::Backend::DX9;
+        detected = globals::Backend::DX9;
     }
     else if (_stricmp(base, "vulkan-1.dll") == 0) {
+        detected = globals::Backend::Vulkan;
+    }
+    else {
+        return;
+    }
+
+    if (GetBackendPriority(detected) <= GetBackendPriority(globals::activeBackend))
+        return;
+
+    switch (globals::activeBackend)
+    {
+    case globals::Backend::DX9:
+        d3d9hook::release();
+        break;
+    case globals::Backend::DX10:
+        hooks_dx10::release();
+        break;
+    case globals::Backend::DX11:
+        hooks_dx11::release();
+        break;
+    case globals::Backend::DX12:
+        d3d12hook::release();
+        break;
+    case globals::Backend::Vulkan:
+        hooks_vk::release();
+        break;
+    default:
+        break;
+    }
+
+    if (detected == globals::Backend::DX12) {
+        DebugLog("[DllMain] LoadLibrary detected DX12/dxgi module, initializing DX12 hooks.\n");
+        hooks::Init();
+    }
+    else if (detected == globals::Backend::DX11) {
+        DebugLog("[DllMain] LoadLibrary detected d3d11.dll, initializing DX11 hooks.\n");
+        hooks_dx11::Init();
+    }
+    else if (detected == globals::Backend::DX10) {
+        DebugLog("[DllMain] LoadLibrary detected d3d10.dll, initializing DX10 hooks.\n");
+        hooks_dx10::Init();
+    }
+    else if (detected == globals::Backend::DX9) {
+        DebugLog("[DllMain] LoadLibrary detected d3d9.dll, initializing DX9 hooks.\n");
+        d3d9hook::Init();
+    }
+    else if (detected == globals::Backend::Vulkan) {
         DebugLog("[DllMain] LoadLibrary detected vulkan-1.dll, initializing Vulkan hooks.\n");
         hooks_vk::Init();
-        globals::activeBackend = globals::Backend::Vulkan;
     }
+
+    globals::activeBackend = detected;
 }
 
 // Hooked LoadLibraryA
