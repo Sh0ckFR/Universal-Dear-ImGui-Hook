@@ -93,12 +93,15 @@ namespace d3d9hook {
 
 namespace hooks_dx10 {
     using PresentFn = HRESULT(__stdcall*)(IDXGISwapChain*, UINT, UINT);
+    using Present1Fn = HRESULT(__stdcall*)(IDXGISwapChain1*, UINT, UINT, const DXGI_PRESENT_PARAMETERS*);
     using ResizeBuffersFn = HRESULT(__stdcall*)(IDXGISwapChain*, UINT, UINT, UINT, DXGI_FORMAT, UINT);
 
     extern PresentFn       oPresentD3D10;
+    extern Present1Fn      oPresent1D3D10;
     extern ResizeBuffersFn oResizeBuffersD3D10;
 
     HRESULT __stdcall hookPresentD3D10(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags);
+    HRESULT __stdcall hookPresent1D3D10(IDXGISwapChain1* pSwapChain, UINT SyncInterval, UINT Flags, const DXGI_PRESENT_PARAMETERS* pPresentParameters);
     HRESULT __stdcall hookResizeBuffersD3D10(
         IDXGISwapChain* pSwapChain,
         UINT BufferCount,
