@@ -5,6 +5,8 @@ An universal Dear ImGui Hook for Directx12 D3D12 (D3D11, D3D10 and maybe Vulkan 
 
 [19/08/2025] The project is actually stable for directx12, I must fix some potential issues and add the others directx engines but you can actually use it, I tested few games and applications without issues but you can debug it with DebugView if you have some problems, I added logs to directly know what is wrong.
 
+Here is the last stable commit: https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook/commit/ca3d843057ff8647f40a94ba46034a7cca8b2084
+
 ## Getting Started
 
 - This project is based on https://github.com/Rebzzel/kiero
@@ -33,6 +35,7 @@ An universal Dear ImGui Hook for Directx12 D3D12 (D3D11, D3D10 and maybe Vulkan 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details
 
 The original licence of the Kiero library can be found here: [LICENSE](https://github.com/Rebzzel/kiero/blob/master/LICENSE)
+
 
 
 
