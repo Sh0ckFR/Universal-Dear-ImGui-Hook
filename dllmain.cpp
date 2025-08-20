@@ -20,7 +20,7 @@ static DWORD WINAPI onAttach(LPVOID lpParameter)
     HMODULE mod = nullptr;
     if ((mod = GetModuleHandleA("d3d9.dll"))) {
         DebugLog("[DllMain] Detected d3d9.dll (%p). Initializing DX9 hooks.\n", mod);
-        hooks_dx9::Init();
+        d3d9hook::Init();
         globals::activeBackend = globals::Backend::DX9;
     }
     else if ((mod = GetModuleHandleA("d3d10.dll"))) {
@@ -75,7 +75,7 @@ BOOL WINAPI DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved
         DebugLog("[DllMain] DLL_PROCESS_DETACH. Releasing hooks and uninitializing MinHook.\n");
         switch (globals::activeBackend) {
         case globals::Backend::DX9:
-            hooks_dx9::release();
+            d3d9hook::release();
             break;
         case globals::Backend::DX10:
             hooks_dx10::release();

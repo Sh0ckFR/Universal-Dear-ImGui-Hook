@@ -73,7 +73,7 @@ namespace d3d12hook {
 }
 
 // Forward declarations for other rendering backends
-namespace hooks_dx9 {
+namespace d3d9hook {
         void Init();
         void release();
 }
