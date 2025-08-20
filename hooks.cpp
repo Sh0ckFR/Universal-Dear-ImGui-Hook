@@ -5,7 +5,8 @@ using Microsoft::WRL::ComPtr;
 namespace hooks {
     // VTable indices derived from the official DirectX interface order.
     // These values are stable across Windows versions and SDKs.
-    constexpr size_t kPresentIndex = 8;            // IDXGISwapChain::Present
+    constexpr size_t kPresentIndex  = 8;            // IDXGISwapChain::Present
+    constexpr size_t kPresent1Index = 22;           // IDXGISwapChain1::Present1
     constexpr size_t kResizeBuffersIndex = 13;     // IDXGISwapChain::ResizeBuffers
     constexpr size_t kExecuteCommandListsIndex = 10; // ID3D12CommandQueue::ExecuteCommandLists
     constexpr size_t kSignalIndex = 14;            // ID3D12CommandQueue::Signal
@@ -122,8 +123,8 @@ namespace hooks {
     void Init() {
         DebugLog("[hooks] Init starting\n");
         DebugLog(
-            "[hooks] VTable indices - Present:%zu ResizeBuffers:%zu ExecuteCmdLists:%zu Signal:%zu\n",
-            kPresentIndex, kResizeBuffersIndex, kExecuteCommandListsIndex, kSignalIndex);
+            "[hooks] VTable indices - Present:%zu Present1:%zu ResizeBuffers:%zu ExecuteCmdLists:%zu Signal:%zu\n",
+            kPresentIndex, kPresent1Index, kResizeBuffersIndex, kExecuteCommandListsIndex, kSignalIndex);
 
         struct CleanupGuard {
             ~CleanupGuard() { CleanupDummyObjects(); }
@@ -145,6 +146,14 @@ namespace hooks {
         );
         if (mh != MH_OK)
             DebugLog("[hooks] MH_CreateHook Present failed: %s\n", MH_StatusToString(mh));
+
+        mh = MH_CreateHook(
+            reinterpret_cast<LPVOID>(scVTable[kPresent1Index]),
+            reinterpret_cast<LPVOID>(d3d12hook::hookPresent1D3D12),
+            reinterpret_cast<LPVOID*>(&d3d12hook::oPresent1D3D12)
+        );
+        if (mh != MH_OK)
+            DebugLog("[hooks] MH_CreateHook Present1 failed: %s\n", MH_StatusToString(mh));
 
         // --- Hook ResizeBuffers ---
         mh = MH_CreateHook(
@@ -180,8 +189,9 @@ namespace hooks {
             DebugLog("[hooks] MH_EnableHook failed: %s\n", MH_StatusToString(mh));
         else
             DebugLog(
-                "[hooks] Hooks enabled. Present@%p (idx=%zu), Resize@%p (idx=%zu), Exec@%p (idx=%zu), Signal@%p (idx=%zu)\n",
+                "[hooks] Hooks enabled. Present@%p (idx=%zu), Present1@%p (idx=%zu), Resize@%p (idx=%zu), Exec@%p (idx=%zu), Signal@%p (idx=%zu)\n",
                 reinterpret_cast<LPVOID>(scVTable[kPresentIndex]), kPresentIndex,
+                reinterpret_cast<LPVOID>(scVTable[kPresent1Index]), kPresent1Index,
                 reinterpret_cast<LPVOID>(scVTable[kResizeBuffersIndex]), kResizeBuffersIndex,
                 reinterpret_cast<LPVOID>(cqVTable[kExecuteCommandListsIndex]), kExecuteCommandListsIndex,
                 reinterpret_cast<LPVOID>(cqVTable[kSignalIndex]), kSignalIndex
