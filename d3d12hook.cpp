@@ -49,6 +49,9 @@ namespace d3d12hook {
         gAfterFirstPresent = true;
         if (!gCommandQueue) {
             DebugLog("[d3d12hook] CommandQueue not yet captured, skipping frame\n");
+            if (!gDevice) {
+                pSwapChain->GetDevice(__uuidof(ID3D12Device), (void**)&gDevice);
+            }
             return oPresentD3D12(pSwapChain, SyncInterval, Flags);
         }
 
@@ -263,6 +266,9 @@ namespace d3d12hook {
         gAfterFirstPresent = true;
         if (!gCommandQueue) {
             DebugLog("[d3d12hook] CommandQueue not yet captured, skipping frame\n");
+            if (!gDevice) {
+                pSwapChain->GetDevice(__uuidof(ID3D12Device), (void**)&gDevice);
+            }
             return oPresent1D3D12(pSwapChain, SyncInterval, Flags, pParams);
         }
 
@@ -468,27 +474,30 @@ namespace d3d12hook {
         UINT                          NumCommandLists,
         ID3D12CommandList* const* ppCommandLists) {
         if (!gCommandQueue && gAfterFirstPresent) {
-            if (gDevice) {
-                ID3D12Device* queueDevice = nullptr;
-                if (SUCCEEDED(_this->GetDevice(__uuidof(ID3D12Device), (void**)&queueDevice))) {
-                    if (queueDevice == gDevice) {
-                        D3D12_COMMAND_QUEUE_DESC desc = _this->GetDesc();
-                        DebugLog("[d3d12hook] CommandQueue type=%u\n", desc.Type);
-                        if (desc.Type == D3D12_COMMAND_LIST_TYPE_DIRECT) {
-                            _this->AddRef();
-                            gCommandQueue = _this;
-                            DebugLog("[d3d12hook] Captured CommandQueue=%p\n", _this);
-                        }
-                        else {
-                            DebugLog("[d3d12hook] Skipping capture: non-direct queue\n");
-                        }
+            ID3D12Device* queueDevice = nullptr;
+            if (SUCCEEDED(_this->GetDevice(__uuidof(ID3D12Device), (void**)&queueDevice))) {
+                if (!gDevice) {
+                    gDevice = queueDevice;
+                }
+
+                if (queueDevice == gDevice) {
+                    D3D12_COMMAND_QUEUE_DESC desc = _this->GetDesc();
+                    DebugLog("[d3d12hook] CommandQueue type=%u\n", desc.Type);
+                    if (desc.Type == D3D12_COMMAND_LIST_TYPE_DIRECT) {
+                        _this->AddRef();
+                        gCommandQueue = _this;
+                        DebugLog("[d3d12hook] Captured CommandQueue=%p\n", _this);
                     }
                     else {
-                        DebugLog("[d3d12hook] Skipping capture: CommandQueue uses different device (%p != %p)\n", queueDevice, gDevice);
+                        DebugLog("[d3d12hook] Skipping capture: non-direct queue\n");
                     }
-                    if (queueDevice)
-                        queueDevice->Release();
                 }
+                else {
+                    DebugLog("[d3d12hook] Skipping capture: CommandQueue uses different device (%p != %p)\n", queueDevice, gDevice);
+                }
+
+                if (queueDevice && queueDevice != gDevice)
+                    queueDevice->Release();
             }
         }
         gAfterFirstPresent = false;
