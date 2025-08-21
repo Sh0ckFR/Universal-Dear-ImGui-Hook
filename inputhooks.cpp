@@ -52,8 +52,18 @@ namespace inputhook {
             ImGuiIO& io = ImGui::GetIO();
             if (io.WantCaptureMouse || io.WantCaptureKeyboard)
             {
-                //DebugLog("[inputhook] Swallow msg=0x%X (WantCapture M=%d K=%d)\n", uMsg, io.WantCaptureMouse, io.WantCaptureKeyboard);
-                return TRUE;
+                switch (uMsg)
+                {
+                case WM_KEYUP:
+                case WM_SYSKEYUP:
+                case WM_LBUTTONUP:
+                case WM_RBUTTONUP:
+                case WM_MBUTTONUP:
+                case WM_XBUTTONUP:
+                    return CallWindowProc(sOriginalWndProc, hwnd, uMsg, wParam, lParam);
+                default:
+                    return TRUE; // on bloque seulement les pressions
+                }
             }
         }
 
