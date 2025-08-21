@@ -44,10 +44,6 @@ namespace d3d12hook {
 		ID3D12CommandQueue * _this, UINT NumCommandLists, ID3D12CommandList* const* ppCommandLists);
         extern ExecuteCommandListsFn oExecuteCommandListsD3D12;
 
-        typedef HRESULT(STDMETHODCALLTYPE* SignalFn)(
-                ID3D12CommandQueue * _this, ID3D12Fence* pFence, UINT64 Value);
-        extern SignalFn oSignalD3D12;
-
         typedef HRESULT(STDMETHODCALLTYPE* ResizeBuffersFn)(
                 IDXGISwapChain3* pSwapChain,
                 UINT BufferCount,
@@ -67,15 +63,10 @@ namespace d3d12hook {
 
         extern long __fastcall hookPresentD3D12(IDXGISwapChain3* pSwapChain, UINT SyncInterval, UINT Flags);
         extern long __fastcall hookPresent1D3D12(IDXGISwapChain3* pSwapChain, UINT SyncInterval, UINT Flags, const DXGI_PRESENT_PARAMETERS* pParams);
-	extern void STDMETHODCALLTYPE hookExecuteCommandListsD3D12(
-		ID3D12CommandQueue* _this,
-		UINT                          NumCommandLists,
-		ID3D12CommandList* const* ppCommandLists);
-
-        extern HRESULT STDMETHODCALLTYPE hookSignalD3D12(
+        extern void STDMETHODCALLTYPE hookExecuteCommandListsD3D12(
                 ID3D12CommandQueue* _this,
-                ID3D12Fence* pFence,
-                UINT64              Value);
+                UINT                          NumCommandLists,
+                ID3D12CommandList* const* ppCommandLists);
 
         extern void release();
         bool IsInitialized();
