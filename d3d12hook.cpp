@@ -26,6 +26,7 @@ namespace d3d12hook {
     static FrameContext* gFrameContexts = nullptr;
     static bool                   gInitialized = false;
     static bool                   gShutdown = false;
+    static bool                   gAfterFirstPresent = false;
 
     // Utility to log HRESULTs
     inline void LogHRESULT(const char* label, HRESULT hr) {
@@ -40,6 +41,12 @@ namespace d3d12hook {
 
         if (GetAsyncKeyState(globals::uninjectKey) & 1) {
             Uninject();
+            return oPresentD3D12(pSwapChain, SyncInterval, Flags);
+        }
+
+        gAfterFirstPresent = true;
+        if (!gCommandQueue) {
+            DebugLog("[d3d12hook] CommandQueue not yet captured, skipping frame\n");
             return oPresentD3D12(pSwapChain, SyncInterval, Flags);
         }
 
@@ -243,6 +250,12 @@ namespace d3d12hook {
             return oPresent1D3D12(pSwapChain, SyncInterval, Flags, pParams);
         }
 
+        gAfterFirstPresent = true;
+        if (!gCommandQueue) {
+            DebugLog("[d3d12hook] CommandQueue not yet captured, skipping frame\n");
+            return oPresent1D3D12(pSwapChain, SyncInterval, Flags, pParams);
+        }
+
         if (!gInitialized) {
             DebugLog("[d3d12hook] Initializing ImGui on first Present1.\n");
             if (FAILED(pSwapChain->GetDevice(__uuidof(ID3D12Device), (void**)&gDevice))) {
@@ -436,7 +449,7 @@ namespace d3d12hook {
         ID3D12CommandQueue* _this,
         UINT                          NumCommandLists,
         ID3D12CommandList* const* ppCommandLists) {
-        if (!gCommandQueue) {
+        if (!gCommandQueue && gAfterFirstPresent) {
             if (gDevice) {
                 ID3D12Device* queueDevice = nullptr;
                 if (SUCCEEDED(_this->GetDevice(__uuidof(ID3D12Device), (void**)&queueDevice))) {
@@ -460,6 +473,7 @@ namespace d3d12hook {
                 }
             }
         }
+        gAfterFirstPresent = false;
         oExecuteCommandListsD3D12(_this, NumCommandLists, ppCommandLists);
     }
 
