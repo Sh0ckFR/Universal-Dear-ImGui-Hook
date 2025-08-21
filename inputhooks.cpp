@@ -46,14 +46,15 @@ namespace inputhook {
 
     LRESULT APIENTRY WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     {
-        ImGuiIO& io = ImGui::GetIO();
-
-        ImGui_ImplWin32_WndProcHandler(hwnd, uMsg, wParam, lParam);
-
-        if (menu::isOpen && (io.WantCaptureMouse || io.WantCaptureKeyboard))
+        if (menu::isOpen)
         {
-            //DebugLog("[inputhook] Swallow msg=0x%X (WantCapture M=%d K=%d)\n", uMsg, io.WantCaptureMouse, io.WantCaptureKeyboard);
-            return TRUE;
+            ImGui_ImplWin32_WndProcHandler(hwnd, uMsg, wParam, lParam);
+            ImGuiIO& io = ImGui::GetIO();
+            if (io.WantCaptureMouse || io.WantCaptureKeyboard)
+            {
+                //DebugLog("[inputhook] Swallow msg=0x%X (WantCapture M=%d K=%d)\n", uMsg, io.WantCaptureMouse, io.WantCaptureKeyboard);
+                return TRUE;
+            }
         }
 
         return CallWindowProc(sOriginalWndProc, hwnd, uMsg, wParam, lParam);

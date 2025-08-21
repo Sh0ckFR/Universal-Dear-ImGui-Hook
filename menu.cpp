@@ -1,7 +1,7 @@
 #include "stdafx.h"
 
 namespace menu {
-    bool isOpen = true;
+    bool isOpen = false;
     float test = 0.0f;
     static bool noTitleBar = false;
 
