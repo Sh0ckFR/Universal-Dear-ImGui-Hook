@@ -28,6 +28,8 @@ namespace d3d12hook {
     static bool                   gShutdown = false;
     static bool                   gAfterFirstPresent = false;
 
+    void release();
+
     // Utility to log HRESULTs
     inline void LogHRESULT(const char* label, HRESULT hr) {
         DebugLog("[d3d12hook] %s: hr=0x%08X\n", label, hr);
@@ -231,6 +233,14 @@ namespace d3d12hook {
                     HRESULT hr = gCommandQueue->Signal(gOverlayFence, ++gOverlayFenceValue);
                     if (FAILED(hr)) {
                         LogHRESULT("Signal", hr);
+                        if (gDevice) {
+                            HRESULT reason = gDevice->GetDeviceRemovedReason();
+                            DebugLog("[d3d12hook] DeviceRemovedReason=0x%08X\n", reason);
+                            if (reason != S_OK) {
+                                DebugLog("[d3d12hook] Device lost. Releasing resources.\n");
+                                release();
+                            }
+                        }
                     }
                 }
             }
@@ -437,6 +447,14 @@ namespace d3d12hook {
                     HRESULT hr = gCommandQueue->Signal(gOverlayFence, ++gOverlayFenceValue);
                     if (FAILED(hr)) {
                         LogHRESULT("Signal", hr);
+                        if (gDevice) {
+                            HRESULT reason = gDevice->GetDeviceRemovedReason();
+                            DebugLog("[d3d12hook] DeviceRemovedReason=0x%08X\n", reason);
+                            if (reason != S_OK) {
+                                DebugLog("[d3d12hook] Device lost. Releasing resources.\n");
+                                release();
+                            }
+                        }
                     }
                 }
             }
