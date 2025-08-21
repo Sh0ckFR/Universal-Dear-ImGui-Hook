@@ -3,17 +3,18 @@ An universal Dear ImGui Hook for Directx12, 11, 10, 9 and Vulkan.
 
 ## Getting Started
 
-- To use it, you need to compile it and inject your dll file in an application process.
 - Do not forget to select your engine in `globals.cpp`: https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook/blob/master/globals.cpp#L13
-- Disable debug logs if you don't need to use them.
+- To use it, you need to compile it and inject your dll file in an application process.
+- Press `INSERT` to display the menu, `F11` to uninject.
 - If you have an error about `libMinHook.x64.lib`, recompile https://github.com/TsudaKageyu/minhook in x64 and replace the old .lib file by your new one.
 - If you have some issues with the `vulkan-1.lib` download the lastest Vulkan SDK and replace the existing file by the new one from the SDK's lib directory `ex: C:\VulkanSDK\YOURVERSION\Lib\vulkan-1.lib`
 
 ![alt text](https://raw.githubusercontent.com/Sh0ckFR/Universal-Dear-ImGui-Hook/master/imgui.png)
 
-## Know bugs
+## If you want to debug it
 
-- There is a bug with some games based on directx12 actually, I will fix it in few days (20/08/2025).
+- You can enable the logs here: https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook/blob/master/globals.cpp#L15
+- Use DebugView to see the different logs during the injection: https://learn.microsoft.com/fr-fr/sysinternals/downloads/debugview
 
 ## Built With
 
@@ -32,6 +33,7 @@ An universal Dear ImGui Hook for Directx12, 11, 10, 9 and Vulkan.
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details
+
 
 
 
