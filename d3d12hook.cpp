@@ -436,12 +436,18 @@ namespace d3d12hook {
     }
 
     void STDMETHODCALLTYPE hookExecuteCommandListsD3D12(
-        ID3D12CommandQueue * _this,
+        ID3D12CommandQueue* _this,
         UINT                          NumCommandLists,
         ID3D12CommandList* const* ppCommandLists) {
         if (!gCommandQueue) {
-            gCommandQueue = _this;
-            DebugLog("[d3d12hook] Captured CommandQueue=%p\n", _this);
+            D3D12_COMMAND_QUEUE_DESC desc = _this->GetDesc();
+            DebugLog("[d3d12hook] CommandQueue type=%u\n", desc.Type);
+            if (desc.Type == D3D12_COMMAND_LIST_TYPE_DIRECT) {
+                gCommandQueue = _this;
+                DebugLog("[d3d12hook] Captured CommandQueue=%p\n", _this);
+            } else {
+                DebugLog("[d3d12hook] Skipping capture: non-direct queue\n");
+            }
         }
         oExecuteCommandListsD3D12(_this, NumCommandLists, ppCommandLists);
     }
