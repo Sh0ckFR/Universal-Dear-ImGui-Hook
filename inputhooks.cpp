@@ -62,7 +62,7 @@ namespace inputhook {
                 case WM_XBUTTONUP:
                     return CallWindowProc(sOriginalWndProc, hwnd, uMsg, wParam, lParam);
                 default:
-                    return TRUE; // on bloque seulement les pressions
+                    return TRUE;
                 }
             }
         }

@@ -1,5 +1,4 @@
 #include "stdafx.h"
-#include <cstring>
 
 namespace mousehooks { void Init(); void Remove(); }
 
