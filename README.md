@@ -5,7 +5,7 @@ An universal Dear ImGui Hook for Directx12, 11, 10, 9 and Vulkan.
 
 - Do not forget to select your engine in `globals.cpp`: https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook/blob/master/globals.cpp#L13
 - To use it, you need to compile it and inject your dll file in an application process.
-- Press `INSERT` to display the menu, `F11` to uninject.
+- Press `INSERT` to display the menu, `F11` to uninject by default, you can configure your own keys in `globals.cpp`
 - If you have an error about `libMinHook.x64.lib`, recompile https://github.com/TsudaKageyu/minhook in x64 and replace the old .lib file by your new one.
 - If you have some issues with the `vulkan-1.lib` download the lastest Vulkan SDK and replace the existing file by the new one from the SDK's lib directory `ex: C:\VulkanSDK\YOURVERSION\Lib\vulkan-1.lib`
 
@@ -33,6 +33,7 @@ An universal Dear ImGui Hook for Directx12, 11, 10, 9 and Vulkan.
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details
+
 
 
 
