@@ -6,7 +6,6 @@ namespace d3d12hook {
     PresentD3D12            oPresentD3D12 = nullptr;
     Present1Fn              oPresent1D3D12 = nullptr;
     ExecuteCommandListsFn   oExecuteCommandListsD3D12 = nullptr;
-    SignalFn                oSignalD3D12 = nullptr;
     ResizeBuffersFn         oResizeBuffersD3D12 = nullptr;
 
     static ID3D12Device* gDevice = nullptr;
@@ -462,19 +461,6 @@ namespace d3d12hook {
             }
         }
         oExecuteCommandListsD3D12(_this, NumCommandLists, ppCommandLists);
-    }
-
-HRESULT STDMETHODCALLTYPE hookSignalD3D12(
-        ID3D12CommandQueue* _this,
-        ID3D12Fence*        pFence,
-        UINT64              Value)
-    {
-        // When we signal using our internal overlay fence, skip any capture logic
-        // by immediately calling the original Signal implementation.
-        if (pFence == gOverlayFence)
-            return oSignalD3D12(_this, pFence, Value);
-
-        return oSignalD3D12(_this, pFence, Value);
     }
 
     HRESULT STDMETHODCALLTYPE hookResizeBuffersD3D12(
