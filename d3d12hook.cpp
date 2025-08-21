@@ -571,6 +571,12 @@ HRESULT STDMETHODCALLTYPE hookSignalD3D12(
             gFenceEvent = nullptr;
         }
 
+        if (gCommandQueue)
+        {
+            gCommandQueue->Release();
+            gCommandQueue = nullptr;
+        }
+
         if (gDevice) gDevice->Release();
         delete[] gFrameContexts;
 
