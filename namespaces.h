@@ -27,9 +27,14 @@ namespace hooks {
 }
 
 namespace inputhook {
-	extern void Init(HWND hWindow);
-	extern void Remove(HWND hWindow);
-	static LRESULT APIENTRY WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+        extern void Init(HWND hWindow);
+        extern void Remove(HWND hWindow);
+        static LRESULT APIENTRY WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+}
+
+namespace mousehooks {
+        void Init();
+        void Remove();
 }
 
 namespace d3d12hook {

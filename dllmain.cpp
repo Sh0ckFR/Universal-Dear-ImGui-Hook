@@ -1,6 +1,8 @@
 #include "stdafx.h"
 #include <cstring>
 
+namespace mousehooks { void Init(); void Remove(); }
+
 // Utility helpers for backend initialization checks
 using IsInitFn = bool (*)();
 
@@ -243,6 +245,8 @@ static DWORD WINAPI UninjectThread(LPVOID)
         break;
     }
 
+    mousehooks::Remove();
+
     // Disable and remove all hooks, then uninitialize MinHook
     MH_DisableHook(MH_ALL_HOOKS);
     MH_RemoveHook(MH_ALL_HOOKS);
@@ -300,6 +304,8 @@ static DWORD WINAPI onAttach(LPVOID lpParameter)
         }
     }
 
+    mousehooks::Init();
+
     DebugLog("[DllMain] Hook initialization completed.\n");
     return 0;
 }
@@ -345,6 +351,7 @@ BOOL WINAPI DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved
         default:
             break;
         }
+        mousehooks::Remove();
         MH_DisableHook(MH_ALL_HOOKS);
         MH_RemoveHook(MH_ALL_HOOKS);
         MH_Uninitialize();

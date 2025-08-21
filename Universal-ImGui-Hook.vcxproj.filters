@@ -63,6 +63,9 @@
     <ClCompile Include="menu.cpp">
       <Filter>Sources Files</Filter>
     </ClCompile>
+    <ClCompile Include="mousehooks.cpp">
+      <Filter>Sources Files</Filter>
+    </ClCompile>
     <ClCompile Include="globals.cpp">
       <Filter>Sources Files</Filter>
     </ClCompile>

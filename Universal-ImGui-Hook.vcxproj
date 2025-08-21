@@ -140,6 +140,7 @@
     <ClCompile Include="imgui\imgui_widgets.cpp" />
     <ClCompile Include="inputhooks.cpp" />
     <ClCompile Include="menu.cpp" />
+    <ClCompile Include="mousehooks.cpp" />
     <ClCompile Include="vulkanhook.cpp" />
   </ItemGroup>
   <ItemGroup>
