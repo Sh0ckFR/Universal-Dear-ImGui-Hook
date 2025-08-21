@@ -573,9 +573,13 @@ namespace d3d12hook {
         }
 
         // Shutdown ImGui before releasing any D3D resources
-        ImGui_ImplDX12_Shutdown();
-        ImGui_ImplWin32_Shutdown();
-        ImGui::DestroyContext();
+        if (gInitialized && ImGui::GetCurrentContext())
+        {
+            ImGui_ImplDX12_Shutdown();
+            ImGui_ImplWin32_Shutdown();
+            ImGui::DestroyContext();
+            gInitialized = false;
+        }
 
         if (gCommandList) gCommandList->Release();
         if (gHeapRTV) gHeapRTV->Release();
