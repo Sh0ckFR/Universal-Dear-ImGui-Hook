@@ -13,7 +13,7 @@ static bool WaitForInitialization(IsInitFn fn, int attempts = 50, int sleepMs = 
             return true;
         Sleep(sleepMs);
     }
-    return fn();
+    return false;
 }
 
 static bool TryInitBackend(globals::Backend backend)
@@ -31,8 +31,7 @@ static bool TryInitBackend(globals::Backend backend)
                 globals::activeBackend = globals::Backend::Vulkan;
                 return true;
             }
-            DebugLog("[DllMain] Vulkan initialization failed, falling back.\n");
-            hooks_vk::release();
+            DebugLog("[DllMain] Vulkan initialization pending, hooks remain active.\n");
         }
         break;
     case globals::Backend::DX12:
