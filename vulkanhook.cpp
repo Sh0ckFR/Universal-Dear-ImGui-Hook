@@ -267,11 +267,14 @@ namespace hooks_vk {
             fpEndRendering   = (PFN_vkCmdEndRenderingKHR)oGetDeviceProcAddr(gDevice, "vkCmdEndRenderingKHR");
         }
 
-        oQueuePresentKHR = (PFN_vkQueuePresentKHR)oGetDeviceProcAddr(gDevice, "vkQueuePresentKHR");
-        if (oQueuePresentKHR)
+        if (oQueuePresentKHR == nullptr)
         {
-            MH_CreateHook((void*)oQueuePresentKHR, (void*)hook_vkQueuePresentKHR, (void**)&oQueuePresentKHR);
-            MH_EnableHook((void*)oQueuePresentKHR);
+            oQueuePresentKHR = (PFN_vkQueuePresentKHR)oGetDeviceProcAddr(gDevice, "vkQueuePresentKHR");
+            if (oQueuePresentKHR)
+            {
+                MH_CreateHook((void*)oQueuePresentKHR, (void*)hook_vkQueuePresentKHR, (void**)&oQueuePresentKHR);
+                MH_EnableHook((void*)oQueuePresentKHR);
+            }
         }
 
         CreateDescriptorPool();
@@ -475,6 +478,7 @@ namespace hooks_vk {
         oCreateDevice         = (PFN_vkCreateDevice)GetProcAddress(mod, "vkCreateDevice");
         oGetDeviceProcAddr    = (PFN_vkGetDeviceProcAddr)GetProcAddress(mod, "vkGetDeviceProcAddr");
         oGetInstanceProcAddr  = (PFN_vkGetInstanceProcAddr)GetProcAddress(mod, "vkGetInstanceProcAddr");
+        oQueuePresentKHR      = (PFN_vkQueuePresentKHR)GetProcAddress(mod, "vkQueuePresentKHR");
         if (oCreateInstance)
         {
             MH_CreateHook((void*)oCreateInstance, (void*)hook_vkCreateInstance, (void**)&oCreateInstance);
@@ -494,6 +498,11 @@ namespace hooks_vk {
         {
             MH_CreateHook((void*)oGetInstanceProcAddr, (void*)hook_vkGetInstanceProcAddr, (void**)&oGetInstanceProcAddr);
             MH_EnableHook((void*)oGetInstanceProcAddr);
+        }
+        if (oQueuePresentKHR)
+        {
+            MH_CreateHook((void*)oQueuePresentKHR, (void*)hook_vkQueuePresentKHR, (void**)&oQueuePresentKHR);
+            MH_EnableHook((void*)oQueuePresentKHR);
         }
         DebugLog("[vulkanhook] Hooks placed for Vulkan procs\n");
     }
