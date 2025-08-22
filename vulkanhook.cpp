@@ -7,6 +7,7 @@ namespace hooks_vk {
     static PFN_vkGetInstanceProcAddr oGetInstanceProcAddr = nullptr;
     static PFN_vkGetDeviceProcAddr   oGetDeviceProcAddr   = nullptr;
     static PFN_vkGetDeviceQueue      oGetDeviceQueue      = nullptr;
+    typedef VkPhysicalDevice(VKAPI_PTR* PFN_vkGetPhysicalDevice)(VkDevice device);
     static PFN_vkCmdBeginRenderingKHR fpBeginRendering = nullptr;
     static PFN_vkCmdEndRenderingKHR   fpEndRendering   = nullptr;
     static bool                      gUseDynamicRendering = false;
@@ -285,6 +286,53 @@ namespace hooks_vk {
 
     VkResult VKAPI_PTR hook_vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* pPresentInfo)
     {
+        if (gDevice == VK_NULL_HANDLE || gQueue == VK_NULL_HANDLE)
+        {
+            void*** dispatch_ptr = reinterpret_cast<void***>(queue);
+            if (dispatch_ptr && *dispatch_ptr)
+            {
+                PFN_vkGetDeviceProcAddr getDeviceProcAddr = reinterpret_cast<PFN_vkGetDeviceProcAddr>((*dispatch_ptr)[0]);
+                if (!oGetDeviceProcAddr)
+                    oGetDeviceProcAddr = getDeviceProcAddr;
+
+                VkDevice device = VK_NULL_HANDLE;
+                void** queue_ptr = reinterpret_cast<void**>(queue);
+                if (queue_ptr)
+                    device = reinterpret_cast<VkDevice>(queue_ptr[1]);
+
+                if (device != VK_NULL_HANDLE)
+                {
+                    gDevice = device;
+                    if (!oGetDeviceQueue)
+                        oGetDeviceQueue = reinterpret_cast<PFN_vkGetDeviceQueue>(oGetDeviceProcAddr(gDevice, "vkGetDeviceQueue"));
+
+                    PFN_vkGetPhysicalDevice getPhysicalDevice =
+                        reinterpret_cast<PFN_vkGetPhysicalDevice>(oGetDeviceProcAddr(gDevice, "vkGetPhysicalDevice"));
+                    if (getPhysicalDevice)
+                        gPhysicalDevice = getPhysicalDevice(gDevice);
+
+                    if (gPhysicalDevice != VK_NULL_HANDLE && oGetDeviceQueue)
+                    {
+                        uint32_t family_count = 0;
+                        vkGetPhysicalDeviceQueueFamilyProperties(gPhysicalDevice, &family_count, nullptr);
+                        for (uint32_t i = 0; i < family_count; ++i)
+                        {
+                            VkQueue q = VK_NULL_HANDLE;
+                            oGetDeviceQueue(gDevice, i, 0, &q);
+                            if (q == queue)
+                            {
+                                gQueueFamily = i;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (gQueue == VK_NULL_HANDLE)
+                gQueue = queue;
+        }
+
         if (gQueue == VK_NULL_HANDLE)
             gQueue = queue;
 
