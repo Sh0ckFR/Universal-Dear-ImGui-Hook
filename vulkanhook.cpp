@@ -1,11 +1,12 @@
 #include "stdafx.h"
 
 namespace hooks_vk {
-    PFN_vkCreateInstance  oCreateInstance  = nullptr;
-    PFN_vkCreateDevice    oCreateDevice    = nullptr;
-    PFN_vkQueuePresentKHR oQueuePresentKHR = nullptr;
-    static PFN_vkGetDeviceProcAddr oGetDeviceProcAddr = nullptr;
-    static PFN_vkGetDeviceQueue oGetDeviceQueue = nullptr;
+    PFN_vkCreateInstance       oCreateInstance       = nullptr;
+    PFN_vkCreateDevice         oCreateDevice         = nullptr;
+    PFN_vkQueuePresentKHR      oQueuePresentKHR      = nullptr;
+    static PFN_vkGetInstanceProcAddr oGetInstanceProcAddr = nullptr;
+    static PFN_vkGetDeviceProcAddr   oGetDeviceProcAddr   = nullptr;
+    static PFN_vkGetDeviceQueue      oGetDeviceQueue      = nullptr;
     static PFN_vkCmdBeginRenderingKHR fpBeginRendering = nullptr;
     static PFN_vkCmdEndRenderingKHR   fpEndRendering   = nullptr;
     static bool                      gUseDynamicRendering = false;
@@ -150,6 +151,50 @@ namespace hooks_vk {
         }
     }
 
+    PFN_vkVoidFunction VKAPI_PTR hook_vkGetDeviceProcAddr(VkDevice device, const char* pName)
+    {
+        PFN_vkVoidFunction func = oGetDeviceProcAddr(device, pName);
+        if (!func)
+            return func;
+
+        if (strcmp(pName, "vkQueuePresentKHR") == 0)
+        {
+            if (oQueuePresentKHR == nullptr)
+            {
+                MH_CreateHook((void*)func, (void*)hook_vkQueuePresentKHR, (void**)&oQueuePresentKHR);
+                MH_EnableHook((void*)func);
+            }
+            if (gDevice == VK_NULL_HANDLE)
+                gDevice = device;
+            if (gQueue == VK_NULL_HANDLE)
+            {
+                PFN_vkGetDeviceQueue getQueue = (PFN_vkGetDeviceQueue)oGetDeviceProcAddr(device, "vkGetDeviceQueue");
+                if (getQueue)
+                    getQueue(device, 0, 0, &gQueue);
+            }
+        }
+        return func;
+    }
+
+    PFN_vkVoidFunction VKAPI_PTR hook_vkGetInstanceProcAddr(VkInstance instance, const char* pName)
+    {
+        PFN_vkVoidFunction func = oGetInstanceProcAddr(instance, pName);
+        if (!func)
+            return func;
+
+        if (gInstance == VK_NULL_HANDLE)
+            gInstance = instance;
+        if (strcmp(pName, "vkQueuePresentKHR") == 0)
+        {
+            if (oQueuePresentKHR == nullptr)
+            {
+                MH_CreateHook((void*)func, (void*)hook_vkQueuePresentKHR, (void**)&oQueuePresentKHR);
+                MH_EnableHook((void*)func);
+            }
+        }
+        return func;
+    }
+
     VkResult VKAPI_PTR hook_vkCreateInstance(const VkInstanceCreateInfo* pCreateInfo,
                                              const VkAllocationCallbacks* pAllocator,
                                              VkInstance* pInstance)
@@ -237,6 +282,9 @@ namespace hooks_vk {
 
     VkResult VKAPI_PTR hook_vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* pPresentInfo)
     {
+        if (gQueue == VK_NULL_HANDLE)
+            gQueue = queue;
+
         if (!gInitialized && pPresentInfo && pPresentInfo->swapchainCount > 0)
         {
             gSwapchain = pPresentInfo->pSwapchains[0];
@@ -291,6 +339,7 @@ namespace hooks_vk {
 #endif
             ImGui_ImplVulkan_Init(&init_info);
             gInitialized = true;
+            globals::activeBackend = globals::Backend::Vulkan;
             DebugLog("[vulkanhook] ImGui initialized.\n");
         }
 
@@ -422,9 +471,10 @@ namespace hooks_vk {
             DebugLog("[vulkanhook] vulkan-1.dll not found\n");
             return;
         }
-        oCreateInstance = (PFN_vkCreateInstance)GetProcAddress(mod, "vkCreateInstance");
-        oCreateDevice = (PFN_vkCreateDevice)GetProcAddress(mod, "vkCreateDevice");
-        oGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)GetProcAddress(mod, "vkGetDeviceProcAddr");
+        oCreateInstance       = (PFN_vkCreateInstance)GetProcAddress(mod, "vkCreateInstance");
+        oCreateDevice         = (PFN_vkCreateDevice)GetProcAddress(mod, "vkCreateDevice");
+        oGetDeviceProcAddr    = (PFN_vkGetDeviceProcAddr)GetProcAddress(mod, "vkGetDeviceProcAddr");
+        oGetInstanceProcAddr  = (PFN_vkGetInstanceProcAddr)GetProcAddress(mod, "vkGetInstanceProcAddr");
         if (oCreateInstance)
         {
             MH_CreateHook((void*)oCreateInstance, (void*)hook_vkCreateInstance, (void**)&oCreateInstance);
@@ -435,7 +485,17 @@ namespace hooks_vk {
             MH_CreateHook((void*)oCreateDevice, (void*)hook_vkCreateDevice, (void**)&oCreateDevice);
             MH_EnableHook((void*)oCreateDevice);
         }
-        DebugLog("[vulkanhook] Hooks placed for vkCreateInstance and vkCreateDevice\n");
+        if (oGetDeviceProcAddr)
+        {
+            MH_CreateHook((void*)oGetDeviceProcAddr, (void*)hook_vkGetDeviceProcAddr, (void**)&oGetDeviceProcAddr);
+            MH_EnableHook((void*)oGetDeviceProcAddr);
+        }
+        if (oGetInstanceProcAddr)
+        {
+            MH_CreateHook((void*)oGetInstanceProcAddr, (void*)hook_vkGetInstanceProcAddr, (void**)&oGetInstanceProcAddr);
+            MH_EnableHook((void*)oGetInstanceProcAddr);
+        }
+        DebugLog("[vulkanhook] Hooks placed for Vulkan procs\n");
     }
 
     void release()
@@ -471,11 +531,24 @@ namespace hooks_vk {
         gRenderPass = VK_NULL_HANDLE;
         gDevice = VK_NULL_HANDLE;
         gInstance = VK_NULL_HANDLE;
+        gPhysicalDevice = VK_NULL_HANDLE;
+        gQueue = VK_NULL_HANDLE;
+        gQueueFamily = 0;
 
         if (oQueuePresentKHR) {
             MH_DisableHook((void*)oQueuePresentKHR);
             MH_RemoveHook((void*)oQueuePresentKHR);
             oQueuePresentKHR = nullptr;
+        }
+        if (oGetDeviceProcAddr) {
+            MH_DisableHook((void*)oGetDeviceProcAddr);
+            MH_RemoveHook((void*)oGetDeviceProcAddr);
+            oGetDeviceProcAddr = nullptr;
+        }
+        if (oGetInstanceProcAddr) {
+            MH_DisableHook((void*)oGetInstanceProcAddr);
+            MH_RemoveHook((void*)oGetInstanceProcAddr);
+            oGetInstanceProcAddr = nullptr;
         }
         if (oCreateInstance) {
             MH_DisableHook((void*)oCreateInstance);
