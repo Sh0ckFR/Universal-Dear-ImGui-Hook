@@ -37,7 +37,7 @@ namespace hooks_vk {
     static uint32_t                  gImageCount = 0;
     static uint32_t                  gFrameIndex = 0;
 
-    static void CreateDescriptorPool()
+    static VkResult CreateDescriptorPool()
     {
         VkDescriptorPoolSize pool_sizes[] = {
             { VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
@@ -58,16 +58,22 @@ namespace hooks_vk {
         pool_info.maxSets = 1000 * IM_ARRAYSIZE(pool_sizes);
         pool_info.poolSizeCount = (uint32_t)IM_ARRAYSIZE(pool_sizes);
         pool_info.pPoolSizes = pool_sizes;
-        vkCreateDescriptorPool(gDevice, &pool_info, nullptr, &gDescriptorPool);
+        VkResult res = vkCreateDescriptorPool(gDevice, &pool_info, nullptr, &gDescriptorPool);
+        if (res != VK_SUCCESS)
+            DebugLog("[vulkanhook] vkCreateDescriptorPool failed: %d\n", res);
+        return res;
     }
 
-    static void CreateCommandPool()
+    static VkResult CreateCommandPool()
     {
         VkCommandPoolCreateInfo info{};
         info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
         info.queueFamilyIndex = gQueueFamily;
-        vkCreateCommandPool(gDevice, &info, nullptr, &gCommandPool);
+        VkResult res = vkCreateCommandPool(gDevice, &info, nullptr, &gCommandPool);
+        if (res != VK_SUCCESS)
+            DebugLog("[vulkanhook] vkCreateCommandPool failed: %d\n", res);
+        return res;
     }
 
     static VkImageAspectFlags GetAspectMask(VkFormat format)
@@ -88,10 +94,10 @@ namespace hooks_vk {
         }
     }
 
-    static void CreateRenderPass()
+    static VkResult CreateRenderPass()
     {
         if (gRenderPass)
-            return;
+            return VK_SUCCESS;
         VkAttachmentDescription attachment{};
         attachment.format = gSwapchainFormat;
         attachment.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -116,7 +122,10 @@ namespace hooks_vk {
         rp_info.subpassCount = 1;
         rp_info.pSubpasses = &subpass;
 
-        vkCreateRenderPass(gDevice, &rp_info, nullptr, &gRenderPass);
+        VkResult res = vkCreateRenderPass(gDevice, &rp_info, nullptr, &gRenderPass);
+        if (res != VK_SUCCESS)
+            DebugLog("[vulkanhook] vkCreateRenderPass failed: %d\n", res);
+        return res;
     }
 
     static void DestroyFrameResources()
@@ -153,7 +162,7 @@ namespace hooks_vk {
         gFrameIndex = 0;
     }
 
-    static void CreateFrameResources(uint32_t count)
+    static VkResult CreateFrameResources(uint32_t count)
     {
         gFrames.resize(count);
         VkCommandBufferAllocateInfo alloc_info{};
@@ -162,15 +171,26 @@ namespace hooks_vk {
         alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         alloc_info.commandBufferCount = count;
         std::vector<VkCommandBuffer> cmds(count);
-        vkAllocateCommandBuffers(gDevice, &alloc_info, cmds.data());
+        VkResult res = vkAllocateCommandBuffers(gDevice, &alloc_info, cmds.data());
+        if (res != VK_SUCCESS)
+        {
+            DebugLog("[vulkanhook] vkAllocateCommandBuffers failed: %d\n", res);
+            return res;
+        }
         for (uint32_t i = 0; i < count; ++i)
         {
             gFrames[i].cmd = cmds[i];
             VkFenceCreateInfo fence_info{};
             fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
             fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-            vkCreateFence(gDevice, &fence_info, nullptr, &gFrames[i].fence);
+            res = vkCreateFence(gDevice, &fence_info, nullptr, &gFrames[i].fence);
+            if (res != VK_SUCCESS)
+            {
+                DebugLog("[vulkanhook] vkCreateFence failed: %d\n", res);
+                return res;
+            }
         }
+        return VK_SUCCESS;
     }
 
     PFN_vkVoidFunction VKAPI_PTR hook_vkGetDeviceProcAddr(VkDevice device, const char* pName)
@@ -243,7 +263,10 @@ namespace hooks_vk {
             gSwapchainFormat = pCreateInfo->imageFormat;
             gSwapchainAspectMask = GetAspectMask(gSwapchainFormat);
         }
-        return oCreateSwapchainKHR(device, pCreateInfo, pAllocator, pSwapchain);
+        VkResult res = oCreateSwapchainKHR(device, pCreateInfo, pAllocator, pSwapchain);
+        if (res != VK_SUCCESS)
+            DebugLog("[vulkanhook] vkCreateSwapchainKHR failed: %d\n", res);
+        return res;
     }
 
     VkResult VKAPI_PTR hook_vkCreateInstance(const VkInstanceCreateInfo* pCreateInfo,
@@ -251,10 +274,12 @@ namespace hooks_vk {
                                              VkInstance* pInstance)
     {
         VkResult res = oCreateInstance(pCreateInfo, pAllocator, pInstance);
-        if (res == VK_SUCCESS)
+        if (res != VK_SUCCESS)
         {
-            gInstance = *pInstance;
+            DebugLog("[vulkanhook] vkCreateInstance failed: %d\n", res);
+            return res;
         }
+        gInstance = *pInstance;
         return res;
     }
 
@@ -289,9 +314,19 @@ namespace hooks_vk {
         if (!has_dynamic)
         {
             uint32_t ext_count = 0;
-            vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &ext_count, nullptr);
+            VkResult res = vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &ext_count, nullptr);
+            if (res != VK_SUCCESS)
+            {
+                DebugLog("[vulkanhook] vkEnumerateDeviceExtensionProperties failed: %d\n", res);
+                return res;
+            }
             std::vector<VkExtensionProperties> props(ext_count);
-            vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &ext_count, props.data());
+            res = vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &ext_count, props.data());
+            if (res != VK_SUCCESS)
+            {
+                DebugLog("[vulkanhook] vkEnumerateDeviceExtensionProperties failed: %d\n", res);
+                return res;
+            }
             for (const auto& e : props)
             {
                 if (strcmp(e.extensionName, "VK_KHR_dynamic_rendering") == 0)
@@ -318,7 +353,10 @@ namespace hooks_vk {
 
         VkResult res = oCreateDevice(physicalDevice, &create_info, pAllocator, pDevice);
         if (res != VK_SUCCESS)
+        {
+            DebugLog("[vulkanhook] vkCreateDevice failed: %d\n", res);
             return res;
+        }
 
         gUseDynamicRendering = has_dynamic;
         gDevice = *pDevice;
@@ -348,8 +386,12 @@ namespace hooks_vk {
             }
         }
 
-        CreateDescriptorPool();
-        CreateCommandPool();
+        res = CreateDescriptorPool();
+        if (res != VK_SUCCESS)
+            return res;
+        res = CreateCommandPool();
+        if (res != VK_SUCCESS)
+            return res;
         DebugLog("[vulkanhook] Device initialized.\n");
         return res;
     }
@@ -409,7 +451,12 @@ namespace hooks_vk {
         if (pPresentInfo && pPresentInfo->swapchainCount > 0 &&
             gSwapchain != VK_NULL_HANDLE && pPresentInfo->pSwapchains[0] != gSwapchain)
         {
-            vkDeviceWaitIdle(gDevice);
+            VkResult res = vkDeviceWaitIdle(gDevice);
+            if (res != VK_SUCCESS)
+            {
+                DebugLog("[vulkanhook] vkDeviceWaitIdle failed: %d\n", res);
+                return res;
+            }
             if (globals::mainWindow)
                 inputhook::Remove(globals::mainWindow);
             if (gInitialized)
@@ -446,14 +493,33 @@ namespace hooks_vk {
 
         if (!gInitialized && pPresentInfo && pPresentInfo->swapchainCount > 0)
         {
+            VkResult res;
             if (gDescriptorPool == VK_NULL_HANDLE)
-                CreateDescriptorPool();
+            {
+                res = CreateDescriptorPool();
+                if (res != VK_SUCCESS)
+                    return res;
+            }
             if (gCommandPool == VK_NULL_HANDLE)
-                CreateCommandPool();
+            {
+                res = CreateCommandPool();
+                if (res != VK_SUCCESS)
+                    return res;
+            }
             gSwapchain = pPresentInfo->pSwapchains[0];
-            vkGetSwapchainImagesKHR(gDevice, gSwapchain, &gImageCount, nullptr);
+            res = vkGetSwapchainImagesKHR(gDevice, gSwapchain, &gImageCount, nullptr);
+            if (res != VK_SUCCESS)
+            {
+                DebugLog("[vulkanhook] vkGetSwapchainImagesKHR failed: %d\n", res);
+                return res;
+            }
             gSwapchainImages.resize(gImageCount);
-            vkGetSwapchainImagesKHR(gDevice, gSwapchain, &gImageCount, gSwapchainImages.data());
+            res = vkGetSwapchainImagesKHR(gDevice, gSwapchain, &gImageCount, gSwapchainImages.data());
+            if (res != VK_SUCCESS)
+            {
+                DebugLog("[vulkanhook] vkGetSwapchainImagesKHR failed: %d\n", res);
+                return res;
+            }
             gImageViews.resize(gImageCount);
             for (uint32_t i = 0; i < gImageCount; ++i)
             {
@@ -465,12 +531,23 @@ namespace hooks_vk {
                 view_info.subresourceRange.aspectMask = gSwapchainAspectMask;
                 view_info.subresourceRange.levelCount = 1;
                 view_info.subresourceRange.layerCount = 1;
-                vkCreateImageView(gDevice, &view_info, nullptr, &gImageViews[i]);
+                res = vkCreateImageView(gDevice, &view_info, nullptr, &gImageViews[i]);
+                if (res != VK_SUCCESS)
+                {
+                    DebugLog("[vulkanhook] vkCreateImageView failed: %d\n", res);
+                    return res;
+                }
             }
             if (!gUseDynamicRendering)
-                CreateRenderPass();
+            {
+                res = CreateRenderPass();
+                if (res != VK_SUCCESS)
+                    return res;
+            }
             DestroyFrameResources();
-            CreateFrameResources(gImageCount);
+            res = CreateFrameResources(gImageCount);
+            if (res != VK_SUCCESS)
+                return res;
 
             ImGui::CreateContext();
             if (globals::mainWindow)
@@ -522,9 +599,24 @@ namespace hooks_vk {
         {
             uint32_t image_index = pPresentInfo->pImageIndices[0];
             FrameData& fr = gFrames[image_index % gFrames.size()];
-            vkWaitForFences(gDevice, 1, &fr.fence, VK_TRUE, UINT64_MAX);
-            vkResetFences(gDevice, 1, &fr.fence);
-            vkResetCommandBuffer(fr.cmd, 0);
+            VkResult res = vkWaitForFences(gDevice, 1, &fr.fence, VK_TRUE, UINT64_MAX);
+            if (res != VK_SUCCESS)
+            {
+                DebugLog("[vulkanhook] vkWaitForFences failed: %d\n", res);
+                return res;
+            }
+            res = vkResetFences(gDevice, 1, &fr.fence);
+            if (res != VK_SUCCESS)
+            {
+                DebugLog("[vulkanhook] vkResetFences failed: %d\n", res);
+                return res;
+            }
+            res = vkResetCommandBuffer(fr.cmd, 0);
+            if (res != VK_SUCCESS)
+            {
+                DebugLog("[vulkanhook] vkResetCommandBuffer failed: %d\n", res);
+                return res;
+            }
 
             ImGui_ImplVulkan_NewFrame();
             if (globals::mainWindow)
@@ -537,7 +629,12 @@ namespace hooks_vk {
 
             VkCommandBufferBeginInfo begin_info{};
             begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-            vkBeginCommandBuffer(fr.cmd, &begin_info);
+            res = vkBeginCommandBuffer(fr.cmd, &begin_info);
+            if (res != VK_SUCCESS)
+            {
+                DebugLog("[vulkanhook] vkBeginCommandBuffer failed: %d\n", res);
+                return res;
+            }
 #ifdef IMGUI_IMPL_VULKAN_HAS_DYNAMIC_RENDERING
             if (gUseDynamicRendering && fpBeginRendering && fpEndRendering)
             {
@@ -598,7 +695,12 @@ namespace hooks_vk {
                     fb_info.width = (uint32_t)ImGui::GetDrawData()->DisplaySize.x;
                     fb_info.height = (uint32_t)ImGui::GetDrawData()->DisplaySize.y;
                     fb_info.layers = 1;
-                    vkCreateFramebuffer(gDevice, &fb_info, nullptr, &gFrames[image_index].fb);
+                    res = vkCreateFramebuffer(gDevice, &fb_info, nullptr, &gFrames[image_index].fb);
+                    if (res != VK_SUCCESS)
+                    {
+                        DebugLog("[vulkanhook] vkCreateFramebuffer failed: %d\n", res);
+                        return res;
+                    }
                 }
 
                 VkRenderPassBeginInfo rp_begin{};
@@ -611,18 +713,31 @@ namespace hooks_vk {
                 ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), fr.cmd);
                 vkCmdEndRenderPass(fr.cmd);
             }
-            vkEndCommandBuffer(fr.cmd);
+            res = vkEndCommandBuffer(fr.cmd);
+            if (res != VK_SUCCESS)
+            {
+                DebugLog("[vulkanhook] vkEndCommandBuffer failed: %d\n", res);
+                return res;
+            }
 
             VkSubmitInfo submit{};
             submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
             submit.commandBufferCount = 1;
             submit.pCommandBuffers = &fr.cmd;
-            vkQueueSubmit(gQueue, 1, &submit, fr.fence);
+            res = vkQueueSubmit(gQueue, 1, &submit, fr.fence);
+            if (res != VK_SUCCESS)
+            {
+                DebugLog("[vulkanhook] vkQueueSubmit failed: %d\n", res);
+                return res;
+            }
 
             gFrameIndex = (gFrameIndex + 1) % gFrames.size();
         }
 
-        return oQueuePresentKHR(queue, pPresentInfo);
+        VkResult pres = oQueuePresentKHR(queue, pPresentInfo);
+        if (pres != VK_SUCCESS)
+            DebugLog("[vulkanhook] vkQueuePresentKHR failed: %d\n", pres);
+        return pres;
     }
 
     void Init()
@@ -690,7 +805,9 @@ namespace hooks_vk {
 
         if (gDevice != VK_NULL_HANDLE)
         {
-            vkDeviceWaitIdle(gDevice);
+            VkResult res = vkDeviceWaitIdle(gDevice);
+            if (res != VK_SUCCESS)
+                DebugLog("[vulkanhook] vkDeviceWaitIdle failed during release: %d\n", res);
             DestroyFrameResources();
             if (gCommandPool) vkDestroyCommandPool(gDevice, gCommandPool, nullptr);
             if (gDescriptorPool) vkDestroyDescriptorPool(gDevice, gDescriptorPool, nullptr);
