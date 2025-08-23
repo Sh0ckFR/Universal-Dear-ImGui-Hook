@@ -54,9 +54,13 @@ namespace hooks_vk {
         // dummy call to ensure the device is valid.
         if (oGetDeviceProcAddr)
         {
-            auto p = (PFN_vkGetDeviceQueue)oGetDeviceProcAddr(dev, "vkGetDeviceQueue");
-            if (p == nullptr)
+            auto stub = oGetDeviceProcAddr(VK_NULL_HANDLE, "vkGetDeviceQueue");
+            PFN_vkGetDeviceQueue p = (PFN_vkGetDeviceQueue)oGetDeviceProcAddr(dev, "vkGetDeviceQueue");
+            if (p == nullptr || p == (PFN_vkGetDeviceQueue)stub)
+            {
+                DebugLog("[vulkanhook] device %p rejected (stub dispatch)\n", dev);
                 return false;
+            }
             __try
             {
                 VkQueue q = VK_NULL_HANDLE;
