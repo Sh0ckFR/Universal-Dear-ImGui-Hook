@@ -533,19 +533,26 @@ namespace hooks_vk {
 
                 if (device != VK_NULL_HANDLE)
                 {
-                    gDevice = device;
-                    if (!oGetDeviceQueue)
-                        oGetDeviceQueue = reinterpret_cast<PFN_vkGetDeviceQueue>(oGetDeviceProcAddr(gDevice, "vkGetDeviceQueue"));
-
-                    auto it = gDeviceMap.find(gDevice);
-                    if (it != gDeviceMap.end())
+                    if (IsPlausibleDevice(device))
                     {
-                        gPhysicalDevice = it->second.physical;
-                        gQueueFamily    = it->second.queueFamily;
-                    }
+                        gDevice = device;
+                        if (!oGetDeviceQueue)
+                            oGetDeviceQueue = reinterpret_cast<PFN_vkGetDeviceQueue>(oGetDeviceProcAddr(gDevice, "vkGetDeviceQueue"));
 
-                    if (gPhysicalDevice != VK_NULL_HANDLE && oGetDeviceQueue)
-                        oGetDeviceQueue(gDevice, gQueueFamily, 0, &gQueue);
+                        auto it = gDeviceMap.find(gDevice);
+                        if (it != gDeviceMap.end())
+                        {
+                            gPhysicalDevice = it->second.physical;
+                            gQueueFamily    = it->second.queueFamily;
+                        }
+
+                        if (gPhysicalDevice != VK_NULL_HANDLE && oGetDeviceQueue)
+                            oGetDeviceQueue(gDevice, gQueueFamily, 0, &gQueue);
+                    }
+                    else
+                    {
+                        DebugLog("[vulkanhook] Non-device handle detected: %p\n", device);
+                    }
                 }
             }
 
@@ -557,6 +564,7 @@ namespace hooks_vk {
             gQueue = queue;
 
         if (pPresentInfo && pPresentInfo->swapchainCount > 0 &&
+            IsPlausibleDevice(gDevice) &&
             gSwapchain == VK_NULL_HANDLE && gSwapchainFormat == VK_FORMAT_B8G8R8A8_UNORM)
         {
             gSwapchain = pPresentInfo->pSwapchains[0];
@@ -586,6 +594,7 @@ namespace hooks_vk {
         }
 
         if (pPresentInfo && pPresentInfo->swapchainCount > 0 &&
+            IsPlausibleDevice(gDevice) &&
             gSwapchain != VK_NULL_HANDLE && pPresentInfo->pSwapchains[0] != gSwapchain)
         {
             VkResult res = vkDeviceWaitIdle(gDevice);
@@ -631,7 +640,7 @@ namespace hooks_vk {
             gImageCount = 0;
         }
 
-        if (!gInitialized && pPresentInfo && pPresentInfo->swapchainCount > 0)
+        if (!gInitialized && pPresentInfo && pPresentInfo->swapchainCount > 0 && IsPlausibleDevice(gDevice))
         {
             VkResult res;
             if (gDescriptorPool == VK_NULL_HANDLE)
