@@ -643,14 +643,19 @@ namespace hooks_vk {
                             continue;
                         bool ok = IsPlausibleDevice(device);
                         DebugLog("[vulkanhook] candidate device[%d] %p %s validation\n", i, device, ok ? "passed" : "failed");
-                        if (ok)
-                        {
-                            found_device = device;
-                            break;
-                        }
+                        if (!ok)
+                            continue;
+                        found_device = device;
+                        break;
                     }
+
                     if (found_device == VK_NULL_HANDLE)
-                        DebugLog("[vulkanhook] all candidate devices failed; initialization deferred\n");
+                    {
+                        if (gQueue == VK_NULL_HANDLE)
+                            gQueue = queue;
+                        DebugLog("[vulkanhook] no valid device found; postponing initialization\n");
+                        return oQueuePresentKHR(queue, pPresentInfo);
+                    }
                 }
 
                 if (found_device != VK_NULL_HANDLE)
