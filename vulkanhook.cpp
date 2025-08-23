@@ -551,38 +551,44 @@ namespace hooks_vk {
                 if (!oGetDeviceProcAddr)
                     oGetDeviceProcAddr = getDeviceProcAddr;
 
-                VkDevice device = VK_NULL_HANDLE;
-                void** queue_ptr = reinterpret_cast<void**>(queue);
+                VkDevice        found_device = VK_NULL_HANDLE;
+                void**          queue_ptr    = reinterpret_cast<void**>(queue);
                 if (queue_ptr)
-                    device = reinterpret_cast<VkDevice>(queue_ptr[1]);
-                DebugLog("[vulkanhook] guessed device %p from queue %p\n", device, queue);
-
-                if (device != VK_NULL_HANDLE)
                 {
-                    bool ok = IsPlausibleDevice(device);
-                    DebugLog("[vulkanhook] device %p %s validation\n", device, ok ? "passed" : "failed");
-                    if (ok)
+                    for (int i = 0; i < 4; ++i)
                     {
-                        gDevice = device;
-                        if (!oGetDeviceQueue)
-                            oGetDeviceQueue = reinterpret_cast<PFN_vkGetDeviceQueue>(oGetDeviceProcAddr(gDevice, "vkGetDeviceQueue"));
-
-                        auto it = gDeviceMap.find(gDevice);
-                        if (it != gDeviceMap.end())
+                        VkDevice device = reinterpret_cast<VkDevice>(queue_ptr[i]);
+                        if (device == VK_NULL_HANDLE)
+                            continue;
+                        bool ok = IsPlausibleDevice(device);
+                        DebugLog("[vulkanhook] candidate device[%d] %p %s validation\n", i, device, ok ? "passed" : "failed");
+                        if (ok)
                         {
-                            gPhysicalDevice = it->second.physical;
-                            gQueueFamily    = it->second.queueFamily;
-                        }
-
-                        if (gPhysicalDevice != VK_NULL_HANDLE && oGetDeviceQueue)
-                        {
-                            oGetDeviceQueue(gDevice, gQueueFamily, 0, &gQueue);
-                            DebugLog("[vulkanhook] oGetDeviceQueue(%p) returned %p\n", device, gQueue);
+                            found_device = device;
+                            break;
                         }
                     }
-                    else
+                    if (found_device == VK_NULL_HANDLE)
+                        DebugLog("[vulkanhook] all candidate devices failed; initialization deferred\n");
+                }
+
+                if (found_device != VK_NULL_HANDLE)
+                {
+                    gDevice = found_device;
+                    if (!oGetDeviceQueue)
+                        oGetDeviceQueue = reinterpret_cast<PFN_vkGetDeviceQueue>(oGetDeviceProcAddr(gDevice, "vkGetDeviceQueue"));
+
+                    auto it = gDeviceMap.find(gDevice);
+                    if (it != gDeviceMap.end())
                     {
-                        DebugLog("[vulkanhook] skipping initialization; device still unresolved\n");
+                        gPhysicalDevice = it->second.physical;
+                        gQueueFamily    = it->second.queueFamily;
+                    }
+
+                    if (gPhysicalDevice != VK_NULL_HANDLE && oGetDeviceQueue)
+                    {
+                        oGetDeviceQueue(gDevice, gQueueFamily, 0, &gQueue);
+                        DebugLog("[vulkanhook] oGetDeviceQueue(%p) returned %p\n", gDevice, gQueue);
                     }
                 }
             }
