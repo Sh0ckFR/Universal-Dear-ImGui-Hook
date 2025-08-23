@@ -543,6 +543,69 @@ namespace hooks_vk {
         return res;
     }
 
+    static bool FallbackScanDispatchTables()
+    {
+        if (!oGetDeviceQueue || !oGetDeviceProcAddr)
+            return false;
+
+        SYSTEM_INFO si{};
+        GetSystemInfo(&si);
+        MEMORY_BASIC_INFORMATION mbi{};
+        uint8_t* addr = (uint8_t*)si.lpMinimumApplicationAddress;
+        while (addr < (uint8_t*)si.lpMaximumApplicationAddress)
+        {
+            if (VirtualQuery(addr, &mbi, sizeof(mbi)) == sizeof(mbi))
+            {
+                bool readable = (mbi.State == MEM_COMMIT) &&
+                                !(mbi.Protect & PAGE_GUARD) &&
+                                (mbi.Protect & (PAGE_READWRITE | PAGE_READONLY |
+                                                PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE |
+                                                PAGE_EXECUTE_READ | PAGE_EXECUTE_WRITECOPY));
+                if (readable)
+                {
+                    uint8_t* start = (uint8_t*)mbi.BaseAddress;
+                    uint8_t* end   = start + mbi.RegionSize;
+                    for (uint8_t* p = start; p < end; p += sizeof(void*))
+                    {
+                        if (*(void**)p == (void*)oGetDeviceProcAddr)
+                        {
+                            VkDevice dev = (VkDevice)p;
+                            if (!IsPlausibleDevice(dev))
+                            {
+                                DebugLog("[vulkanhook] Rejected candidate VkDevice %p during fallback scan\n", dev);
+                                continue;
+                            }
+                            VkQueue q = VK_NULL_HANDLE;
+                            __try { oGetDeviceQueue(dev, 0, 0, &q); }
+                            __except (EXCEPTION_EXECUTE_HANDLER)
+                            {
+                                DebugLog("[vulkanhook] Exception while querying queue for VkDevice %p during fallback scan\n", dev);
+                            }
+                            if (q)
+                            {
+                                gDevice = dev;
+                                gQueue  = q;
+                                HookQueuePresent(gDevice, gQueue);
+                                gDeviceMap[dev] = { VK_NULL_HANDLE, 0 };
+                                return true;
+                            }
+                            else
+                            {
+                                DebugLog("[vulkanhook] No queue returned for VkDevice %p during fallback scan\n", dev);
+                            }
+                        }
+                    }
+                }
+                addr = (uint8_t*)mbi.BaseAddress + mbi.RegionSize;
+            }
+            else
+            {
+                addr += si.dwPageSize;
+            }
+        }
+        return false;
+    }
+
     VkResult VKAPI_PTR hook_vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* pPresentInfo)
     {
         static bool logged = false;
@@ -613,6 +676,22 @@ namespace hooks_vk {
 
         if (gQueue == VK_NULL_HANDLE)
             gQueue = queue;
+
+        static int noDeviceFrames = 0;
+        if (!IsPlausibleDevice(gDevice) || gQueue == VK_NULL_HANDLE)
+        {
+            if (++noDeviceFrames >= 10)
+            {
+                DebugLog("[vulkanhook] attempting fallback dispatch table scan after %d frames\n", noDeviceFrames);
+                bool ok = FallbackScanDispatchTables();
+                DebugLog("[vulkanhook] fallback dispatch table scan %s\n", ok ? "succeeded" : "failed");
+                noDeviceFrames = 0;
+            }
+        }
+        else
+        {
+            noDeviceFrames = 0;
+        }
 
         if (pPresentInfo && pPresentInfo->swapchainCount > 0 &&
             IsPlausibleDevice(gDevice) &&
