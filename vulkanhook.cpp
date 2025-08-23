@@ -530,10 +530,13 @@ namespace hooks_vk {
                 void** queue_ptr = reinterpret_cast<void**>(queue);
                 if (queue_ptr)
                     device = reinterpret_cast<VkDevice>(queue_ptr[1]);
+                DebugLog("[vulkanhook] guessed device %p from queue %p\n", device, queue);
 
                 if (device != VK_NULL_HANDLE)
                 {
-                    if (IsPlausibleDevice(device))
+                    bool ok = IsPlausibleDevice(device);
+                    DebugLog("[vulkanhook] device %p %s validation\n", device, ok ? "passed" : "failed");
+                    if (ok)
                     {
                         gDevice = device;
                         if (!oGetDeviceQueue)
@@ -547,11 +550,14 @@ namespace hooks_vk {
                         }
 
                         if (gPhysicalDevice != VK_NULL_HANDLE && oGetDeviceQueue)
+                        {
                             oGetDeviceQueue(gDevice, gQueueFamily, 0, &gQueue);
+                            DebugLog("[vulkanhook] oGetDeviceQueue(%p) returned %p\n", device, gQueue);
+                        }
                     }
                     else
                     {
-                        DebugLog("[vulkanhook] Non-device handle detected: %p\n", device);
+                        DebugLog("[vulkanhook] skipping initialization; device still unresolved\n");
                     }
                 }
             }
