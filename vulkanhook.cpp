@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include <unordered_map>
+#include <Psapi.h>
 #include <vulkan/vulkan_win32.h>
 
 namespace hooks_vk {
@@ -29,7 +30,13 @@ namespace hooks_vk {
     static VkRenderPass     gRenderPass     = VK_NULL_HANDLE;
     static VkFormat         gSwapchainFormat = VK_FORMAT_B8G8R8A8_UNORM;
     static VkImageAspectFlags gSwapchainAspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    static std::unordered_map<VkDevice, VkPhysicalDevice> gDeviceMap;
+
+    struct DeviceInfo
+    {
+        VkPhysicalDevice physical = VK_NULL_HANDLE;
+        uint32_t        queueFamily = 0;
+    };
+    static std::unordered_map<VkDevice, DeviceInfo> gDeviceMap;
 
     VkResult VKAPI_PTR hook_vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* pPresentInfo);
     void     VKAPI_PTR hook_vkGetDeviceQueue(VkDevice device, uint32_t queueFamilyIndex, uint32_t queueIndex, VkQueue* pQueue);
@@ -328,6 +335,7 @@ namespace hooks_vk {
         {
             gDevice = device;
             gQueueFamily = queueFamilyIndex;
+            gDeviceMap[device].queueFamily = queueFamilyIndex;
             HookQueuePresent(device, *pQueue);
             gQueue = *pQueue;
         }
@@ -457,8 +465,8 @@ namespace hooks_vk {
         gUseDynamicRendering = has_dynamic;
         gDevice = *pDevice;
         gPhysicalDevice = physicalDevice;
-        gDeviceMap[gDevice] = gPhysicalDevice;
         gQueueFamily = pCreateInfo->pQueueCreateInfos[0].queueFamilyIndex;
+        gDeviceMap[gDevice] = { gPhysicalDevice, gQueueFamily };
 
         if (!oGetDeviceProcAddr)
             oGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)GetProcAddress(GetModuleHandleA("vulkan-1.dll"), "vkGetDeviceProcAddr");
@@ -515,23 +523,13 @@ namespace hooks_vk {
 
                     auto it = gDeviceMap.find(gDevice);
                     if (it != gDeviceMap.end())
-                        gPhysicalDevice = it->second;
+                    {
+                        gPhysicalDevice = it->second.physical;
+                        gQueueFamily    = it->second.queueFamily;
+                    }
 
                     if (gPhysicalDevice != VK_NULL_HANDLE && oGetDeviceQueue)
-                    {
-                        uint32_t family_count = 0;
-                        vkGetPhysicalDeviceQueueFamilyProperties(gPhysicalDevice, &family_count, nullptr);
-                        for (uint32_t i = 0; i < family_count; ++i)
-                        {
-                            VkQueue q = VK_NULL_HANDLE;
-                            oGetDeviceQueue(gDevice, i, 0, &q);
-                            if (q == queue)
-                            {
-                                gQueueFamily = i;
-                                break;
-                            }
-                        }
-                    }
+                        oGetDeviceQueue(gDevice, gQueueFamily, 0, &gQueue);
                 }
             }
 
@@ -957,8 +955,80 @@ namespace hooks_vk {
             if (mh != MH_OK)
                 DebugLog("[vulkanhook] MH_EnableHook vkCreateWin32SurfaceKHR failed: %s\n", MH_StatusToString(mh));
         }
-        if (gDevice != VK_NULL_HANDLE && gQueue != VK_NULL_HANDLE)
+        if (oGetDeviceQueue && !gDeviceMap.empty())
+        {
+            for (const auto& kv : gDeviceMap)
+            {
+                VkQueue q = VK_NULL_HANDLE;
+                oGetDeviceQueue(kv.first, kv.second.queueFamily, 0, &q);
+                if (q)
+                    HookQueuePresent(kv.first, q);
+            }
+        }
+        else if (gDevice != VK_NULL_HANDLE && gQueue != VK_NULL_HANDLE)
+        {
             HookQueuePresent(gDevice, gQueue);
+        }
+        else if (oGetDeviceQueue && oGetDeviceProcAddr)
+        {
+            DWORD processes[1024];
+            DWORD bytes = 0;
+            if (EnumProcesses(processes, sizeof(processes), &bytes))
+            {
+                DWORD current = GetCurrentProcessId();
+                for (DWORD i = 0; i < bytes / sizeof(DWORD); ++i)
+                {
+                    if (processes[i] != current)
+                        continue;
+
+                    HMODULE mods[1024];
+                    DWORD   cbMods = 0;
+                    EnumProcessModules(GetCurrentProcess(), mods, sizeof(mods), &cbMods);
+
+                    SYSTEM_INFO si{};
+                    GetSystemInfo(&si);
+                    MEMORY_BASIC_INFORMATION mbi{};
+                    uint8_t* addr = (uint8_t*)si.lpMinimumApplicationAddress;
+                    while (addr < (uint8_t*)si.lpMaximumApplicationAddress)
+                    {
+                        if (VirtualQuery(addr, &mbi, sizeof(mbi)) == sizeof(mbi))
+                        {
+                            bool readable = (mbi.State == MEM_COMMIT) &&
+                                !(mbi.Protect & PAGE_GUARD) &&
+                                (mbi.Protect & (PAGE_READWRITE | PAGE_READONLY |
+                                                PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE |
+                                                PAGE_EXECUTE_READ | PAGE_EXECUTE_WRITECOPY));
+                            if (readable)
+                            {
+                                uint8_t* start = (uint8_t*)mbi.BaseAddress;
+                                uint8_t* end   = start + mbi.RegionSize;
+                                for (uint8_t* p = start; p < end; p += sizeof(void*))
+                                {
+                                    if (*(void**)p == (void*)oGetDeviceProcAddr)
+                                    {
+                                        VkDevice dev = (VkDevice)p;
+                                        VkQueue  q   = VK_NULL_HANDLE;
+                                        oGetDeviceQueue(dev, 0, 0, &q);
+                                        if (q)
+                                        {
+                                            HookQueuePresent(dev, q);
+                                            gDeviceMap[dev] = { VK_NULL_HANDLE, 0 };
+                                            addr = (uint8_t*)si.lpMaximumApplicationAddress;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            addr = (uint8_t*)mbi.BaseAddress + mbi.RegionSize;
+                        }
+                        else
+                        {
+                            addr += si.dwPageSize;
+                        }
+                    }
+                }
+            }
+        }
         DebugLog("[vulkanhook] Hooks placed for Vulkan procs\n");
     }
 
