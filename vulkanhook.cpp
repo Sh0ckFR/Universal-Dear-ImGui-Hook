@@ -88,7 +88,10 @@ namespace hooks_vk {
     static VkResult CreateDescriptorPool()
     {
         if (!IsPlausibleDevice(gDevice))
+        {
+            DebugLog("[vulkanhook] CreateDescriptorPool: invalid device %p\n", gDevice);
             return VK_ERROR_DEVICE_LOST;
+        }
         VkDescriptorPoolSize pool_sizes[] = {
             { VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
             { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
@@ -117,7 +120,10 @@ namespace hooks_vk {
     static VkResult CreateCommandPool()
     {
         if (!IsPlausibleDevice(gDevice))
+        {
+            DebugLog("[vulkanhook] CreateCommandPool: invalid device %p\n", gDevice);
             return VK_ERROR_DEVICE_LOST;
+        }
         VkCommandPoolCreateInfo info{};
         info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -510,12 +516,18 @@ namespace hooks_vk {
 
         HookQueuePresent(gDevice, gQueue);
 
-        res = CreateDescriptorPool();
-        if (res != VK_SUCCESS)
+        VkResult init_res = CreateDescriptorPool();
+        if (init_res != VK_SUCCESS)
+        {
+            DebugLog("[vulkanhook] initialization aborted; gDevice=%p, gQueue=%p, res=%d\n", gDevice, gQueue, init_res);
             return res;
-        res = CreateCommandPool();
-        if (res != VK_SUCCESS)
+        }
+        init_res = CreateCommandPool();
+        if (init_res != VK_SUCCESS)
+        {
+            DebugLog("[vulkanhook] initialization aborted; gDevice=%p, gQueue=%p, res=%d\n", gDevice, gQueue, init_res);
             return res;
+        }
         DebugLog("[vulkanhook] Device initialized.\n");
         return res;
     }
@@ -666,13 +678,19 @@ namespace hooks_vk {
             {
                 res = CreateDescriptorPool();
                 if (res != VK_SUCCESS)
-                    return res;
+                {
+                    DebugLog("[vulkanhook] initialization aborted; gDevice=%p, gQueue=%p, res=%d\n", gDevice, gQueue, res);
+                    return oQueuePresentKHR(queue, pPresentInfo);
+                }
             }
             if (gCommandPool == VK_NULL_HANDLE)
             {
                 res = CreateCommandPool();
                 if (res != VK_SUCCESS)
-                    return res;
+                {
+                    DebugLog("[vulkanhook] initialization aborted; gDevice=%p, gQueue=%p, res=%d\n", gDevice, gQueue, res);
+                    return oQueuePresentKHR(queue, pPresentInfo);
+                }
             }
             gSwapchain = pPresentInfo->pSwapchains[0];
             res = vkGetSwapchainImagesKHR(gDevice, gSwapchain, &gImageCount, nullptr);
