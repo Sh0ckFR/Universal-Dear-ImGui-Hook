@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include <unordered_map>
 
 namespace hooks_vk {
     PFN_vkCreateInstance       oCreateInstance       = nullptr;
@@ -8,7 +9,6 @@ namespace hooks_vk {
     static PFN_vkGetInstanceProcAddr oGetInstanceProcAddr = nullptr;
     static PFN_vkGetDeviceProcAddr   oGetDeviceProcAddr   = nullptr;
     static PFN_vkGetDeviceQueue      oGetDeviceQueue      = nullptr;
-    typedef VkPhysicalDevice(VKAPI_PTR* PFN_vkGetPhysicalDevice)(VkDevice device);
     static PFN_vkCmdBeginRenderingKHR fpBeginRendering = nullptr;
     static PFN_vkCmdEndRenderingKHR   fpEndRendering   = nullptr;
     static bool                      gUseDynamicRendering = false;
@@ -25,6 +25,7 @@ namespace hooks_vk {
     static VkRenderPass     gRenderPass     = VK_NULL_HANDLE;
     static VkFormat         gSwapchainFormat = VK_FORMAT_B8G8R8A8_UNORM;
     static VkImageAspectFlags gSwapchainAspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    static std::unordered_map<VkDevice, VkPhysicalDevice> gDeviceMap;
 
     struct FrameData {
         VkCommandBuffer cmd = VK_NULL_HANDLE;
@@ -361,6 +362,7 @@ namespace hooks_vk {
         gUseDynamicRendering = has_dynamic;
         gDevice = *pDevice;
         gPhysicalDevice = physicalDevice;
+        gDeviceMap[gDevice] = gPhysicalDevice;
         gQueueFamily = pCreateInfo->pQueueCreateInfos[0].queueFamilyIndex;
 
         if (!oGetDeviceProcAddr)
@@ -418,10 +420,9 @@ namespace hooks_vk {
                     if (!oGetDeviceQueue)
                         oGetDeviceQueue = reinterpret_cast<PFN_vkGetDeviceQueue>(oGetDeviceProcAddr(gDevice, "vkGetDeviceQueue"));
 
-                    PFN_vkGetPhysicalDevice getPhysicalDevice =
-                        reinterpret_cast<PFN_vkGetPhysicalDevice>(oGetDeviceProcAddr(gDevice, "vkGetPhysicalDevice"));
-                    if (getPhysicalDevice)
-                        gPhysicalDevice = getPhysicalDevice(gDevice);
+                    auto it = gDeviceMap.find(gDevice);
+                    if (it != gDeviceMap.end())
+                        gPhysicalDevice = it->second;
 
                     if (gPhysicalDevice != VK_NULL_HANDLE && oGetDeviceQueue)
                     {
@@ -826,6 +827,7 @@ namespace hooks_vk {
         gPhysicalDevice = VK_NULL_HANDLE;
         gQueue = VK_NULL_HANDLE;
         gQueueFamily = 0;
+        gDeviceMap.clear();
 
         if (oQueuePresentKHR) {
             MH_DisableHook((void*)oQueuePresentKHR);
