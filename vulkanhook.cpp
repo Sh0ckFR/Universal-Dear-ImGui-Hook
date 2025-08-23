@@ -38,6 +38,18 @@ namespace hooks_vk {
     };
     static std::unordered_map<VkDevice, DeviceInfo> gDeviceMap;
 
+    static bool IsPlausibleDevice(VkDevice dev)
+    {
+        if (dev == VK_NULL_HANDLE)
+            return false;
+        if (!gDeviceMap.empty() && gDeviceMap.find(dev) == gDeviceMap.end())
+            return false;
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (!VirtualQuery((void*)dev, &mbi, sizeof(mbi)))
+            return false;
+        return mbi.State == MEM_COMMIT;
+    }
+
     VkResult VKAPI_PTR hook_vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* pPresentInfo);
     void     VKAPI_PTR hook_vkGetDeviceQueue(VkDevice device, uint32_t queueFamilyIndex, uint32_t queueIndex, VkQueue* pQueue);
     VkResult VKAPI_PTR hook_vkCreateSwapchainKHR(
@@ -1015,14 +1027,30 @@ namespace hooks_vk {
                                     if (*(void**)p == (void*)oGetDeviceProcAddr)
                                     {
                                         VkDevice dev = (VkDevice)p;
+                                        if (!IsPlausibleDevice(dev))
+                                        {
+                                            DebugLog("[vulkanhook] Rejected candidate VkDevice %p during memory scan\n", dev);
+                                            continue;
+                                        }
                                         VkQueue  q   = VK_NULL_HANDLE;
-                                        oGetDeviceQueue(dev, 0, 0, &q);
+                                        __try
+                                        {
+                                            oGetDeviceQueue(dev, 0, 0, &q);
+                                        }
+                                        __except (EXCEPTION_EXECUTE_HANDLER)
+                                        {
+                                            DebugLog("[vulkanhook] Exception while querying queue for VkDevice %p\n", dev);
+                                        }
                                         if (q)
                                         {
                                             HookQueuePresent(dev, q);
                                             gDeviceMap[dev] = { VK_NULL_HANDLE, 0 };
                                             addr = (uint8_t*)si.lpMaximumApplicationAddress;
                                             break;
+                                        }
+                                        else
+                                        {
+                                            DebugLog("[vulkanhook] No queue returned for VkDevice %p during memory scan\n", dev);
                                         }
                                     }
                                 }
