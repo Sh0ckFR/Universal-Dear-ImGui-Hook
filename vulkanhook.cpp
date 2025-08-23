@@ -386,8 +386,50 @@ namespace hooks_vk {
         if (gQueue == VK_NULL_HANDLE)
             gQueue = queue;
 
+        if (pPresentInfo && pPresentInfo->swapchainCount > 0 &&
+            gSwapchain != VK_NULL_HANDLE && pPresentInfo->pSwapchains[0] != gSwapchain)
+        {
+            vkDeviceWaitIdle(gDevice);
+            if (globals::mainWindow)
+                inputhook::Remove(globals::mainWindow);
+            if (gInitialized)
+            {
+                ImGui_ImplVulkan_Shutdown();
+                if (globals::mainWindow)
+                    ImGui_ImplWin32_Shutdown();
+                ImGui::DestroyContext();
+                gInitialized = false;
+            }
+            DestroyFrameResources();
+            if (gCommandPool)
+            {
+                vkDestroyCommandPool(gDevice, gCommandPool, nullptr);
+                gCommandPool = VK_NULL_HANDLE;
+            }
+            if (gDescriptorPool)
+            {
+                vkDestroyDescriptorPool(gDevice, gDescriptorPool, nullptr);
+                gDescriptorPool = VK_NULL_HANDLE;
+            }
+            for (auto view : gImageViews)
+                vkDestroyImageView(gDevice, view, nullptr);
+            gImageViews.clear();
+            gSwapchainImages.clear();
+            if (gRenderPass)
+            {
+                vkDestroyRenderPass(gDevice, gRenderPass, nullptr);
+                gRenderPass = VK_NULL_HANDLE;
+            }
+            gSwapchain = VK_NULL_HANDLE;
+            gImageCount = 0;
+        }
+
         if (!gInitialized && pPresentInfo && pPresentInfo->swapchainCount > 0)
         {
+            if (gDescriptorPool == VK_NULL_HANDLE)
+                CreateDescriptorPool();
+            if (gCommandPool == VK_NULL_HANDLE)
+                CreateCommandPool();
             gSwapchain = pPresentInfo->pSwapchains[0];
             vkGetSwapchainImagesKHR(gDevice, gSwapchain, &gImageCount, nullptr);
             gSwapchainImages.resize(gImageCount);
