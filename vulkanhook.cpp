@@ -273,6 +273,17 @@ namespace hooks_vk {
             }
         }
 
+        bool has_dynamic_feature = false;
+        for (const VkBaseInStructure* p = reinterpret_cast<const VkBaseInStructure*>(pCreateInfo->pNext);
+             p; p = p->pNext)
+        {
+            if (p->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR)
+            {
+                has_dynamic_feature = true;
+                break;
+            }
+        }
+
         std::vector<const char*> extensions;
         VkDeviceCreateInfo create_info = *pCreateInfo;
         if (!has_dynamic)
@@ -294,6 +305,15 @@ namespace hooks_vk {
                     break;
                 }
             }
+        }
+
+        VkPhysicalDeviceDynamicRenderingFeaturesKHR dyn_features{};
+        if (!has_dynamic_feature)
+        {
+            dyn_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR;
+            dyn_features.dynamicRendering = VK_TRUE;
+            dyn_features.pNext = create_info.pNext;
+            create_info.pNext = &dyn_features;
         }
 
         VkResult res = oCreateDevice(physicalDevice, &create_info, pAllocator, pDevice);
