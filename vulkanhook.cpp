@@ -679,8 +679,11 @@ namespace hooks_vk {
 
         if (!gInitialized && pPresentInfo && pPresentInfo->swapchainCount > 0)
         {
-            if (!IsPlausibleDevice(gDevice))
+            if (!IsPlausibleDevice(gDevice) || gQueue == VK_NULL_HANDLE || gPhysicalDevice == VK_NULL_HANDLE)
+            {
+                DebugLog("[vulkanhook] initialization postponed; gDevice=%p, gQueue=%p, gPhysicalDevice=%p\n", gDevice, gQueue, gPhysicalDevice);
                 return oQueuePresentKHR(queue, pPresentInfo);
+            }
             VkResult res;
             if (gDescriptorPool == VK_NULL_HANDLE)
             {
