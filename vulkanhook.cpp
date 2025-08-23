@@ -23,6 +23,7 @@ namespace hooks_vk {
     static VkDescriptorPool gDescriptorPool = VK_NULL_HANDLE;
     static VkCommandPool    gCommandPool    = VK_NULL_HANDLE;
     static VkSwapchainKHR   gSwapchain      = VK_NULL_HANDLE;
+    static VkSurfaceKHR     gSurface        = VK_NULL_HANDLE;
     static bool             gInitialized    = false;
     static bool             gWin32Initialized = false;
     static VkRenderPass     gRenderPass     = VK_NULL_HANDLE;
@@ -332,6 +333,7 @@ namespace hooks_vk {
     {
         if (pCreateInfo)
         {
+            gSurface = pCreateInfo->surface;
             gSwapchainFormat = pCreateInfo->imageFormat;
             gSwapchainAspectMask = GetAspectMask(gSwapchainFormat);
         }
@@ -349,6 +351,8 @@ namespace hooks_vk {
         if (pCreateInfo)
             globals::mainWindow = pCreateInfo->hwnd;
         VkResult res = oCreateWin32SurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
+        if (res == VK_SUCCESS && pSurface)
+            gSurface = *pSurface;
         if (res != VK_SUCCESS)
             DebugLog("[vulkanhook] vkCreateWin32SurfaceKHR failed: %d\n", res);
         return res;
@@ -524,6 +528,35 @@ namespace hooks_vk {
 
         if (gQueue == VK_NULL_HANDLE)
             gQueue = queue;
+
+        if (pPresentInfo && pPresentInfo->swapchainCount > 0 &&
+            gSwapchain == VK_NULL_HANDLE && gSwapchainFormat == VK_FORMAT_B8G8R8A8_UNORM)
+        {
+            gSwapchain = pPresentInfo->pSwapchains[0];
+            if (gPhysicalDevice != VK_NULL_HANDLE && gSurface != VK_NULL_HANDLE)
+            {
+                uint32_t format_count = 0;
+                VkResult res = vkGetPhysicalDeviceSurfaceFormatsKHR(gPhysicalDevice, gSurface, &format_count, nullptr);
+                if (res == VK_SUCCESS && format_count > 0)
+                {
+                    std::vector<VkSurfaceFormatKHR> formats(format_count);
+                    res = vkGetPhysicalDeviceSurfaceFormatsKHR(gPhysicalDevice, gSurface, &format_count, formats.data());
+                    if (res == VK_SUCCESS)
+                    {
+                        gSwapchainFormat = formats[0].format;
+                        gSwapchainAspectMask = GetAspectMask(gSwapchainFormat);
+                        for (auto view : gImageViews)
+                            vkDestroyImageView(gDevice, view, nullptr);
+                        gImageViews.clear();
+                        if (gRenderPass)
+                        {
+                            vkDestroyRenderPass(gDevice, gRenderPass, nullptr);
+                            gRenderPass = VK_NULL_HANDLE;
+                        }
+                    }
+                }
+            }
+        }
 
         if (pPresentInfo && pPresentInfo->swapchainCount > 0 &&
             gSwapchain != VK_NULL_HANDLE && pPresentInfo->pSwapchains[0] != gSwapchain)
