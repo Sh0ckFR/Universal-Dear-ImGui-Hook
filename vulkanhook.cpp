@@ -640,8 +640,10 @@ namespace hooks_vk {
             gImageCount = 0;
         }
 
-        if (!gInitialized && pPresentInfo && pPresentInfo->swapchainCount > 0 && IsPlausibleDevice(gDevice))
+        if (!gInitialized && pPresentInfo && pPresentInfo->swapchainCount > 0)
         {
+            if (!IsPlausibleDevice(gDevice))
+                return oQueuePresentKHR(queue, pPresentInfo);
             VkResult res;
             if (gDescriptorPool == VK_NULL_HANDLE)
             {
