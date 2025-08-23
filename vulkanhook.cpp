@@ -480,6 +480,12 @@ namespace hooks_vk {
 
     VkResult VKAPI_PTR hook_vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* pPresentInfo)
     {
+        static bool logged = false;
+        if (!logged)
+        {
+            DebugLog("[vulkanhook] vkQueuePresentKHR intercepted\\n");
+            logged = true;
+        }
         if (gDevice == VK_NULL_HANDLE || gQueue == VK_NULL_HANDLE)
         {
             void*** dispatch_ptr = reinterpret_cast<void***>(queue);
