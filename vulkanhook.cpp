@@ -354,7 +354,7 @@ namespace hooks_vk {
         {
             dyn_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR;
             dyn_features.dynamicRendering = VK_TRUE;
-            dyn_features.pNext = create_info.pNext;
+            dyn_features.pNext = const_cast<void*>(create_info.pNext);
             create_info.pNext = &dyn_features;
         }
 
