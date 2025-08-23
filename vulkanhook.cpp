@@ -564,7 +564,12 @@ namespace hooks_vk {
                 void**          queue_ptr    = reinterpret_cast<void**>(queue);
                 if (queue_ptr)
                 {
-                    for (int i = 0; i < 4; ++i)
+                    // Search through up to the first 64 bytes (8 pointers on 64-bit
+                    // builds) of the queue object for a plausible VkDevice pointer.
+                    // Adjust MAX_DEVICE_OFFSETS if Vulkan internals change.
+                    constexpr int MAX_DEVICE_OFFSETS = 64 / sizeof(void*);
+                    DebugLog("[vulkanhook] probing %d candidate device offsets\n", MAX_DEVICE_OFFSETS);
+                    for (int i = 0; i < MAX_DEVICE_OFFSETS; ++i)
                     {
                         VkDevice device = reinterpret_cast<VkDevice>(queue_ptr[i]);
                         if (device == VK_NULL_HANDLE)
