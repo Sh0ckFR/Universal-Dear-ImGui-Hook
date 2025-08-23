@@ -885,73 +885,81 @@ namespace hooks_vk {
         MH_STATUS mh;
         if (oCreateInstance)
         {
-            mh = MH_CreateHook((void*)oCreateInstance, (void*)hook_vkCreateInstance, (void**)&oCreateInstance);
+            auto target = oCreateInstance;
+            mh = MH_CreateHook(target, reinterpret_cast<void*>(hook_vkCreateInstance), reinterpret_cast<void**>(&oCreateInstance));
             if (mh != MH_OK)
                 DebugLog("[vulkanhook] MH_CreateHook vkCreateInstance failed: %s\n", MH_StatusToString(mh));
-            mh = MH_EnableHook((void*)oCreateInstance);
+            mh = MH_EnableHook(target);
             if (mh != MH_OK)
                 DebugLog("[vulkanhook] MH_EnableHook vkCreateInstance failed: %s\n", MH_StatusToString(mh));
         }
         if (oCreateDevice)
         {
-            mh = MH_CreateHook((void*)oCreateDevice, (void*)hook_vkCreateDevice, (void**)&oCreateDevice);
+            auto target = oCreateDevice;
+            mh = MH_CreateHook(target, reinterpret_cast<void*>(hook_vkCreateDevice), reinterpret_cast<void**>(&oCreateDevice));
             if (mh != MH_OK)
                 DebugLog("[vulkanhook] MH_CreateHook vkCreateDevice failed: %s\n", MH_StatusToString(mh));
-            mh = MH_EnableHook((void*)oCreateDevice);
+            mh = MH_EnableHook(target);
             if (mh != MH_OK)
                 DebugLog("[vulkanhook] MH_EnableHook vkCreateDevice failed: %s\n", MH_StatusToString(mh));
         }
         if (oGetDeviceProcAddr)
         {
-            mh = MH_CreateHook((void*)oGetDeviceProcAddr, (void*)hook_vkGetDeviceProcAddr, (void**)&oGetDeviceProcAddr);
+            auto target = oGetDeviceProcAddr;
+            mh = MH_CreateHook(target, reinterpret_cast<void*>(hook_vkGetDeviceProcAddr), reinterpret_cast<void**>(&oGetDeviceProcAddr));
             if (mh != MH_OK)
                 DebugLog("[vulkanhook] MH_CreateHook vkGetDeviceProcAddr failed: %s\n", MH_StatusToString(mh));
-            mh = MH_EnableHook((void*)oGetDeviceProcAddr);
+            mh = MH_EnableHook(target);
             if (mh != MH_OK)
                 DebugLog("[vulkanhook] MH_EnableHook vkGetDeviceProcAddr failed: %s\n", MH_StatusToString(mh));
         }
         if (oGetInstanceProcAddr)
         {
-            mh = MH_CreateHook((void*)oGetInstanceProcAddr, (void*)hook_vkGetInstanceProcAddr, (void**)&oGetInstanceProcAddr);
+            auto target = oGetInstanceProcAddr;
+            mh = MH_CreateHook(target, reinterpret_cast<void*>(hook_vkGetInstanceProcAddr), reinterpret_cast<void**>(&oGetInstanceProcAddr));
             if (mh != MH_OK)
                 DebugLog("[vulkanhook] MH_CreateHook vkGetInstanceProcAddr failed: %s\n", MH_StatusToString(mh));
-            mh = MH_EnableHook((void*)oGetInstanceProcAddr);
+            mh = MH_EnableHook(target);
             if (mh != MH_OK)
                 DebugLog("[vulkanhook] MH_EnableHook vkGetInstanceProcAddr failed: %s\n", MH_StatusToString(mh));
         }
         if (oGetDeviceQueue)
         {
-            mh = MH_CreateHook((void*)oGetDeviceQueue, (void*)hook_vkGetDeviceQueue, (void**)&oGetDeviceQueue);
+            auto target = oGetDeviceQueue;
+            mh = MH_CreateHook(target, reinterpret_cast<void*>(hook_vkGetDeviceQueue), reinterpret_cast<void**>(&oGetDeviceQueue));
             if (mh != MH_OK)
                 DebugLog("[vulkanhook] MH_CreateHook vkGetDeviceQueue failed: %s\n", MH_StatusToString(mh));
-            mh = MH_EnableHook((void*)oGetDeviceQueue);
+            mh = MH_EnableHook(target);
             if (mh != MH_OK)
                 DebugLog("[vulkanhook] MH_EnableHook vkGetDeviceQueue failed: %s\n", MH_StatusToString(mh));
         }
         if (oQueuePresentKHR)
         {
-            mh = MH_CreateHook((void*)oQueuePresentKHR, (void*)hook_vkQueuePresentKHR, (void**)&oQueuePresentKHR);
+            auto target = oQueuePresentKHR;
+            mh = MH_CreateHook(target, reinterpret_cast<void*>(hook_vkQueuePresentKHR), reinterpret_cast<void**>(&oQueuePresentKHR));
             if (mh != MH_OK)
                 DebugLog("[vulkanhook] MH_CreateHook vkQueuePresentKHR failed: %s\n", MH_StatusToString(mh));
-            mh = MH_EnableHook((void*)oQueuePresentKHR);
+            mh = MH_EnableHook(target);
             if (mh != MH_OK)
                 DebugLog("[vulkanhook] MH_EnableHook vkQueuePresentKHR failed: %s\n", MH_StatusToString(mh));
         }
         if (oCreateSwapchainKHR)
         {
-            mh = MH_CreateHook((void*)oCreateSwapchainKHR, (void*)hook_vkCreateSwapchainKHR, (void**)&oCreateSwapchainKHR);
+            auto target = oCreateSwapchainKHR;
+            mh = MH_CreateHook(target, reinterpret_cast<void*>(hook_vkCreateSwapchainKHR), reinterpret_cast<void**>(&oCreateSwapchainKHR));
             if (mh != MH_OK)
                 DebugLog("[vulkanhook] MH_CreateHook vkCreateSwapchainKHR failed: %s\n", MH_StatusToString(mh));
-            mh = MH_EnableHook((void*)oCreateSwapchainKHR);
+            mh = MH_EnableHook(target);
             if (mh != MH_OK)
                 DebugLog("[vulkanhook] MH_EnableHook vkCreateSwapchainKHR failed: %s\n", MH_StatusToString(mh));
         }
         if (oCreateWin32SurfaceKHR)
         {
-            mh = MH_CreateHook((void*)oCreateWin32SurfaceKHR, (void*)hook_vkCreateWin32SurfaceKHR, (void**)&oCreateWin32SurfaceKHR);
+            auto target = oCreateWin32SurfaceKHR;
+            mh = MH_CreateHook(target, reinterpret_cast<void*>(hook_vkCreateWin32SurfaceKHR), reinterpret_cast<void**>(&oCreateWin32SurfaceKHR));
             if (mh != MH_OK)
                 DebugLog("[vulkanhook] MH_CreateHook vkCreateWin32SurfaceKHR failed: %s\n", MH_StatusToString(mh));
-            mh = MH_EnableHook((void*)oCreateWin32SurfaceKHR);
+            mh = MH_EnableHook(target);
             if (mh != MH_OK)
                 DebugLog("[vulkanhook] MH_EnableHook vkCreateWin32SurfaceKHR failed: %s\n", MH_StatusToString(mh));
         }
