@@ -4,6 +4,7 @@ namespace hooks_vk {
     PFN_vkCreateInstance       oCreateInstance       = nullptr;
     PFN_vkCreateDevice         oCreateDevice         = nullptr;
     PFN_vkQueuePresentKHR      oQueuePresentKHR      = nullptr;
+    PFN_vkCreateSwapchainKHR   oCreateSwapchainKHR   = nullptr;
     static PFN_vkGetInstanceProcAddr oGetInstanceProcAddr = nullptr;
     static PFN_vkGetDeviceProcAddr   oGetDeviceProcAddr   = nullptr;
     static PFN_vkGetDeviceQueue      oGetDeviceQueue      = nullptr;
@@ -22,6 +23,8 @@ namespace hooks_vk {
     static VkSwapchainKHR   gSwapchain      = VK_NULL_HANDLE;
     static bool             gInitialized    = false;
     static VkRenderPass     gRenderPass     = VK_NULL_HANDLE;
+    static VkFormat         gSwapchainFormat = VK_FORMAT_B8G8R8A8_UNORM;
+    static VkImageAspectFlags gSwapchainAspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
     struct FrameData {
         VkCommandBuffer cmd = VK_NULL_HANDLE;
@@ -67,12 +70,30 @@ namespace hooks_vk {
         vkCreateCommandPool(gDevice, &info, nullptr, &gCommandPool);
     }
 
+    static VkImageAspectFlags GetAspectMask(VkFormat format)
+    {
+        switch (format)
+        {
+        case VK_FORMAT_D16_UNORM:
+        case VK_FORMAT_X8_D24_UNORM_PACK32:
+        case VK_FORMAT_D32_SFLOAT:
+            return VK_IMAGE_ASPECT_DEPTH_BIT;
+        case VK_FORMAT_S8_UINT:
+            return VK_IMAGE_ASPECT_STENCIL_BIT;
+        case VK_FORMAT_D24_UNORM_S8_UINT:
+        case VK_FORMAT_D32_SFLOAT_S8_UINT:
+            return VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+        default:
+            return VK_IMAGE_ASPECT_COLOR_BIT;
+        }
+    }
+
     static void CreateRenderPass()
     {
         if (gRenderPass)
             return;
         VkAttachmentDescription attachment{};
-        attachment.format = VK_FORMAT_B8G8R8A8_UNORM;
+        attachment.format = gSwapchainFormat;
         attachment.samples = VK_SAMPLE_COUNT_1_BIT;
         attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
         attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -174,6 +195,14 @@ namespace hooks_vk {
                     getQueue(device, 0, 0, &gQueue);
             }
         }
+        else if (strcmp(pName, "vkCreateSwapchainKHR") == 0)
+        {
+            if (oCreateSwapchainKHR == nullptr)
+            {
+                MH_CreateHook((void*)func, (void*)hook_vkCreateSwapchainKHR, (void**)&oCreateSwapchainKHR);
+                MH_EnableHook((void*)func);
+            }
+        }
         return func;
     }
 
@@ -193,7 +222,28 @@ namespace hooks_vk {
                 MH_EnableHook((void*)func);
             }
         }
+        else if (strcmp(pName, "vkCreateSwapchainKHR") == 0)
+        {
+            if (oCreateSwapchainKHR == nullptr)
+            {
+                MH_CreateHook((void*)func, (void*)hook_vkCreateSwapchainKHR, (void**)&oCreateSwapchainKHR);
+                MH_EnableHook((void*)func);
+            }
+        }
         return func;
+    }
+
+    VkResult VKAPI_PTR hook_vkCreateSwapchainKHR(VkDevice device,
+                                                 const VkSwapchainCreateInfoKHR* pCreateInfo,
+                                                 const VkAllocationCallbacks* pAllocator,
+                                                 VkSwapchainKHR* pSwapchain)
+    {
+        if (pCreateInfo)
+        {
+            gSwapchainFormat = pCreateInfo->imageFormat;
+            gSwapchainAspectMask = GetAspectMask(gSwapchainFormat);
+        }
+        return oCreateSwapchainKHR(device, pCreateInfo, pAllocator, pSwapchain);
     }
 
     VkResult VKAPI_PTR hook_vkCreateInstance(const VkInstanceCreateInfo* pCreateInfo,
@@ -348,9 +398,9 @@ namespace hooks_vk {
                 VkImageViewCreateInfo view_info{};
                 view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
                 view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-                view_info.format = VK_FORMAT_B8G8R8A8_UNORM;
+                view_info.format = gSwapchainFormat;
                 view_info.image = gSwapchainImages[i];
-                view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                view_info.subresourceRange.aspectMask = gSwapchainAspectMask;
                 view_info.subresourceRange.levelCount = 1;
                 view_info.subresourceRange.layerCount = 1;
                 vkCreateImageView(gDevice, &view_info, nullptr, &gImageViews[i]);
@@ -382,7 +432,7 @@ namespace hooks_vk {
 #ifdef IMGUI_IMPL_VULKAN_HAS_DYNAMIC_RENDERING
             if (gUseDynamicRendering)
             {
-                VkFormat color_format = VK_FORMAT_B8G8R8A8_UNORM;
+                VkFormat color_format = gSwapchainFormat;
                 init_info.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
                 init_info.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
                 init_info.PipelineRenderingCreateInfo.pColorAttachmentFormats = &color_format;
@@ -436,7 +486,7 @@ namespace hooks_vk {
                 barrier.srcAccessMask = 0;
                 barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
                 barrier.image = gSwapchainImages[image_index];
-                barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                barrier.subresourceRange.aspectMask = gSwapchainAspectMask;
                 barrier.subresourceRange.levelCount = 1;
                 barrier.subresourceRange.layerCount = 1;
                 vkCmdPipelineBarrier(fr.cmd,
@@ -527,6 +577,7 @@ namespace hooks_vk {
         oGetDeviceProcAddr    = (PFN_vkGetDeviceProcAddr)GetProcAddress(mod, "vkGetDeviceProcAddr");
         oGetInstanceProcAddr  = (PFN_vkGetInstanceProcAddr)GetProcAddress(mod, "vkGetInstanceProcAddr");
         oQueuePresentKHR      = (PFN_vkQueuePresentKHR)GetProcAddress(mod, "vkQueuePresentKHR");
+        oCreateSwapchainKHR   = (PFN_vkCreateSwapchainKHR)GetProcAddress(mod, "vkCreateSwapchainKHR");
         if (oCreateInstance)
         {
             MH_CreateHook((void*)oCreateInstance, (void*)hook_vkCreateInstance, (void**)&oCreateInstance);
@@ -551,6 +602,11 @@ namespace hooks_vk {
         {
             MH_CreateHook((void*)oQueuePresentKHR, (void*)hook_vkQueuePresentKHR, (void**)&oQueuePresentKHR);
             MH_EnableHook((void*)oQueuePresentKHR);
+        }
+        if (oCreateSwapchainKHR)
+        {
+            MH_CreateHook((void*)oCreateSwapchainKHR, (void*)hook_vkCreateSwapchainKHR, (void**)&oCreateSwapchainKHR);
+            MH_EnableHook((void*)oCreateSwapchainKHR);
         }
         DebugLog("[vulkanhook] Hooks placed for Vulkan procs\n");
     }
@@ -596,6 +652,11 @@ namespace hooks_vk {
             MH_DisableHook((void*)oQueuePresentKHR);
             MH_RemoveHook((void*)oQueuePresentKHR);
             oQueuePresentKHR = nullptr;
+        }
+        if (oCreateSwapchainKHR) {
+            MH_DisableHook((void*)oCreateSwapchainKHR);
+            MH_RemoveHook((void*)oCreateSwapchainKHR);
+            oCreateSwapchainKHR = nullptr;
         }
         if (oGetDeviceProcAddr) {
             MH_DisableHook((void*)oGetDeviceProcAddr);
