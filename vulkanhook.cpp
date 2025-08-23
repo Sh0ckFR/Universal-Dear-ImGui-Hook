@@ -47,7 +47,18 @@ namespace hooks_vk {
         MEMORY_BASIC_INFORMATION mbi{};
         if (!VirtualQuery((void*)dev, &mbi, sizeof(mbi)))
             return false;
-        return mbi.State == MEM_COMMIT;
+        if (mbi.State != MEM_COMMIT)
+            return false;
+        // Some applications provide stale or placeholder device handles that pass the
+        // memory checks above but do not expose core Vulkan entry points. Verify that
+        // vkGetDeviceQueue is reachable to ensure the device is valid.
+        if (oGetDeviceProcAddr)
+        {
+            auto p = oGetDeviceProcAddr(dev, "vkGetDeviceQueue");
+            if (p == nullptr || p == (PFN_vkVoidFunction)VK_NULL_HANDLE)
+                return false;
+        }
+        return true;
     }
 
     VkResult VKAPI_PTR hook_vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* pPresentInfo);
