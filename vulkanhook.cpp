@@ -627,6 +627,12 @@ namespace hooks_vk {
                 if (!oGetDeviceProcAddr)
                     oGetDeviceProcAddr = getDeviceProcAddr;
 
+                if (!oGetDeviceProcAddr)
+                {
+                    DebugLog("[vulkanhook] skipping device scan; GetDeviceProcAddr unresolved\n");
+                    return oQueuePresentKHR(queue, pPresentInfo);
+                }
+
                 VkDevice        found_device = VK_NULL_HANDLE;
                 void**          queue_ptr    = reinterpret_cast<void**>(queue);
                 if (queue_ptr)
