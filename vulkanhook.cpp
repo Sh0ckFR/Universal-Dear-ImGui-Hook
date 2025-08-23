@@ -27,6 +27,12 @@ namespace hooks_vk {
     static VkImageAspectFlags gSwapchainAspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     static std::unordered_map<VkDevice, VkPhysicalDevice> gDeviceMap;
 
+    VkResult VKAPI_PTR hook_vkCreateSwapchainKHR(
+        VkDevice device,
+        const VkSwapchainCreateInfoKHR* pCreateInfo,
+        const VkAllocationCallbacks* pAllocator,
+        VkSwapchainKHR* pSwapchain);
+
     struct FrameData {
         VkCommandBuffer cmd = VK_NULL_HANDLE;
         VkFence         fence = VK_NULL_HANDLE;
