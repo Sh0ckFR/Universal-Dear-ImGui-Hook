@@ -1,11 +1,13 @@
 #include "stdafx.h"
 #include <unordered_map>
+#include <vulkan/vulkan_win32.h>
 
 namespace hooks_vk {
     PFN_vkCreateInstance       oCreateInstance       = nullptr;
     PFN_vkCreateDevice         oCreateDevice         = nullptr;
     PFN_vkQueuePresentKHR      oQueuePresentKHR      = nullptr;
     PFN_vkCreateSwapchainKHR   oCreateSwapchainKHR   = nullptr;
+    PFN_vkCreateWin32SurfaceKHR oCreateWin32SurfaceKHR = nullptr;
     static PFN_vkGetInstanceProcAddr oGetInstanceProcAddr = nullptr;
     static PFN_vkGetDeviceProcAddr   oGetDeviceProcAddr   = nullptr;
     static PFN_vkGetDeviceQueue      oGetDeviceQueue      = nullptr;
@@ -22,6 +24,7 @@ namespace hooks_vk {
     static VkCommandPool    gCommandPool    = VK_NULL_HANDLE;
     static VkSwapchainKHR   gSwapchain      = VK_NULL_HANDLE;
     static bool             gInitialized    = false;
+    static bool             gWin32Initialized = false;
     static VkRenderPass     gRenderPass     = VK_NULL_HANDLE;
     static VkFormat         gSwapchainFormat = VK_FORMAT_B8G8R8A8_UNORM;
     static VkImageAspectFlags gSwapchainAspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -34,6 +37,11 @@ namespace hooks_vk {
         const VkSwapchainCreateInfoKHR* pCreateInfo,
         const VkAllocationCallbacks* pAllocator,
         VkSwapchainKHR* pSwapchain);
+    VkResult VKAPI_PTR hook_vkCreateWin32SurfaceKHR(
+        VkInstance instance,
+        const VkWin32SurfaceCreateInfoKHR* pCreateInfo,
+        const VkAllocationCallbacks* pAllocator,
+        VkSurfaceKHR* pSurface);
 
     struct FrameData {
         VkCommandBuffer cmd = VK_NULL_HANDLE;
@@ -255,6 +263,14 @@ namespace hooks_vk {
                 MH_EnableHook((void*)func);
             }
         }
+        else if (strcmp(pName, "vkCreateWin32SurfaceKHR") == 0)
+        {
+            if (oCreateWin32SurfaceKHR == nullptr)
+            {
+                MH_CreateHook((void*)func, (void*)hook_vkCreateWin32SurfaceKHR, (void**)&oCreateWin32SurfaceKHR);
+                MH_EnableHook((void*)func);
+            }
+        }
         else if (strcmp(pName, "vkGetDeviceQueue") == 0)
         {
             if (oGetDeviceQueue == nullptr)
@@ -322,6 +338,19 @@ namespace hooks_vk {
         VkResult res = oCreateSwapchainKHR(device, pCreateInfo, pAllocator, pSwapchain);
         if (res != VK_SUCCESS)
             DebugLog("[vulkanhook] vkCreateSwapchainKHR failed: %d\n", res);
+        return res;
+    }
+
+    VkResult VKAPI_PTR hook_vkCreateWin32SurfaceKHR(VkInstance instance,
+                                                    const VkWin32SurfaceCreateInfoKHR* pCreateInfo,
+                                                    const VkAllocationCallbacks* pAllocator,
+                                                    VkSurfaceKHR* pSurface)
+    {
+        if (pCreateInfo)
+            globals::mainWindow = pCreateInfo->hwnd;
+        VkResult res = oCreateWin32SurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
+        if (res != VK_SUCCESS)
+            DebugLog("[vulkanhook] vkCreateWin32SurfaceKHR failed: %d\n", res);
         return res;
     }
 
@@ -505,13 +534,16 @@ namespace hooks_vk {
                 DebugLog("[vulkanhook] vkDeviceWaitIdle failed: %d\n", res);
                 return res;
             }
+            HWND hwnd = globals::mainWindow;
             if (globals::mainWindow)
                 inputhook::Remove(globals::mainWindow);
+            globals::mainWindow = hwnd;
+            if (gWin32Initialized)
+                ImGui_ImplWin32_Shutdown();
+            gWin32Initialized = false;
             if (gInitialized)
             {
                 ImGui_ImplVulkan_Shutdown();
-                if (globals::mainWindow)
-                    ImGui_ImplWin32_Shutdown();
                 ImGui::DestroyContext();
                 gInitialized = false;
             }
@@ -598,11 +630,6 @@ namespace hooks_vk {
                 return res;
 
             ImGui::CreateContext();
-            if (globals::mainWindow)
-            {
-                ImGui_ImplWin32_Init(globals::mainWindow);
-                inputhook::Init(globals::mainWindow);
-            }
             ImGui_ImplVulkan_InitInfo init_info{};
             init_info.Instance = gInstance;
             init_info.PhysicalDevice = gPhysicalDevice;
@@ -667,7 +694,7 @@ namespace hooks_vk {
             }
 
             ImGui_ImplVulkan_NewFrame();
-            if (globals::mainWindow)
+            if (gWin32Initialized)
                 ImGui_ImplWin32_NewFrame();
             ImGui::NewFrame();
             if (menu::isOpen)
@@ -783,6 +810,12 @@ namespace hooks_vk {
         }
 
         VkResult pres = oQueuePresentKHR(queue, pPresentInfo);
+        if (pres == VK_SUCCESS && !gWin32Initialized && globals::mainWindow)
+        {
+            inputhook::Init(globals::mainWindow);
+            ImGui_ImplWin32_Init(globals::mainWindow);
+            gWin32Initialized = true;
+        }
         if (pres != VK_SUCCESS)
             DebugLog("[vulkanhook] vkQueuePresentKHR failed: %d\n", pres);
         return pres;
@@ -803,6 +836,7 @@ namespace hooks_vk {
         oGetInstanceProcAddr  = (PFN_vkGetInstanceProcAddr)GetProcAddress(mod, "vkGetInstanceProcAddr");
         oQueuePresentKHR      = (PFN_vkQueuePresentKHR)GetProcAddress(mod, "vkQueuePresentKHR");
         oCreateSwapchainKHR   = (PFN_vkCreateSwapchainKHR)GetProcAddress(mod, "vkCreateSwapchainKHR");
+        oCreateWin32SurfaceKHR = (PFN_vkCreateWin32SurfaceKHR)GetProcAddress(mod, "vkCreateWin32SurfaceKHR");
         oGetDeviceQueue       = (PFN_vkGetDeviceQueue)GetProcAddress(mod, "vkGetDeviceQueue");
         if (oCreateInstance)
         {
@@ -839,6 +873,11 @@ namespace hooks_vk {
             MH_CreateHook((void*)oCreateSwapchainKHR, (void*)hook_vkCreateSwapchainKHR, (void**)&oCreateSwapchainKHR);
             MH_EnableHook((void*)oCreateSwapchainKHR);
         }
+        if (oCreateWin32SurfaceKHR)
+        {
+            MH_CreateHook((void*)oCreateWin32SurfaceKHR, (void*)hook_vkCreateWin32SurfaceKHR, (void**)&oCreateWin32SurfaceKHR);
+            MH_EnableHook((void*)oCreateWin32SurfaceKHR);
+        }
         if (gDevice != VK_NULL_HANDLE && gQueue != VK_NULL_HANDLE)
             HookQueuePresent(gDevice, gQueue);
         DebugLog("[vulkanhook] Hooks placed for Vulkan procs\n");
@@ -849,12 +888,13 @@ namespace hooks_vk {
         DebugLog("[vulkanhook] Releasing resources\n");
         if (globals::mainWindow)
             inputhook::Remove(globals::mainWindow);
+        if (gWin32Initialized)
+            ImGui_ImplWin32_Shutdown();
+        gWin32Initialized = false;
 
         if (gInitialized)
         {
             ImGui_ImplVulkan_Shutdown();
-            if (globals::mainWindow)
-                ImGui_ImplWin32_Shutdown();
             ImGui::DestroyContext();
             gInitialized = false;
         }
@@ -893,6 +933,11 @@ namespace hooks_vk {
             MH_DisableHook((void*)oCreateSwapchainKHR);
             MH_RemoveHook((void*)oCreateSwapchainKHR);
             oCreateSwapchainKHR = nullptr;
+        }
+        if (oCreateWin32SurfaceKHR) {
+            MH_DisableHook((void*)oCreateWin32SurfaceKHR);
+            MH_RemoveHook((void*)oCreateWin32SurfaceKHR);
+            oCreateWin32SurfaceKHR = nullptr;
         }
         if (oGetDeviceProcAddr) {
             MH_DisableHook((void*)oGetDeviceProcAddr);
