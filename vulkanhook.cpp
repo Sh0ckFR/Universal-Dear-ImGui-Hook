@@ -76,6 +76,8 @@ namespace hooks_vk {
 
     static VkResult CreateDescriptorPool()
     {
+        if (!IsPlausibleDevice(gDevice))
+            return VK_ERROR_DEVICE_LOST;
         VkDescriptorPoolSize pool_sizes[] = {
             { VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
             { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
@@ -103,6 +105,8 @@ namespace hooks_vk {
 
     static VkResult CreateCommandPool()
     {
+        if (!IsPlausibleDevice(gDevice))
+            return VK_ERROR_DEVICE_LOST;
         VkCommandPoolCreateInfo info{};
         info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
