@@ -27,6 +27,8 @@ namespace hooks_vk {
     static VkImageAspectFlags gSwapchainAspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     static std::unordered_map<VkDevice, VkPhysicalDevice> gDeviceMap;
 
+    VkResult VKAPI_PTR hook_vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* pPresentInfo);
+    void     VKAPI_PTR hook_vkGetDeviceQueue(VkDevice device, uint32_t queueFamilyIndex, uint32_t queueIndex, VkQueue* pQueue);
     VkResult VKAPI_PTR hook_vkCreateSwapchainKHR(
         VkDevice device,
         const VkSwapchainCreateInfoKHR* pCreateInfo,
@@ -81,6 +83,33 @@ namespace hooks_vk {
         if (res != VK_SUCCESS)
             DebugLog("[vulkanhook] vkCreateCommandPool failed: %d\n", res);
         return res;
+    }
+
+    static void HookQueuePresent(VkDevice device, VkQueue queue)
+    {
+        if (!device || !oGetDeviceProcAddr)
+            return;
+
+        PFN_vkQueuePresentKHR func = (PFN_vkQueuePresentKHR)oGetDeviceProcAddr(device, "vkQueuePresentKHR");
+        if (!func)
+            return;
+
+        if (oQueuePresentKHR && oQueuePresentKHR != func)
+        {
+            MH_DisableHook((void*)oQueuePresentKHR);
+            MH_RemoveHook((void*)oQueuePresentKHR);
+        }
+
+        if (oQueuePresentKHR != func)
+            MH_CreateHook((void*)func, (void*)hook_vkQueuePresentKHR, (void**)&oQueuePresentKHR);
+
+        MH_EnableHook((void*)func);
+        oQueuePresentKHR = func;
+
+        if (gDevice == VK_NULL_HANDLE)
+            gDevice = device;
+        if (queue != VK_NULL_HANDLE && gQueue == VK_NULL_HANDLE)
+            gQueue = queue;
     }
 
     static VkImageAspectFlags GetAspectMask(VkFormat format)
@@ -208,11 +237,6 @@ namespace hooks_vk {
 
         if (strcmp(pName, "vkQueuePresentKHR") == 0)
         {
-            if (oQueuePresentKHR == nullptr)
-            {
-                MH_CreateHook((void*)func, (void*)hook_vkQueuePresentKHR, (void**)&oQueuePresentKHR);
-                MH_EnableHook((void*)func);
-            }
             if (gDevice == VK_NULL_HANDLE)
                 gDevice = device;
             if (gQueue == VK_NULL_HANDLE)
@@ -221,12 +245,21 @@ namespace hooks_vk {
                 if (getQueue)
                     getQueue(device, 0, 0, &gQueue);
             }
+            HookQueuePresent(device, gQueue);
         }
         else if (strcmp(pName, "vkCreateSwapchainKHR") == 0)
         {
             if (oCreateSwapchainKHR == nullptr)
             {
                 MH_CreateHook((void*)func, (void*)hook_vkCreateSwapchainKHR, (void**)&oCreateSwapchainKHR);
+                MH_EnableHook((void*)func);
+            }
+        }
+        else if (strcmp(pName, "vkGetDeviceQueue") == 0)
+        {
+            if (oGetDeviceQueue == nullptr)
+            {
+                MH_CreateHook((void*)func, (void*)hook_vkGetDeviceQueue, (void**)&oGetDeviceQueue);
                 MH_EnableHook((void*)func);
             }
         }
@@ -243,11 +276,7 @@ namespace hooks_vk {
             gInstance = instance;
         if (strcmp(pName, "vkQueuePresentKHR") == 0)
         {
-            if (oQueuePresentKHR == nullptr)
-            {
-                MH_CreateHook((void*)func, (void*)hook_vkQueuePresentKHR, (void**)&oQueuePresentKHR);
-                MH_EnableHook((void*)func);
-            }
+            HookQueuePresent(gDevice, gQueue);
         }
         else if (strcmp(pName, "vkCreateSwapchainKHR") == 0)
         {
@@ -257,7 +286,27 @@ namespace hooks_vk {
                 MH_EnableHook((void*)func);
             }
         }
+        else if (strcmp(pName, "vkGetDeviceQueue") == 0)
+        {
+            if (oGetDeviceQueue == nullptr)
+            {
+                MH_CreateHook((void*)func, (void*)hook_vkGetDeviceQueue, (void**)&oGetDeviceQueue);
+                MH_EnableHook((void*)func);
+            }
+        }
         return func;
+    }
+
+    void VKAPI_PTR hook_vkGetDeviceQueue(VkDevice device, uint32_t queueFamilyIndex, uint32_t queueIndex, VkQueue* pQueue)
+    {
+        oGetDeviceQueue(device, queueFamilyIndex, queueIndex, pQueue);
+        if (pQueue && *pQueue)
+        {
+            gDevice = device;
+            gQueueFamily = queueFamilyIndex;
+            HookQueuePresent(device, *pQueue);
+            gQueue = *pQueue;
+        }
     }
 
     VkResult VKAPI_PTR hook_vkCreateSwapchainKHR(VkDevice device,
@@ -384,15 +433,7 @@ namespace hooks_vk {
             fpEndRendering   = (PFN_vkCmdEndRenderingKHR)oGetDeviceProcAddr(gDevice, "vkCmdEndRenderingKHR");
         }
 
-        if (oQueuePresentKHR == nullptr)
-        {
-            oQueuePresentKHR = (PFN_vkQueuePresentKHR)oGetDeviceProcAddr(gDevice, "vkQueuePresentKHR");
-            if (oQueuePresentKHR)
-            {
-                MH_CreateHook((void*)oQueuePresentKHR, (void*)hook_vkQueuePresentKHR, (void**)&oQueuePresentKHR);
-                MH_EnableHook((void*)oQueuePresentKHR);
-            }
-        }
+        HookQueuePresent(gDevice, gQueue);
 
         res = CreateDescriptorPool();
         if (res != VK_SUCCESS)
@@ -762,6 +803,7 @@ namespace hooks_vk {
         oGetInstanceProcAddr  = (PFN_vkGetInstanceProcAddr)GetProcAddress(mod, "vkGetInstanceProcAddr");
         oQueuePresentKHR      = (PFN_vkQueuePresentKHR)GetProcAddress(mod, "vkQueuePresentKHR");
         oCreateSwapchainKHR   = (PFN_vkCreateSwapchainKHR)GetProcAddress(mod, "vkCreateSwapchainKHR");
+        oGetDeviceQueue       = (PFN_vkGetDeviceQueue)GetProcAddress(mod, "vkGetDeviceQueue");
         if (oCreateInstance)
         {
             MH_CreateHook((void*)oCreateInstance, (void*)hook_vkCreateInstance, (void**)&oCreateInstance);
@@ -782,6 +824,11 @@ namespace hooks_vk {
             MH_CreateHook((void*)oGetInstanceProcAddr, (void*)hook_vkGetInstanceProcAddr, (void**)&oGetInstanceProcAddr);
             MH_EnableHook((void*)oGetInstanceProcAddr);
         }
+        if (oGetDeviceQueue)
+        {
+            MH_CreateHook((void*)oGetDeviceQueue, (void*)hook_vkGetDeviceQueue, (void**)&oGetDeviceQueue);
+            MH_EnableHook((void*)oGetDeviceQueue);
+        }
         if (oQueuePresentKHR)
         {
             MH_CreateHook((void*)oQueuePresentKHR, (void*)hook_vkQueuePresentKHR, (void**)&oQueuePresentKHR);
@@ -792,6 +839,8 @@ namespace hooks_vk {
             MH_CreateHook((void*)oCreateSwapchainKHR, (void*)hook_vkCreateSwapchainKHR, (void**)&oCreateSwapchainKHR);
             MH_EnableHook((void*)oCreateSwapchainKHR);
         }
+        if (gDevice != VK_NULL_HANDLE && gQueue != VK_NULL_HANDLE)
+            HookQueuePresent(gDevice, gQueue);
         DebugLog("[vulkanhook] Hooks placed for Vulkan procs\n");
     }
 
@@ -854,6 +903,11 @@ namespace hooks_vk {
             MH_DisableHook((void*)oGetInstanceProcAddr);
             MH_RemoveHook((void*)oGetInstanceProcAddr);
             oGetInstanceProcAddr = nullptr;
+        }
+        if (oGetDeviceQueue) {
+            MH_DisableHook((void*)oGetDeviceQueue);
+            MH_RemoveHook((void*)oGetDeviceQueue);
+            oGetDeviceQueue = nullptr;
         }
         if (oCreateInstance) {
             MH_DisableHook((void*)oCreateInstance);
