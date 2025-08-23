@@ -51,11 +51,13 @@ namespace hooks_vk {
             return false;
         // Some applications provide stale or placeholder device handles that pass the
         // memory checks above but do not expose core Vulkan entry points. Verify that
-        // vkGetDeviceQueue is reachable to ensure the device is valid.
+        // vkGetDeviceQueue resolves to a real device dispatch rather than the global
+        // stub to ensure the device is valid.
         if (oGetDeviceProcAddr)
         {
-            auto p = oGetDeviceProcAddr(dev, "vkGetDeviceQueue");
-            if (p == nullptr || p == (PFN_vkVoidFunction)VK_NULL_HANDLE)
+            auto stub = oGetDeviceProcAddr(VK_NULL_HANDLE, "vkGetDeviceQueue");
+            auto p    = oGetDeviceProcAddr(dev, "vkGetDeviceQueue");
+            if (p == nullptr || p == stub)
                 return false;
         }
         return true;
