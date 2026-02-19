@@ -1,7 +1,4 @@
 #include "stdafx.h"
-#include <unordered_map>
-#include <Psapi.h>
-#include <vulkan/vulkan_win32.h>
 
 namespace hooks_vk {
     PFN_vkCreateInstance       oCreateInstance       = nullptr;
