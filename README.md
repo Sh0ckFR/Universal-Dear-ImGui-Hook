@@ -152,6 +152,10 @@ ctest --test-dir build/msvc-x64 -C Release
 
 * **primemb** - *Bug fixes* - [primemb](https://github.com/primemb)
 
+## Support
+
+This project is free and MIT-licensed. Building it from scratch represents roughly 33 days of senior C++ work, about €22,000 at French freelance rates. If it saved you time, consider [sponsoring](https://github.com/sponsors/Sh0ckFR) or starring the repository.
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
