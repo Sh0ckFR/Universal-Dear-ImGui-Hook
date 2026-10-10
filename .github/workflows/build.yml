@@ -1,0 +1,54 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  msvc:
+    name: MSVC ${{ matrix.arch }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, Win32]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A ${{ matrix.arch }} -DUIH_BUILD_TESTS=ON
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Smoke test (WARP)
+        run: build\tests\Release\uih_host.exe --api d3d11 --warp
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Universal-ImGui-Hook-msvc-${{ matrix.arch }}
+          path: build/Release/Universal-ImGui-Hook.dll
+
+  mingw:
+    name: MinGW-w64 ${{ matrix.arch }} (Linux cross-compile)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            package: g++-mingw-w64-x86-64
+            preset: mingw-x64
+          - arch: i686
+            package: g++-mingw-w64-i686
+            preset: mingw-x86
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build ${{ matrix.package }}
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }} -DUIH_BUILD_TESTS=ON
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Universal-ImGui-Hook-mingw-${{ matrix.arch }}
+          path: build/${{ matrix.preset }}/Universal-ImGui-Hook.dll

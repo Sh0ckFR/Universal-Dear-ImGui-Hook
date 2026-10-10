@@ -1,0 +1,21 @@
+add_executable(uih_host host.cpp)
+target_link_libraries(uih_host PRIVATE uih d3d9 d3d10 d3d11 d3d12 dxgi)
+target_compile_definitions(uih_host PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+
+function(uih_add_host_test name)
+    add_test(NAME ${name} COMMAND uih_host ${ARGN})
+    set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120)
+endfunction()
+
+uih_add_host_test(d3d9 --api d3d9)
+uih_add_host_test(d3d10 --api d3d10)
+uih_add_host_test(d3d11 --api d3d11)
+uih_add_host_test(d3d11_early --api d3d11 --inject-at 0)
+uih_add_host_test(d3d12 --api d3d12)
+uih_add_host_test(vulkan --api vulkan)
+uih_add_host_test(vulkan_early --api vulkan --inject-at 0)
+
+if(TARGET uih_example)
+    uih_add_host_test(dll_d3d11 --api d3d11 --dll $<TARGET_FILE:uih_example>)
+    uih_add_host_test(dll_vulkan --api vulkan --dll $<TARGET_FILE:uih_example>)
+endif()
