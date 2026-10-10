@@ -19,7 +19,7 @@ The hook detects the API the target uses at runtime: inject the DLL, press `INSE
 
 The build uses CMake 3.21+ and ships every dependency (Dear ImGui, MinHook, Vulkan headers), so nothing else has to be downloaded. The output is `Universal-ImGui-Hook.dll`, a Windows DLL that only depends on system libraries. Build the architecture of the process you want to inject into: a 64-bit game needs the x64 DLL, a 32-bit game needs the x86 one.
 
-Ready-made DLLs for every toolchain are also attached to each run of the [build workflow](../../actions).
+Prebuilt DLLs for every toolchain are attached to each [release](../../releases); the [build workflow](../../actions) also keeps them as artifacts for every commit.
 
 ### Windows with Visual Studio
 
@@ -111,7 +111,7 @@ add_library(my_overlay SHARED dllmain.cpp)
 target_link_libraries(my_overlay PRIVATE uih::uih)
 ```
 
-`uih::uih` exposes `include/uih.h` and Dear ImGui's headers.
+`uih::uih` exposes `include/uih.h` and Dear ImGui's headers. `tests/consumer/` is a complete example of such a project and is built by the CI on every commit.
 
 ## Tests
 

@@ -2,6 +2,8 @@ name: build
 
 on:
   push:
+    branches: ['**']
+    tags: ['v*']
   pull_request:
 
 jobs:
@@ -26,29 +28,72 @@ jobs:
           path: build/Release/Universal-ImGui-Hook.dll
 
   mingw:
-    name: MinGW-w64 ${{ matrix.arch }} (Linux cross-compile)
-    runs-on: ubuntu-latest
+    name: MinGW-w64 ${{ matrix.arch }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - arch: x86_64
-            package: g++-mingw-w64-x86-64
+          - os: ubuntu-latest
+            arch: x86_64
             preset: mingw-x64
-          - arch: i686
-            package: g++-mingw-w64-i686
+            install: sudo apt-get update && sudo apt-get install -y ninja-build g++-mingw-w64-x86-64
+          - os: ubuntu-latest
+            arch: i686
             preset: mingw-x86
+            install: sudo apt-get update && sudo apt-get install -y ninja-build g++-mingw-w64-i686
+          - os: macos-latest
+            arch: x86_64
+            preset: mingw-x64
+            install: brew install ninja mingw-w64
+          - os: macos-latest
+            arch: i686
+            preset: mingw-x86
+            install: brew install ninja mingw-w64
     steps:
       - uses: actions/checkout@v4
       - name: Install toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ninja-build ${{ matrix.package }}
+        run: ${{ matrix.install }}
       - name: Configure
         run: cmake --preset ${{ matrix.preset }} -DUIH_BUILD_TESTS=ON
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }}
       - uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-latest'
         with:
           name: Universal-ImGui-Hook-mingw-${{ matrix.arch }}
           path: build/${{ matrix.preset }}/Universal-ImGui-Hook.dll
+
+  consumer:
+    name: FetchContent consumer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S tests/consumer -B build -A x64 -DUIH_GIT_REPOSITORY=${{ github.server_url }}/${{ github.repository }}.git -DUIH_GIT_TAG=${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Build
+        run: cmake --build build --config Release
+
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [msvc, mingw, consumer]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Name the DLLs after their toolchain
+        run: |
+          mkdir release
+          for dir in artifacts/*/; do
+            name=$(basename "$dir")
+            cp "$dir/Universal-ImGui-Hook.dll" "release/$name.dll"
+          done
+          ls -l release
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.dll
+          generate_release_notes: true
