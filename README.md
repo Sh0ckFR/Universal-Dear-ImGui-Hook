@@ -16,30 +16,71 @@ The hook detects the API the target uses at runtime: inject the DLL, press `INSE
 
 ## Building
 
-The project uses CMake (3.21+) and ships every dependency (Dear ImGui, MinHook, Vulkan headers). The output is a Windows DLL with no runtime dependency besides the system libraries, so it can be injected into any process.
+The build uses CMake 3.21+ and ships every dependency (Dear ImGui, MinHook, Vulkan headers), so nothing else has to be downloaded. The output is `Universal-ImGui-Hook.dll`, a Windows DLL that only depends on system libraries. Build the architecture of the process you want to inject into: a 64-bit game needs the x64 DLL, a 32-bit game needs the x86 one.
 
-### Windows (Visual Studio 2022 or newer)
+Ready-made DLLs for every toolchain are also attached to each run of the [build workflow](../../actions).
+
+### Windows with Visual Studio
+
+Requirements: Visual Studio 2022 or newer with the "Desktop development with C++" workload, which includes CMake and the Windows SDK.
 
 ```sh
-cmake --preset msvc-x64      # or msvc-x86
-cmake --build --preset msvc-x64
+cmake --preset msvc-x64          # or msvc-x86
+cmake --build --preset msvc-x64  # Release build
 ```
 
-The DLL is written to `build/msvc-x64/Release/Universal-ImGui-Hook.dll`. Visual Studio can also open the folder directly ("Open a local folder") and pick the preset.
+The DLL is written to `build/msvc-x64/Release/Universal-ImGui-Hook.dll`. You can also open the folder in Visual Studio ("Open a local folder") and pick the preset in the configuration dropdown. Visual Studio Code with the CMake Tools extension works the same way.
 
-### Linux (cross-compiling with MinGW-w64)
+### Windows with MinGW-w64 (MSYS2)
 
 ```sh
-sudo apt install cmake ninja-build g++-mingw-w64-x86-64   # g++-mingw-w64-i686 for 32-bit
-cmake --preset mingw-x64      # or mingw-x86
+pacman -S mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja   # UCRT64 shell
+cmake --preset mingw-x64
 cmake --build --preset mingw-x64
 ```
 
-The DLL is written to `build/mingw-x64/Universal-ImGui-Hook.dll`. The same presets work with a MinGW-w64 toolchain on Windows. Linux builds target Windows processes, including games running under Wine or Proton.
+Use the MINGW32 shell and the `mingw-w64-i686-*` packages with the `mingw-x86` preset for a 32-bit DLL.
+
+### Linux (cross-compiling)
+
+The DLL is cross-compiled with MinGW-w64. Install the toolchain:
+
+| Distribution | Packages |
+| --- | --- |
+| Debian, Ubuntu | `sudo apt install cmake ninja-build g++-mingw-w64-x86-64 g++-mingw-w64-i686` |
+| Fedora | `sudo dnf install cmake ninja-build mingw64-gcc-c++ mingw32-gcc-c++` |
+| Arch | `sudo pacman -S cmake ninja mingw-w64-gcc` |
+
+Then:
+
+```sh
+cmake --preset mingw-x64          # or mingw-x86
+cmake --build --preset mingw-x64
+```
+
+The DLL is written to `build/mingw-x64/Universal-ImGui-Hook.dll`. The presets use `cmake/mingw-w64-x86_64.cmake` and `cmake/mingw-w64-i686.cmake`, which expect the `x86_64-w64-mingw32-*` and `i686-w64-mingw32-*` compilers in `PATH`; pass `-DCMAKE_TOOLCHAIN_FILE` with your own file if your distribution names them differently.
+
+The resulting DLL targets Windows processes, including games running under Wine or Proton (use a Windows injector inside the same prefix, or `LoadLibrary` from a wrapper DLL).
+
+### macOS (cross-compiling)
+
+```sh
+brew install cmake ninja mingw-w64
+cmake --preset mingw-x64
+cmake --build --preset mingw-x64
+```
+
+### Build options
+
+| Option | Default | Effect |
+| --- | --- | --- |
+| `UIH_BUILD_EXAMPLE` | `ON` when top-level | Builds the injectable example DLL |
+| `UIH_BUILD_TESTS` | `OFF` | Builds the `uih_host` test application |
+| `UIH_STATIC_RUNTIME` | `ON` when top-level | Links the C runtime statically so the DLL has no redistributable dependency |
 
 ## Usage
 
-Edit `example/menu.cpp` to draw your own interface and `example/dllmain.cpp` to change the keys or force a backend:
+Inject `Universal-ImGui-Hook.dll` into the target with any injector (or `LoadLibrary`). Edit `example/menu.cpp` to draw your own interface and `example/dllmain.cpp` to change the keys or force a backend:
 
 ```cpp
 uih::Config config;
@@ -54,6 +95,8 @@ uih::Start(config);
 
 `DrawMenu` runs between `ImGui::NewFrame()` and `ImGui::Render()` on every frame; use `uih::IsMenuOpen()` to decide what to draw. While the menu is open, keyboard and mouse messages are kept away from the target application and the cursor is released.
 
+The hook can be injected before or after the target initializes its graphics API. When injected into a running Vulkan application, the swap chain format is assumed to be `VK_FORMAT_B8G8R8A8_UNORM` until the application recreates its swap chain.
+
 ### Using the hook as a library
 
 The repository is a CMake package that can be consumed with `FetchContent`:
@@ -67,19 +110,19 @@ add_library(my_overlay SHARED dllmain.cpp)
 target_link_libraries(my_overlay PRIVATE uih::uih)
 ```
 
-`uih::uih` exposes `include/uih.h` and Dear ImGui's headers. Set `UIH_STATIC_RUNTIME` to control whether the C runtime is linked statically.
+`uih::uih` exposes `include/uih.h` and Dear ImGui's headers.
 
 ## Tests
 
-`-DUIH_BUILD_TESTS=ON` builds `uih_host`, a small application that renders with one API, starts the hook in-process and checks that the overlay is drawn and torn down:
+`-DUIH_BUILD_TESTS=ON` builds `uih_host`, a small application that renders with one API, starts the hook and checks that the overlay is drawn and torn down:
 
 ```sh
 cmake --preset msvc-x64 -DUIH_BUILD_TESTS=ON
 cmake --build --preset msvc-x64
-build/msvc-x64/tests/Release/uih_host.exe --api vulkan --capture   # d3d9, d3d10, d3d11, d3d12, vulkan
+ctest --test-dir build/msvc-x64 -C Release
 ```
 
-`--inject-at 0` starts the hook before the API is initialized, `--capture` compares the pixels on screen and `--warp` uses the software rasterizer. `ctest` runs every combination.
+`uih_host --api vulkan --capture` runs one backend (`d3d9`, `d3d10`, `d3d11`, `d3d12`, `vulkan`); `--inject-at 0` starts the hook before the API is initialized, `--dll <path>` loads the real DLL and drives it with its hotkeys, `--capture` compares the pixels on screen and `--warp` uses the software rasterizer.
 
 ## Built With
 
