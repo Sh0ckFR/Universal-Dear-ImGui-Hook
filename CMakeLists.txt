@@ -21,6 +21,9 @@ if(UIH_STATIC_RUNTIME)
         add_link_options(-static -static-libgcc -static-libstdc++)
     endif()
 endif()
+if(MINGW)
+    add_link_options($<$<NOT:$<CONFIG:Debug>>:-s>)
+endif()
 
 set(UIH_THIRD_PARTY ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
