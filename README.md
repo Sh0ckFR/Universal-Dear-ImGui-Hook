@@ -18,7 +18,7 @@ The hook detects the API the target uses at runtime: inject the DLL, press `INSE
 
 The project uses CMake (3.21+) and ships every dependency (Dear ImGui, MinHook, Vulkan headers). The output is a Windows DLL with no runtime dependency besides the system libraries, so it can be injected into any process.
 
-### Windows (Visual Studio 2022)
+### Windows (Visual Studio 2022 or newer)
 
 ```sh
 cmake --preset msvc-x64      # or msvc-x86

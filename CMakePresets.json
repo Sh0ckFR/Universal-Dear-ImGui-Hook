@@ -4,16 +4,14 @@
   "configurePresets": [
     {
       "name": "msvc-x64",
-      "displayName": "Visual Studio 2022 x64",
-      "generator": "Visual Studio 17 2022",
+      "displayName": "Visual Studio x64",
       "architecture": "x64",
       "binaryDir": "${sourceDir}/build/msvc-x64",
       "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
     },
     {
       "name": "msvc-x86",
-      "displayName": "Visual Studio 2022 x86",
-      "generator": "Visual Studio 17 2022",
+      "displayName": "Visual Studio x86",
       "architecture": "Win32",
       "binaryDir": "${sourceDir}/build/msvc-x86",
       "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }

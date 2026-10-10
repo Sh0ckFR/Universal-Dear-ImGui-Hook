@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Configure
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A ${{ matrix.arch }} -DUIH_BUILD_TESTS=ON
+        run: cmake -S . -B build -A ${{ matrix.arch }} -DUIH_BUILD_TESTS=ON
       - name: Build
         run: cmake --build build --config Release
       - name: Smoke test (WARP)
