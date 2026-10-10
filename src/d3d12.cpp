@@ -16,6 +16,8 @@ using CreateDXGIFactory1Fn = HRESULT(WINAPI*)(REFIID, void**);
 
 constexpr size_t kExecuteCommandListsIndex = 10;
 constexpr UINT kSrvHeapSize = 64;
+// Presents to wait before following an application that moved to another direct queue.
+constexpr int kQueueSwitchFrames = 60;
 
 HMODULE g_module = nullptr;
 ExecuteCommandListsFn g_executeCommandLists = nullptr;
@@ -42,6 +44,8 @@ UINT64 g_fenceValue = 0;
 std::vector<FrameContext> g_frames;
 DXGI_FORMAT g_format = DXGI_FORMAT_UNKNOWN;
 uint64_t g_srvFree = 0;
+UINT g_bufferCount = 0;
+int g_queueMisses = 0;
 bool g_framesDirty = false;
 bool g_imguiReady = false;
 
@@ -120,6 +124,8 @@ void Teardown() {
     Release(g_device);
     g_swapChain = nullptr;
     g_format = DXGI_FORMAT_UNKNOWN;
+    g_bufferCount = 0;
+    g_queueMisses = 0;
 }
 
 bool CreateFrames(IDXGISwapChain* swapChain, const DXGI_SWAP_CHAIN_DESC& desc) {
@@ -147,6 +153,7 @@ bool CreateFrames(IDXGISwapChain* swapChain, const DXGI_SWAP_CHAIN_DESC& desc) {
         g_commandList->Close();
     }
     g_swapChain = swapChain;
+    g_bufferCount = desc.BufferCount;
     g_framesDirty = false;
     return true;
 }
@@ -158,7 +165,7 @@ bool Init(IDXGISwapChain* swapChain, ID3D12CommandQueue* queue) {
         return false;
 
     DXGI_FORMAT format = RenderTargetFormat(desc.BufferDesc.Format);
-    if (g_device && (device != g_device || queue != g_queue || format != g_format))
+    if (g_device && (device != g_device || queue != g_queue || format != g_format || desc.BufferCount != g_bufferCount))
         Teardown();
     if (!BindWindow(desc.OutputWindow)) {
         device->Release();
@@ -214,6 +221,13 @@ void Render(IDXGISwapChain* swapChain) {
     ID3D12CommandQueue* queue = CapturedQueue();
     if (!queue)
         return;
+    if (g_queue && queue != g_queue && ++g_queueMisses < kQueueSwitchFrames) {
+        queue->Release();
+        queue = g_queue;
+        queue->AddRef();
+    } else {
+        g_queueMisses = 0;
+    }
     bool ok = true;
     if (swapChain != g_swapChain || queue != g_queue || g_framesDirty)
         ok = Init(swapChain, queue);

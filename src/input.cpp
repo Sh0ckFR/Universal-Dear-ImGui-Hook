@@ -39,14 +39,16 @@ bool IsInputMessage(UINT msg) {
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     ScopedCall call;
+    WNDPROC original = g_originalProc;
+    bool unicode = g_unicode;
     if (ImGui::GetCurrentContext() && hwnd == g_window) {
         ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam);
         if (IsMenuOpen() && IsInputMessage(msg))
             return 0;
     }
-    if (g_unicode)
-        return CallWindowProcW(g_originalProc, hwnd, msg, wParam, lParam);
-    return CallWindowProcA(g_originalProc, hwnd, msg, wParam, lParam);
+    if (unicode)
+        return CallWindowProcW(original, hwnd, msg, wParam, lParam);
+    return CallWindowProcA(original, hwnd, msg, wParam, lParam);
 }
 
 WNDPROC SetProc(HWND hwnd, WNDPROC proc) {
@@ -116,8 +118,8 @@ void Detach() {
         else
             Log("Window %p was re-subclassed by someone else, leaving its procedure in place", g_window);
     }
+    // g_originalProc stays valid for a message that is still being dispatched.
     g_window = nullptr;
-    g_originalProc = nullptr;
 }
 
 void ReleaseCursor() {
