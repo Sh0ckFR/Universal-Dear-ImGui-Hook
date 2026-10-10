@@ -38,6 +38,7 @@ std::atomic<bool> g_unloadRequested{false};
 
 RendererSlot g_renderers[] = {
     {&kVulkanRenderer},
+    {&kOpenGLRenderer},
     {&kD3D9Renderer},
     {&kDxgiRenderer},
     {&kD3D12QueueRenderer},
@@ -70,6 +71,8 @@ bool RendererWanted(const Renderer* renderer) {
         return WantBackend(Backend::D3D9);
     if (renderer == &kD3D12QueueRenderer)
         return WantBackend(Backend::D3D12);
+    if (renderer == &kOpenGLRenderer)
+        return WantBackend(Backend::OpenGL);
     return WantBackend(Backend::Vulkan);
 }
 
@@ -378,6 +381,7 @@ const char* BackendName(Backend backend) {
     case Backend::D3D11: return "D3D11";
     case Backend::D3D12: return "D3D12";
     case Backend::Vulkan: return "Vulkan";
+    case Backend::OpenGL: return "OpenGL";
     default: return "None";
     }
 }

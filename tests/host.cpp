@@ -8,6 +8,7 @@
 #include <d3d12.h>
 #include <d3d9.h>
 #include <dxgi1_4.h>
+#include <GL/gl.h>
 #include <vulkan/vulkan.h>
 
 #include <algorithm>
@@ -520,6 +521,47 @@ struct VulkanHost : Host {
     }
 };
 
+// OpenGL -----------------------------------------------------------------
+
+struct OpenGLHost : Host {
+    HWND window = nullptr;
+    HDC hdc = nullptr;
+    HGLRC context = nullptr;
+
+    bool Init(HWND hwnd, const Options&) override {
+        window = hwnd;
+        hdc = GetDC(window);
+        PIXELFORMATDESCRIPTOR pfd{};
+        pfd.nSize = sizeof(pfd);
+        pfd.nVersion = 1;
+        pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
+        pfd.iPixelType = PFD_TYPE_RGBA;
+        pfd.cColorBits = 32;
+        int format = ChoosePixelFormat(hdc, &pfd);
+        if (!format || !SetPixelFormat(hdc, format, &pfd))
+            return false;
+        context = wglCreateContext(hdc);
+        if (!context || !wglMakeCurrent(hdc, context))
+            return false;
+        const char* version = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+        return version && version[0] >= '3';
+    }
+
+    void Frame() override {
+        glClearColor(kClear[0], kClear[1], kClear[2], kClear[3]);
+        glClear(GL_COLOR_BUFFER_BIT);
+        SwapBuffers(hdc);
+    }
+
+    ~OpenGLHost() override {
+        wglMakeCurrent(nullptr, nullptr);
+        if (context)
+            wglDeleteContext(context);
+        if (hdc)
+            ReleaseDC(window, hdc);
+    }
+};
+
 // Driver -----------------------------------------------------------------
 
 void DrawTestMenu() {
@@ -575,6 +617,7 @@ uih::Backend ExpectedBackend(const std::string& api) {
     if (api == "d3d11") return uih::Backend::D3D11;
     if (api == "d3d12") return uih::Backend::D3D12;
     if (api == "vulkan") return uih::Backend::Vulkan;
+    if (api == "opengl") return uih::Backend::OpenGL;
     return uih::Backend::None;
 }
 
@@ -584,6 +627,7 @@ std::unique_ptr<Host> CreateHost(const std::string& api) {
     if (api == "d3d11") return std::make_unique<D3D11Host>();
     if (api == "d3d12") return std::make_unique<D3D12Host>();
     if (api == "vulkan") return std::make_unique<VulkanHost>();
+    if (api == "opengl") return std::make_unique<OpenGLHost>();
     return nullptr;
 }
 
@@ -661,7 +705,7 @@ int main(int argc, char** argv) {
     }
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d10|d3d11|d3d12|vulkan [--inject-at N] [--warp] [--capture] [--device-proc-addr] [--dll path]\n");
+        printf("usage: uih_host --api d3d9|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--warp] [--capture] [--device-proc-addr] [--dll path]\n");
         return 2;
     }
 

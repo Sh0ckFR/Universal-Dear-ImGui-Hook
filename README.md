@@ -1,6 +1,6 @@
 # Universal-Dear-ImGui-Hook
 
-A universal [Dear ImGui](https://github.com/ocornut/imgui) overlay hook for Direct3D 9, 10, 11, 12 and Vulkan applications on Windows.
+A universal [Dear ImGui](https://github.com/ocornut/imgui) overlay hook for Direct3D 9, 10, 11, 12, Vulkan and OpenGL applications on Windows.
 
 | Backend | Status |
 | ------- | ------ |
@@ -9,6 +9,7 @@ A universal [Dear ImGui](https://github.com/ocornut/imgui) overlay hook for Dire
 | Direct3D 11 | :white_check_mark: |
 | Direct3D 12 | :white_check_mark: |
 | Vulkan | :white_check_mark: |
+| OpenGL 3.0+ | :white_check_mark: |
 
 The hook detects the API the target uses at runtime: inject the DLL, press `INSERT` to open the menu and `F11` to unload it.
 
@@ -122,7 +123,7 @@ cmake --build --preset msvc-x64
 ctest --test-dir build/msvc-x64 -C Release
 ```
 
-`uih_host --api vulkan --capture` runs one backend (`d3d9`, `d3d10`, `d3d11`, `d3d12`, `vulkan`); `--inject-at 0` starts the hook before the API is initialized, `--dll <path>` loads the real DLL and drives it with its hotkeys, `--capture` compares the pixels on screen and `--warp` uses the software rasterizer.
+`uih_host --api vulkan --capture` runs one backend (`d3d9`, `d3d10`, `d3d11`, `d3d12`, `vulkan`, `opengl`); `--inject-at 0` starts the hook before the API is initialized, `--dll <path>` loads the real DLL and drives it with its hotkeys, `--capture` compares the pixels on screen and `--warp` uses the software rasterizer.
 
 ## Built With
 

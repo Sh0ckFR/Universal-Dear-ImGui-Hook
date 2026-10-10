@@ -96,6 +96,7 @@ extern const Renderer kD3D9Renderer;
 extern const Renderer kDxgiRenderer;
 extern const Renderer kD3D12QueueRenderer;
 extern const Renderer kVulkanRenderer;
+extern const Renderer kOpenGLRenderer;
 
 // DXGI swap chain presenters implemented by the D3D10/11/12 backends.
 struct DxgiPresenter {
