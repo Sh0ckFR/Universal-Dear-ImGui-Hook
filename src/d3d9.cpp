@@ -20,10 +20,6 @@ ResetFn g_reset = nullptr;
 IDirect3DDevice9* g_device = nullptr;
 
 HWND DeviceWindow(IDirect3DDevice9* device) {
-    D3DDEVICE_CREATION_PARAMETERS params{};
-    if (SUCCEEDED(device->GetCreationParameters(&params)) && params.hFocusWindow)
-        return params.hFocusWindow;
-
     HWND window = nullptr;
     IDirect3DSwapChain9* swapChain = nullptr;
     if (SUCCEEDED(device->GetSwapChain(0, &swapChain))) {
@@ -32,6 +28,11 @@ HWND DeviceWindow(IDirect3DDevice9* device) {
             window = present.hDeviceWindow;
         swapChain->Release();
     }
+    if (window)
+        return window;
+    D3DDEVICE_CREATION_PARAMETERS params{};
+    if (SUCCEEDED(device->GetCreationParameters(&params)))
+        window = params.hFocusWindow;
     return window;
 }
 

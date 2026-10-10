@@ -148,28 +148,39 @@ std::mutex g_mutex;
 std::unordered_map<VkSwapchainKHR, SwapchainInfo> g_swapchains;
 std::unordered_map<VkQueue, QueueInfo> g_queues;
 std::unordered_map<VkDevice, VkPhysicalDevice> g_devices;
+std::unordered_map<VkDevice, size_t> g_deviceIcd;
 std::unordered_map<VkSurfaceKHR, HWND> g_surfaces;
 
 VulkanState g_renderer;
+uint32_t g_setupFailures = 0;
+constexpr uint32_t kMaxSetupFailures = 5;
+constexpr size_t kMaxIcds = 4;
 
 // ICD lookup --------------------------------------------------------------
 
-const Icd* IcdForDevice(VkDevice device) {
-    if (g_icds.size() == 1 || device == VK_NULL_HANDLE)
-        return g_icds.empty() ? nullptr : &g_icds[0];
-    void* targets[kHookCount];
-    for (int i = 0; i < kHookCount; ++i)
-        targets[i] = reinterpret_cast<void*>(g_getDeviceProcAddr(device, kHookNames[i]));
-    for (const Icd& icd : g_icds)
-        if (std::equal(targets, targets + kHookCount, icd.targets))
-            return &icd;
-    Log("Vulkan device %p does not match any hooked driver", device);
-    return &g_icds[0];
-}
-
-template <typename Fn>
-Fn Original(const Icd* icd, HookId id) {
-    return reinterpret_cast<Fn>(icd->originals[id]);
+// Driver a device belongs to, found by matching its dispatch table against the dummy devices.
+size_t IcdForDevice(VkDevice device) {
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        auto it = g_deviceIcd.find(device);
+        if (it != g_deviceIcd.end())
+            return it->second;
+    }
+    size_t match = 0;
+    if (g_icds.size() > 1) {
+        void* targets[kHookCount];
+        for (int i = 0; i < kHookCount; ++i)
+            targets[i] = reinterpret_cast<void*>(g_getDeviceProcAddr(device, kHookNames[i]));
+        while (match < g_icds.size() && !std::equal(targets, targets + kHookCount, g_icds[match].targets))
+            ++match;
+        if (match == g_icds.size()) {
+            Log("Vulkan device %p does not match any hooked driver", device);
+            match = 0;
+        }
+    }
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_deviceIcd[device] = match;
+    return match;
 }
 
 VkDevice DeviceForQueue(VkQueue queue, VkSwapchainKHR swapchain) {
@@ -413,7 +424,7 @@ bool Setup(VkDevice device, VkQueue queue, VkSwapchainKHR swapchain) {
             physicalDevice = deviceIt->second;
     }
     if (physicalDevice == VK_NULL_HANDLE)
-        physicalDevice = IcdForDevice(device)->physicalDevice;
+        physicalDevice = g_icds[IcdForDevice(device)].physicalDevice;
     if (swapchainInfo.format == VK_FORMAT_UNDEFINED) {
         swapchainInfo.format = VK_FORMAT_B8G8R8A8_UNORM;
         Log("Vulkan swap chain %p was created before injection, assuming VK_FORMAT_B8G8R8A8_UNORM", swapchain);
@@ -426,8 +437,10 @@ bool Setup(VkDevice device, VkQueue queue, VkSwapchainKHR swapchain) {
     DeviceFunctions fn;
     fn.Load(g_getDeviceProcAddr, device);
     uint32_t imageCount = 0;
-    if (fn.vkGetSwapchainImagesKHR(device, swapchain, &imageCount, nullptr) != VK_SUCCESS || imageCount == 0)
+    if (fn.vkGetSwapchainImagesKHR(device, swapchain, &imageCount, nullptr) != VK_SUCCESS || imageCount == 0) {
+        ++g_setupFailures;
         return false;
+    }
     imageCount = std::max<uint32_t>(imageCount, 2);
 
     VulkanState& r = g_renderer;
@@ -442,14 +455,17 @@ bool Setup(VkDevice device, VkQueue queue, VkSwapchainKHR swapchain) {
         if (family == UINT32_MAX || !CreateDeviceResources(device, queue, family, physicalDevice, swapchainInfo.format, imageCount, swapchainInfo.window)) {
             Log("Vulkan renderer initialization failed");
             Teardown();
+            ++g_setupFailures;
             return false;
         }
     }
     if (!CreateSwapchainResources(swapchain, swapchainInfo.extent)) {
         Log("Vulkan swap chain resource creation failed");
         ReleaseSwapchainResources();
+        ++g_setupFailures;
         return false;
     }
+    g_setupFailures = 0;
     return true;
 }
 
@@ -457,8 +473,10 @@ const VkPresentInfoKHR* Render(VkQueue queue, VkDevice device, const VkPresentIn
     VkSwapchainKHR swapchain = info->pSwapchains[0];
     uint32_t imageIndex = info->pImageIndices[0];
     VulkanState& r = g_renderer;
-    if ((r.swapchain != swapchain || r.device != device || r.queue != queue) && !Setup(device, queue, swapchain))
-        return info;
+    if (r.swapchain != swapchain || r.device != device || r.queue != queue) {
+        if (g_setupFailures >= kMaxSetupFailures || !Setup(device, queue, swapchain))
+            return info;
+    }
     if (imageIndex >= r.framebuffers.size())
         return info;
 
@@ -514,6 +532,11 @@ const VkPresentInfoKHR* Render(VkQueue queue, VkDevice device, const VkPresentIn
 
 // Hooks ------------------------------------------------------------------
 
+template <typename Fn>
+Fn Original(size_t icd, HookId id) {
+    return reinterpret_cast<Fn>(g_icds[icd].originals[id]);
+}
+
 void RecordQueue(VkDevice device, uint32_t family, VkQueue queue) {
     if (queue == VK_NULL_HANDLE)
         return;
@@ -521,90 +544,128 @@ void RecordQueue(VkDevice device, uint32_t family, VkQueue queue) {
     g_queues[queue] = {device, family};
 }
 
-void VKAPI_CALL HookGetDeviceQueue(VkDevice device, uint32_t family, uint32_t index, VkQueue* queue) {
-    ScopedCall call;
-    Original<PFN_vkGetDeviceQueue>(IcdForDevice(device), kGetDeviceQueue)(device, family, index, queue);
-    if (queue)
-        RecordQueue(device, family, *queue);
+void OnSwapchainCreated(VkDevice device, const VkSwapchainCreateInfoKHR& info, VkSwapchainKHR swapchain) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    auto surface = g_surfaces.find(info.surface);
+    g_swapchains[swapchain] = {device, info.imageFormat, info.imageExtent, surface != g_surfaces.end() ? surface->second : nullptr};
+    g_setupFailures = 0;
 }
 
-void VKAPI_CALL HookGetDeviceQueue2(VkDevice device, const VkDeviceQueueInfo2* info, VkQueue* queue) {
-    ScopedCall call;
-    Original<PFN_vkGetDeviceQueue2>(IcdForDevice(device), kGetDeviceQueue2)(device, info, queue);
-    if (queue && info)
-        RecordQueue(device, info->queueFamilyIndex, *queue);
-}
-
-VkResult VKAPI_CALL HookCreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR* info, const VkAllocationCallbacks* allocator, VkSwapchainKHR* swapchain) {
-    ScopedCall call;
-    VkResult result = Original<PFN_vkCreateSwapchainKHR>(IcdForDevice(device), kCreateSwapchainKHR)(device, info, allocator, swapchain);
-    if (result == VK_SUCCESS && info && swapchain) {
-        std::lock_guard<std::mutex> lock(g_mutex);
-        auto surface = g_surfaces.find(info->surface);
-        g_swapchains[*swapchain] = {device, info->imageFormat, info->imageExtent, surface != g_surfaces.end() ? surface->second : nullptr};
-    }
-    return result;
-}
-
-void VKAPI_CALL HookDestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapchain, const VkAllocationCallbacks* allocator) {
-    ScopedCall call;
+void OnSwapchainDestroyed(VkSwapchainKHR swapchain) {
     if (swapchain != VK_NULL_HANDLE && g_renderer.swapchain == swapchain)
         ReleaseSwapchainResources();
-    {
-        std::lock_guard<std::mutex> lock(g_mutex);
-        g_swapchains.erase(swapchain);
-    }
-    Original<PFN_vkDestroySwapchainKHR>(IcdForDevice(device), kDestroySwapchainKHR)(device, swapchain, allocator);
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_swapchains.erase(swapchain);
 }
 
-void RecordSwapchainDevice(VkDevice device, VkSwapchainKHR swapchain) {
+void OnImageAcquired(VkDevice device, VkSwapchainKHR swapchain) {
     std::lock_guard<std::mutex> lock(g_mutex);
     g_swapchains[swapchain].device = device;
 }
 
-VkResult VKAPI_CALL HookAcquireNextImageKHR(VkDevice device, VkSwapchainKHR swapchain, uint64_t timeout, VkSemaphore semaphore, VkFence fence, uint32_t* index) {
-    ScopedCall call;
-    RecordSwapchainDevice(device, swapchain);
-    return Original<PFN_vkAcquireNextImageKHR>(IcdForDevice(device), kAcquireNextImageKHR)(device, swapchain, timeout, semaphore, fence, index);
+void OnDeviceDestroyed(VkDevice device) {
+    if (g_renderer.device == device)
+        Teardown();
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_devices.erase(device);
+    g_deviceIcd.erase(device);
+    for (auto it = g_queues.begin(); it != g_queues.end();)
+        it = it->second.device == device ? g_queues.erase(it) : std::next(it);
+    for (auto it = g_swapchains.begin(); it != g_swapchains.end();)
+        it = it->second.device == device ? g_swapchains.erase(it) : std::next(it);
 }
 
-VkResult VKAPI_CALL HookAcquireNextImage2KHR(VkDevice device, const VkAcquireNextImageInfoKHR* info, uint32_t* index) {
-    ScopedCall call;
-    if (info)
-        RecordSwapchainDevice(device, info->swapchain);
-    return Original<PFN_vkAcquireNextImage2KHR>(IcdForDevice(device), kAcquireNextImage2KHR)(device, info, index);
-}
-
-VkResult VKAPI_CALL HookQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* info) {
-    ScopedCall call;
-    ForeignPresentScope presentScope;
-    VkDevice device = VK_NULL_HANDLE;
+VkResult PresentFrame(size_t icd, VkQueue queue, const VkPresentInfoKHR* info) {
     const VkPresentInfoKHR* forward = info;
     VkPresentInfoKHR patched;
-    if (info && info->swapchainCount > 0 && info->pSwapchains && info->pImageIndices) {
-        device = DeviceForQueue(queue, info->pSwapchains[0]);
-        if (device != VK_NULL_HANDLE && ShouldRender(Backend::Vulkan))
+    if (info && info->swapchainCount > 0 && info->pSwapchains && info->pImageIndices && ShouldRender(Backend::Vulkan)) {
+        VkDevice device = DeviceForQueue(queue, info->pSwapchains[0]);
+        if (device != VK_NULL_HANDLE)
             forward = Render(queue, device, info, patched);
     }
-    VkResult result = Original<PFN_vkQueuePresentKHR>(IcdForDevice(device), kQueuePresentKHR)(queue, forward);
+    VkResult result = Original<PFN_vkQueuePresentKHR>(icd, kQueuePresentKHR)(queue, forward);
     ServiceTeardown(Backend::Vulkan, Teardown);
     return result;
 }
 
-void VKAPI_CALL HookDestroyDevice(VkDevice device, const VkAllocationCallbacks* allocator) {
-    ScopedCall call;
-    const Icd* icd = IcdForDevice(device);
-    if (g_renderer.device == device)
-        Teardown();
-    {
-        std::lock_guard<std::mutex> lock(g_mutex);
-        g_devices.erase(device);
-        for (auto it = g_queues.begin(); it != g_queues.end();)
-            it = it->second.device == device ? g_queues.erase(it) : std::next(it);
-        for (auto it = g_swapchains.begin(); it != g_swapchains.end();)
-            it = it->second.device == device ? g_swapchains.erase(it) : std::next(it);
+// One set of detours per driver, so each hook calls back into the function it replaced.
+template <size_t N>
+struct IcdHooks {
+    static void VKAPI_CALL GetDeviceQueue(VkDevice device, uint32_t family, uint32_t index, VkQueue* queue) {
+        ScopedCall call;
+        Original<PFN_vkGetDeviceQueue>(N, kGetDeviceQueue)(device, family, index, queue);
+        if (queue)
+            RecordQueue(device, family, *queue);
     }
-    Original<PFN_vkDestroyDevice>(icd, kDestroyDevice)(device, allocator);
+
+    static void VKAPI_CALL GetDeviceQueue2(VkDevice device, const VkDeviceQueueInfo2* info, VkQueue* queue) {
+        ScopedCall call;
+        Original<PFN_vkGetDeviceQueue2>(N, kGetDeviceQueue2)(device, info, queue);
+        if (queue && info)
+            RecordQueue(device, info->queueFamilyIndex, *queue);
+    }
+
+    static VkResult VKAPI_CALL CreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR* info, const VkAllocationCallbacks* allocator, VkSwapchainKHR* swapchain) {
+        ScopedCall call;
+        VkResult result = Original<PFN_vkCreateSwapchainKHR>(N, kCreateSwapchainKHR)(device, info, allocator, swapchain);
+        if (result == VK_SUCCESS && info && swapchain)
+            OnSwapchainCreated(device, *info, *swapchain);
+        return result;
+    }
+
+    static void VKAPI_CALL DestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapchain, const VkAllocationCallbacks* allocator) {
+        ScopedCall call;
+        OnSwapchainDestroyed(swapchain);
+        Original<PFN_vkDestroySwapchainKHR>(N, kDestroySwapchainKHR)(device, swapchain, allocator);
+    }
+
+    static VkResult VKAPI_CALL AcquireNextImageKHR(VkDevice device, VkSwapchainKHR swapchain, uint64_t timeout, VkSemaphore semaphore, VkFence fence, uint32_t* index) {
+        ScopedCall call;
+        OnImageAcquired(device, swapchain);
+        return Original<PFN_vkAcquireNextImageKHR>(N, kAcquireNextImageKHR)(device, swapchain, timeout, semaphore, fence, index);
+    }
+
+    static VkResult VKAPI_CALL AcquireNextImage2KHR(VkDevice device, const VkAcquireNextImageInfoKHR* info, uint32_t* index) {
+        ScopedCall call;
+        if (info)
+            OnImageAcquired(device, info->swapchain);
+        return Original<PFN_vkAcquireNextImage2KHR>(N, kAcquireNextImage2KHR)(device, info, index);
+    }
+
+    static VkResult VKAPI_CALL QueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* info) {
+        ScopedCall call;
+        ForeignPresentScope presentScope;
+        return PresentFrame(N, queue, info);
+    }
+
+    static void VKAPI_CALL DestroyDevice(VkDevice device, const VkAllocationCallbacks* allocator) {
+        ScopedCall call;
+        OnDeviceDestroyed(device);
+        Original<PFN_vkDestroyDevice>(N, kDestroyDevice)(device, allocator);
+    }
+
+    static void* const* Detours() {
+        static void* const table[kHookCount] = {
+            reinterpret_cast<void*>(GetDeviceQueue),
+            reinterpret_cast<void*>(GetDeviceQueue2),
+            reinterpret_cast<void*>(CreateSwapchainKHR),
+            reinterpret_cast<void*>(DestroySwapchainKHR),
+            reinterpret_cast<void*>(AcquireNextImageKHR),
+            reinterpret_cast<void*>(AcquireNextImage2KHR),
+            reinterpret_cast<void*>(QueuePresentKHR),
+            reinterpret_cast<void*>(DestroyDevice),
+        };
+        return table;
+    }
+};
+
+void* const* DetourTable(size_t icd) {
+    switch (icd) {
+    case 0: return IcdHooks<0>::Detours();
+    case 1: return IcdHooks<1>::Detours();
+    case 2: return IcdHooks<2>::Detours();
+    default: return IcdHooks<3>::Detours();
+    }
 }
 
 VkResult VKAPI_CALL HookCreateDevice(VkPhysicalDevice physicalDevice, const VkDeviceCreateInfo* info, const VkAllocationCallbacks* allocator, VkDevice* device) {
@@ -635,17 +696,6 @@ void VKAPI_CALL HookDestroySurfaceKHR(VkInstance instance, VkSurfaceKHR surface,
     }
     g_destroySurface(instance, surface, allocator);
 }
-
-void* const kDetours[kHookCount] = {
-    reinterpret_cast<void*>(HookGetDeviceQueue),
-    reinterpret_cast<void*>(HookGetDeviceQueue2),
-    reinterpret_cast<void*>(HookCreateSwapchainKHR),
-    reinterpret_cast<void*>(HookDestroySwapchainKHR),
-    reinterpret_cast<void*>(HookAcquireNextImageKHR),
-    reinterpret_cast<void*>(HookAcquireNextImage2KHR),
-    reinterpret_cast<void*>(HookQueuePresentKHR),
-    reinterpret_cast<void*>(HookDestroyDevice),
-};
 
 // Installation -----------------------------------------------------------
 
@@ -747,8 +797,14 @@ bool Install() {
                 break;
             }
         }
-        if (!duplicate)
-            g_icds.push_back(icd);
+        if (duplicate)
+            continue;
+        if (g_icds.size() == kMaxIcds) {
+            Log("Ignoring extra Vulkan driver for physical device %p", physicalDevice);
+            icd.fn.vkDestroyDevice(icd.dummyDevice, nullptr);
+            continue;
+        }
+        g_icds.push_back(icd);
     }
     if (g_icds.empty()) {
         Log("No Vulkan device supports presentation");
@@ -756,18 +812,19 @@ bool Install() {
     }
 
     bool hooked = false;
-    for (Icd& icd : g_icds) {
+    for (size_t n = 0; n < g_icds.size(); ++n) {
+        Icd& icd = g_icds[n];
         for (int i = 0; i < kHookCount; ++i) {
             if (!icd.targets[i])
                 continue;
-            for (const Icd& other : g_icds) {
-                if (&other != &icd && other.targets[i] == icd.targets[i] && other.originals[i]) {
-                    icd.originals[i] = other.originals[i];
+            for (size_t m = 0; m < n; ++m) {
+                if (g_icds[m].targets[i] == icd.targets[i]) {
+                    icd.originals[i] = g_icds[m].originals[i];
                     break;
                 }
             }
             if (!icd.originals[i])
-                hooked |= CreateHook(kHookNames[i], icd.targets[i], kDetours[i], &icd.originals[i]);
+                hooked |= CreateHook(kHookNames[i], icd.targets[i], DetourTable(n)[i], &icd.originals[i]);
         }
     }
 
@@ -797,7 +854,9 @@ void Uninstall() {
     g_swapchains.clear();
     g_queues.clear();
     g_devices.clear();
+    g_deviceIcd.clear();
     g_surfaces.clear();
+    g_setupFailures = 0;
     g_createDevice = nullptr;
     g_createWin32Surface = nullptr;
     g_destroySurface = nullptr;

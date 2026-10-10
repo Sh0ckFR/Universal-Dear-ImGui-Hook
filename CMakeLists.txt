@@ -44,7 +44,8 @@ add_library(uih_imgui STATIC
     ${UIH_THIRD_PARTY}/imgui/backends/imgui_impl_dx10.cpp
     ${UIH_THIRD_PARTY}/imgui/backends/imgui_impl_dx11.cpp
     ${UIH_THIRD_PARTY}/imgui/backends/imgui_impl_dx12.cpp
-    ${UIH_THIRD_PARTY}/imgui/backends/imgui_impl_vulkan.cpp)
+    ${UIH_THIRD_PARTY}/imgui/backends/imgui_impl_vulkan.cpp
+    ${UIH_THIRD_PARTY}/imgui/backends/imgui_impl_opengl3.cpp)
 target_include_directories(uih_imgui PUBLIC
     ${UIH_THIRD_PARTY}/imgui
     ${UIH_THIRD_PARTY}/imgui/backends
@@ -65,7 +66,8 @@ add_library(uih STATIC
     src/d3d10.cpp
     src/d3d11.cpp
     src/d3d12.cpp
-    src/vulkan.cpp)
+    src/vulkan.cpp
+    src/opengl.cpp)
 target_include_directories(uih PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(uih PUBLIC uih_imgui PRIVATE minhook)
 target_compile_definitions(uih PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)

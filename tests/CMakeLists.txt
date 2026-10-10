@@ -1,5 +1,5 @@
 add_executable(uih_host host.cpp)
-target_link_libraries(uih_host PRIVATE uih d3d9 d3d10 d3d11 d3d12 dxgi)
+target_link_libraries(uih_host PRIVATE uih d3d9 d3d10 d3d11 d3d12 dxgi opengl32)
 target_compile_definitions(uih_host PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 
 function(uih_add_host_test name)
@@ -14,6 +14,7 @@ uih_add_host_test(d3d11_early --api d3d11 --inject-at 0)
 uih_add_host_test(d3d12 --api d3d12)
 uih_add_host_test(vulkan --api vulkan)
 uih_add_host_test(vulkan_early --api vulkan --inject-at 0)
+uih_add_host_test(opengl --api opengl)
 
 if(TARGET uih_example)
     uih_add_host_test(dll_d3d11 --api d3d11 --dll $<TARGET_FILE:uih_example>)
