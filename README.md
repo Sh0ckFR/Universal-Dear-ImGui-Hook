@@ -17,7 +17,19 @@ The hook detects the API the target uses at runtime: inject the DLL, press `INSE
 
 ## Building
 
-The build uses CMake 3.21+ and ships every dependency (Dear ImGui, MinHook, Vulkan headers), so nothing else has to be downloaded. The output is `Universal-ImGui-Hook.dll`, a Windows DLL that only depends on system libraries. Build the architecture of the process you want to inject into: a 64-bit game needs the x64 DLL, a 32-bit game needs the x86 one.
+The build uses CMake and ships every dependency (Dear ImGui, MinHook, Vulkan headers), so nothing else has to be downloaded. The output is `Universal-ImGui-Hook.dll`, a Windows DLL that only depends on system libraries. Build the architecture of the process you want to inject into: a 64-bit game needs the x64 DLL, a 32-bit game needs the x86 one.
+
+### Minimum versions
+
+| Tool | Minimum | Verified by the CI |
+| --- | --- | --- |
+| CMake | 3.21 | Versions bundled with Visual Studio and GitHub runners |
+| Visual Studio | 2022 (17.x) | 2022 locally, 2026 on GitHub runners |
+| MinGW-w64 / GCC | mingw-w64 11 with GCC 13 | Ubuntu 24.04 (GCC 13), Homebrew and winlibs (GCC 14 to 16) |
+| Ninja | any | |
+| Windows (runtime) | Windows 10 | |
+
+Visual Studio 2019 is not tested. The mingw-w64 8.0 headers shipped by Ubuntu 22.04 are too old for the D3D12 backend; use Ubuntu 24.04, Debian 13, a current Fedora or Arch, or a toolchain from [winlibs](https://winlibs.com/) or MSYS2. The DLL imports `d3dcompiler_47.dll`, which Windows 8.1 ships as well, but only Windows 10 and 11 are exercised.
 
 Prebuilt DLLs for every toolchain are attached to each [release](../../releases); the [build workflow](../../actions) also keeps them as artifacts for every commit.
 
