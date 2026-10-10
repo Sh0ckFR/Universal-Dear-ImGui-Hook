@@ -25,11 +25,11 @@ The build uses CMake and ships every dependency (Dear ImGui, MinHook, Vulkan hea
 | --- | --- | --- |
 | CMake | 3.21 | Versions bundled with Visual Studio and GitHub runners |
 | Visual Studio | 2022 (17.x) | 2022 locally, 2026 on GitHub runners |
-| MinGW-w64 / GCC | mingw-w64 8.0 with GCC 10 (C++17) | Ubuntu 22.04 (GCC 10), Ubuntu 24.04 (GCC 13), Homebrew and winlibs (GCC 14 to 16) |
+| MinGW-w64 / GCC | mingw-w64 11 with GCC 13 | Ubuntu 24.04 (GCC 13), Homebrew and winlibs (GCC 14 to 16) |
 | Ninja | any | |
 | Windows (runtime) | Windows 10 | |
 
-Visual Studio 2019 is not tested. The DLL imports `d3dcompiler_47.dll`, which Windows 8.1 ships as well, but only Windows 10 and 11 are exercised.
+Visual Studio 2019 is not tested. The mingw-w64 8.0 headers shipped by Ubuntu 22.04 are too old for the D3D12 backend; use Ubuntu 24.04, Debian 13, a current Fedora or Arch, or a toolchain from [winlibs](https://winlibs.com/) or MSYS2. The DLL imports `d3dcompiler_47.dll`, which Windows 8.1 ships as well, but only Windows 10 and 11 are exercised.
 
 Prebuilt DLLs for every toolchain are attached to each [release](../../releases); the [build workflow](../../actions) also keeps them as artifacts for every commit.
 

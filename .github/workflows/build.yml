@@ -42,10 +42,6 @@ jobs:
             arch: i686
             preset: mingw-x86
             install: sudo apt-get update && sudo apt-get install -y ninja-build g++-mingw-w64-i686
-          - os: ubuntu-22.04
-            arch: x86_64
-            preset: mingw-x64
-            install: sudo apt-get update && sudo apt-get install -y ninja-build g++-mingw-w64-x86-64
           - os: macos-latest
             arch: x86_64
             preset: mingw-x64
