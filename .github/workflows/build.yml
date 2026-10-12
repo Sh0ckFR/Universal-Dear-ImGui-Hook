@@ -22,6 +22,8 @@ jobs:
         run: cmake --build build --config Release
       - name: Smoke test (WARP)
         run: build\tests\Release\uih_host.exe --api d3d11 --warp
+      - name: Proxy test
+        run: build\tests\Release\uih_host.exe --proxy build\Release\Universal-ImGui-Hook.dll
       - uses: actions/upload-artifact@v4
         with:
           name: Universal-ImGui-Hook-msvc-${{ matrix.arch }}
@@ -58,6 +60,8 @@ jobs:
         run: cmake --preset ${{ matrix.preset }} -DUIH_BUILD_TESTS=ON
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }}
+      - name: Check the proxy export
+        run: ${{ matrix.arch }}-w64-mingw32-objdump -p build/${{ matrix.preset }}/Universal-ImGui-Hook.dll | grep -E ' DirectInput8Create$'
       - uses: actions/upload-artifact@v4
         if: matrix.os == 'ubuntu-latest'
         with:

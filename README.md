@@ -73,7 +73,7 @@ cmake --build --preset mingw-x64
 
 The DLL is written to `build/mingw-x64/Universal-ImGui-Hook.dll`. The presets use `cmake/mingw-w64-x86_64.cmake` and `cmake/mingw-w64-i686.cmake`, which expect the `x86_64-w64-mingw32-*` and `i686-w64-mingw32-*` compilers in `PATH`; pass `-DCMAKE_TOOLCHAIN_FILE` with your own file if your distribution names them differently.
 
-The resulting DLL targets Windows processes, including games running under Wine or Proton (use a Windows injector inside the same prefix, or `LoadLibrary` from a wrapper DLL).
+The resulting DLL targets Windows processes, including games running under Wine or Proton (use a Windows injector inside the same prefix, or [load it without an injector](#loading-without-an-injector)).
 
 ### macOS (cross-compiling)
 
@@ -110,6 +110,16 @@ uih::Start(config);
 
 The hook can be injected before or after the target initializes its graphics API. When injected into a running Vulkan application, the swap chain format is assumed to be `VK_FORMAT_B8G8R8A8_UNORM` until the application recreates its swap chain.
 
+### Loading without an injector
+
+The DLL exports `DirectInput8Create` and forwards it to the system library, so a target that imports DirectInput 8 loads the hook by itself: rename the DLL to `dinput8.dll` and place it next to the target's executable. Wine and Proton also need the override to be declared:
+
+```sh
+WINEDLLOVERRIDES="dinput8=n,b" %command%
+```
+
+Loaded this way, the unload key removes the overlay and leaves the DLL in memory, as the target still references it.
+
 ### Using the hook as a library
 
 The repository is a CMake package that can be consumed with `FetchContent`:
@@ -135,7 +145,7 @@ cmake --build --preset msvc-x64
 ctest --test-dir build/msvc-x64 -C Release
 ```
 
-`uih_host --api vulkan --capture` runs one backend (`d3d9`, `d3d10`, `d3d11`, `d3d12`, `vulkan`, `opengl`); `--inject-at 0` starts the hook before the API is initialized, `--dll <path>` loads the real DLL and drives it with its hotkeys, `--capture` compares the pixels on screen and `--warp` uses the software rasterizer.
+`uih_host --api vulkan --capture` runs one backend (`d3d9`, `d3d10`, `d3d11`, `d3d12`, `vulkan`, `opengl`); `--inject-at 0` starts the hook before the API is initialized, `--dll <path>` loads the real DLL and drives it with its hotkeys, `--capture` compares the pixels on screen and `--warp` uses the software rasterizer. `uih_host --proxy <path>` checks that the DLL can stand in for `dinput8.dll`.
 
 ## Built With
 
