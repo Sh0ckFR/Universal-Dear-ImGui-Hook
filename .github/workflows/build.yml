@@ -70,7 +70,7 @@ jobs:
 
   linux:
     name: Linux ${{ matrix.compiler }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -112,7 +112,7 @@ jobs:
   # Built against an old glibc so the released library loads on older systems.
   linux-portable:
     name: Linux portable (glibc 2.28)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container: quay.io/pypa/manylinux_2_28_x86_64
     steps:
       - uses: actions/checkout@v4
@@ -146,7 +146,7 @@ jobs:
   ddnet:
     name: DDNet (${{ matrix.backend }})
     needs: linux-portable
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
