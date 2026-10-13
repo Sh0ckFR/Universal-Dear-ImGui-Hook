@@ -1,0 +1,31 @@
+{
+    global:
+        dlsym;
+
+        glXSwapBuffers;
+        glXCreateWindow;
+        glXDestroyWindow;
+        glXGetProcAddress;
+        glXGetProcAddressARB;
+
+        eglSwapBuffers;
+        eglGetProcAddress;
+
+        vkGetInstanceProcAddr;
+        vkGetDeviceProcAddr;
+        vkCreateDevice;
+        vkDestroyDevice;
+        vkGetDeviceQueue;
+        vkGetDeviceQueue2;
+        vkCreateSwapchainKHR;
+        vkDestroySwapchainKHR;
+        vkAcquireNextImageKHR;
+        vkAcquireNextImage2KHR;
+        vkQueuePresentKHR;
+        vkCreateXcbSurfaceKHR;
+        vkCreateXlibSurfaceKHR;
+        vkDestroySurfaceKHR;
+
+    local:
+        *;
+};

@@ -2,41 +2,23 @@
 
 #include "uih.h"
 
-#include <dxgiformat.h>
-
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 
-#include "MinHook.h"
 #include "imgui.h"
-
-struct IDXGISwapChain;
 
 namespace uih::detail {
 
+#ifdef _WIN32
+using NativeWindow = HWND;
+#else
+// X11 window, 0 when unknown.
+using NativeWindow = uint32_t;
+#endif
+
 void Log(const char* fmt, ...);
-
-template <typename T>
-void Release(T*& object) {
-    if (object) {
-        object->Release();
-        object = nullptr;
-    }
-}
-
-template <typename Fn>
-Fn GetProc(HMODULE module, const char* name) {
-    return reinterpret_cast<Fn>(reinterpret_cast<void*>(GetProcAddress(module, name)));
-}
-
-// Hooks ------------------------------------------------------------------
-
-bool CreateHook(const char* name, void* target, void* detour, void** original);
-// Resolves a virtual method from an object's vtable.
-inline void* VirtualMethod(void* object, size_t index) {
-    return (*reinterpret_cast<void***>(object))[index];
-}
 
 // Every hook keeps one of these alive while it runs so Stop() can wait for
 // in-flight calls before the hooks are removed.
@@ -47,6 +29,7 @@ public:
     ScopedCall(const ScopedCall&) = delete;
     ScopedCall& operator=(const ScopedCall&) = delete;
 };
+bool WaitForIdleHooks(unsigned timeoutMs);
 
 // Drivers may implement presentation of one API on top of another (Vulkan on
 // a DXGI swap chain). Hooks of the outer API mark the thread so the inner API
@@ -73,59 +56,44 @@ bool ClaimBackend(Backend backend);
 // Runs `teardown` when Stop() asked the active backend to release its resources
 // on the rendering thread.
 void ServiceTeardown(Backend backend, void (*teardown)());
+// False when the rendering thread did not answer and the caller has to release the resources.
+bool TeardownOnRenderThread(unsigned timeoutMs);
 
+// False when the ImGui context already exists.
+bool CreateContext();
 // Creates the ImGui context on first use and attaches the platform backend
 // and input hooks to `window`.
-bool BindWindow(HWND window);
+bool BindWindow(NativeWindow window);
 // Platform NewFrame, key polling, user callback and ImGui::Render().
 ImDrawData* Frame();
 // Detaches the platform backend and destroys the ImGui context.
 void UnbindWindow();
 
-// Backends --------------------------------------------------------------
+// Implemented once per platform -------------------------------------------
 
-struct Renderer {
-    const char* name;
-    const wchar_t* module;
-    bool (*Install)();
-    void (*Uninstall)();
-    void (*Teardown)();
-};
-
-extern const Renderer kD3D9Renderer;
-extern const Renderer kDxgiRenderer;
-extern const Renderer kD3D12QueueRenderer;
-extern const Renderer kVulkanRenderer;
-extern const Renderer kOpenGLRenderer;
-
-// DXGI swap chain presenters implemented by the D3D10/11/12 backends.
-struct DxgiPresenter {
-    Backend backend;
-    bool (*Probe)(IDXGISwapChain* swapChain);
-    void (*Render)(IDXGISwapChain* swapChain);
-    void (*PreResize)(IDXGISwapChain* swapChain);
-    void (*Teardown)();
-};
-
-extern const DxgiPresenter kD3D10Presenter;
-extern const DxgiPresenter kD3D11Presenter;
-extern const DxgiPresenter kD3D12Presenter;
-
-// Format usable for a render target view on a swap chain buffer.
-DXGI_FORMAT RenderTargetFormat(DXGI_FORMAT format);
-// Hidden window for dummy swap chains.
-HWND CreateHiddenWindow();
-
-// Input -----------------------------------------------------------------
+namespace platform {
+void WriteLog(const char* line);
+bool Start();
+void Stop();
+void NewFrame();
+bool IsKeyDown(int key);
+bool IsFocused();
+void Unload();
+} // namespace platform
 
 namespace input {
-void InstallCursorHooks();
-void Attach(HWND window);
+void Attach(NativeWindow window);
 void Detach();
 // Undoes cursor clipping so the menu can be used.
 void ReleaseCursor();
 // Best-effort lookup of the main window of this process.
-HWND FindProcessWindow();
+NativeWindow FindProcessWindow();
 } // namespace input
 
 } // namespace uih::detail
+
+#ifdef _WIN32
+#include "windows/platform.h"
+#else
+#include "linux/platform.h"
+#endif
