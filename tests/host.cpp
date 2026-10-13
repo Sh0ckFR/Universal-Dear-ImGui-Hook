@@ -31,6 +31,7 @@ constexpr int kHeight = 600;
 struct Options {
     std::string api;
     std::string dll;
+    std::string proxy;
     int injectAt = 30;
     bool warp = false;
     bool capture = false;
@@ -690,6 +691,31 @@ int RunDllMode(HWND window, Host& host, const Options& options) {
     }
 }
 
+// Calls the export a target imports when the DLL is renamed to dinput8.dll.
+int RunProxyMode(const Options& options) {
+    using DirectInput8CreateFn = HRESULT(WINAPI*)(HINSTANCE, DWORD, REFIID, void**, void*);
+    constexpr GUID kDirectInput8W = {0xBF798031, 0x483A, 0x4DA2, {0xAA, 0x99, 0x5D, 0x64, 0xED, 0x36, 0x97, 0x00}};
+    constexpr DWORD kDirectInputVersion = 0x0800;
+
+    std::wstring path(options.proxy.begin(), options.proxy.end());
+    HMODULE module = LoadLibraryW(path.c_str());
+    if (!module)
+        return Fail("LoadLibrary failed");
+    auto create = reinterpret_cast<DirectInput8CreateFn>(reinterpret_cast<void*>(GetProcAddress(module, "DirectInput8Create")));
+    if (!create)
+        return Fail("DirectInput8Create is not exported");
+    IUnknown* directInput = nullptr;
+    HRESULT result = create(GetModuleHandleW(nullptr), kDirectInputVersion, kDirectInput8W, reinterpret_cast<void**>(&directInput), nullptr);
+    if (FAILED(result) || !directInput)
+        return Fail("DirectInput8Create was not forwarded to the system library");
+    directInput->Release();
+    FreeLibrary(module);
+    if (!GetModuleHandleW(path.c_str()))
+        return Fail("DLL unloaded while used as a proxy");
+    printf("PASS: proxy via %s\n", options.proxy.c_str());
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -699,13 +725,16 @@ int main(int argc, char** argv) {
         if (arg == "--api" && i + 1 < argc) options.api = argv[++i];
         else if (arg == "--inject-at" && i + 1 < argc) options.injectAt = atoi(argv[++i]);
         else if (arg == "--dll" && i + 1 < argc) options.dll = argv[++i];
+        else if (arg == "--proxy" && i + 1 < argc) options.proxy = argv[++i];
         else if (arg == "--warp") options.warp = true;
         else if (arg == "--capture") options.capture = true;
         else if (arg == "--device-proc-addr") options.deviceProcAddr = true;
     }
+    if (!options.proxy.empty())
+        return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--warp] [--capture] [--device-proc-addr] [--dll path]\n");
+        printf("usage: uih_host --api d3d9|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--warp] [--capture] [--device-proc-addr] [--dll path]\n       uih_host --proxy path\n");
         return 2;
     }
 

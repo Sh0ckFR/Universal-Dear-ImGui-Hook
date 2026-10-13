@@ -82,9 +82,12 @@ endif()
 add_library(uih::uih ALIAS uih)
 
 if(UIH_BUILD_EXAMPLE)
-    add_library(uih_example SHARED example/dllmain.cpp example/menu.cpp)
+    add_library(uih_example SHARED example/dllmain.cpp example/menu.cpp example/proxy.cpp example/proxy.def)
     target_link_libraries(uih_example PRIVATE uih)
     set_target_properties(uih_example PROPERTIES OUTPUT_NAME Universal-ImGui-Hook PREFIX "")
+    if(MINGW)
+        target_link_options(uih_example PRIVATE -Wl,--enable-stdcall-fixup)
+    endif()
 endif()
 
 if(UIH_BUILD_TESTS)
