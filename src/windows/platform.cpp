@@ -97,13 +97,15 @@ DWORD WINAPI Worker(void*) {
     }
 
     input::InstallCursorHooks();
-    InstallLoadedRenderers();
 
+    // Registered before the first pass: a module loaded meanwhile wakes the loop below.
     HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
     auto registerFn = GetProc<LdrRegisterDllNotificationFn>(ntdll, "LdrRegisterDllNotification");
     auto unregisterFn = GetProc<LdrUnregisterDllNotificationFn>(ntdll, "LdrUnregisterDllNotification");
     if (registerFn && unregisterFn && registerFn(0, OnDllNotification, nullptr, &g_dllNotificationCookie) != 0)
         g_dllNotificationCookie = nullptr;
+
+    InstallLoadedRenderers();
 
     HANDLE events[] = {g_stopEvent, g_wakeEvent};
     while (WaitForMultipleObjects(2, events, FALSE, INFINITE) == WAIT_OBJECT_0 + 1)
