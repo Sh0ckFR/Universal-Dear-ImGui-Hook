@@ -139,7 +139,13 @@ bool CreateContext() {
 ImDrawData* Frame() {
     platform::NewFrame();
     PollKeys();
-    ImGui::GetIO().MouseDrawCursor = g_menuOpen;
+    ImGuiIO& io = ImGui::GetIO();
+    io.MouseDrawCursor = g_menuOpen;
+    // The game keeps its controller while the menu is closed.
+    if (g_menuOpen)
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+    else
+        io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableGamepad;
     ImGui::NewFrame();
     if (g_config.render)
         g_config.render();

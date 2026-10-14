@@ -530,6 +530,10 @@ int main(int argc, char** argv) {
                 break;
             }
             printf("ImGui rendered %d vertices\n", ImGui::GetIO().MetricsRenderVertices);
+            if (!(ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_NavEnableGamepad)) {
+                result = Fail("gamepad navigation is off while the menu is open");
+                break;
+            }
             if (options.capture) {
                 int pixels = CountOverlayPixels(window);
                 printf("%d overlay pixels captured\n", pixels);
