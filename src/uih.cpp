@@ -187,8 +187,7 @@ void SetMenuOpen(bool open) {
     if (g_menuOpen.exchange(open) == open)
         return;
     Log("Menu %s", open ? "opened" : "closed");
-    if (open)
-        input::ReleaseCursor();
+    input::OnMenuToggled(open);
 }
 
 const char* BackendName(Backend backend) {

@@ -32,6 +32,8 @@ struct Options {
     bool warp = false;
     bool capture = false;
     bool deviceProcAddr = false;
+    // "raw" or "directinput": checks the input the host reads while the menu is open.
+    std::string input;
     bool egl = false;
     bool lookup = false;
 };

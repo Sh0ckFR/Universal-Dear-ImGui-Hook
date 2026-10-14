@@ -11,6 +11,8 @@
 #include <d3d9.h>
 #include <dxgi1_4.h>
 #include <GL/gl.h>
+#define DIRECTINPUT_VERSION 0x0800
+#include <dinput.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -434,6 +436,154 @@ int RunDllMode(HWND window, Host& host, const Options& options) {
     }
 }
 
+// Input the application reads while the menu is open ----------------------
+
+struct RawInputSeen {
+    bool keyPressed = false;
+    long mouseMotion = 0;
+};
+
+RawInputSeen g_rawInput;
+
+// Reads WM_INPUT before dispatching it, like engines that poll their message queue.
+void PumpRawInput() {
+    MSG msg{};
+    while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+        if (msg.message == WM_INPUT) {
+            RAWINPUT input{};
+            UINT size = sizeof(input);
+            if (GetRawInputData(reinterpret_cast<HRAWINPUT>(msg.lParam), RID_INPUT, &input, &size, sizeof(RAWINPUTHEADER)) != static_cast<UINT>(-1)) {
+                if (input.header.dwType == RIM_TYPEKEYBOARD && input.data.keyboard.VKey == VK_F13 && !(input.data.keyboard.Flags & RI_KEY_BREAK))
+                    g_rawInput.keyPressed = true;
+                if (input.header.dwType == RIM_TYPEMOUSE)
+                    g_rawInput.mouseMotion += labs(input.data.mouse.lLastX) + labs(input.data.mouse.lLastY);
+            }
+        }
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+}
+
+struct InputState {
+    bool asyncKey = false;
+    bool keyState = false;
+    bool keyboardState = false;
+    bool directInputKey = false;
+    RawInputSeen raw;
+    POINT cursor{};
+};
+
+// Presses F13, which no application uses, and moves the mouse, then reports what the host reads.
+InputState PressAndRead(Host& host, IDirectInputDevice8W* keyboard) {
+    g_rawInput = {};
+    keybd_event(VK_F13, static_cast<BYTE>(MapVirtualKeyW(VK_F13, MAPVK_VK_TO_VSC)), 0, 0);
+    INPUT motion{};
+    motion.type = INPUT_MOUSE;
+    motion.mi.dx = 40;
+    motion.mi.dy = 40;
+    motion.mi.dwFlags = MOUSEEVENTF_MOVE;
+    SendInput(1, &motion, sizeof(motion));
+    for (int frame = 0; frame < 10; ++frame) {
+        PumpRawInput();
+        host.Frame();
+    }
+
+    InputState state;
+    state.asyncKey = (GetAsyncKeyState(VK_F13) & 0x8000) != 0;
+    state.keyState = (GetKeyState(VK_F13) & 0x8000) != 0;
+    BYTE keys[256] = {};
+    GetKeyboardState(keys);
+    state.keyboardState = (keys[VK_F13] & 0x80) != 0;
+    BYTE directInputKeys[256] = {};
+    if (keyboard && SUCCEEDED(keyboard->GetDeviceState(sizeof(directInputKeys), directInputKeys)))
+        state.directInputKey = (directInputKeys[DIK_F13] & 0x80) != 0;
+    state.raw = g_rawInput;
+    GetCursorPos(&state.cursor);
+
+    keybd_event(VK_F13, static_cast<BYTE>(MapVirtualKeyW(VK_F13, MAPVK_VK_TO_VSC)), KEYEVENTF_KEYUP, 0);
+    for (int frame = 0; frame < 5; ++frame) {
+        PumpRawInput();
+        host.Frame();
+    }
+    return state;
+}
+
+void PrintInput(const char* label, const InputState& state) {
+    printf("%s: GetAsyncKeyState %d, GetKeyState %d, GetKeyboardState %d, DirectInput %d, raw key %d, raw motion %ld, cursor %ld,%ld\n", label,
+           state.asyncKey, state.keyState, state.keyboardState, state.directInputKey, state.raw.keyPressed, state.raw.mouseMotion, state.cursor.x,
+           state.cursor.y);
+}
+
+// Checks that the keyboard and the mouse reach the host while the menu is
+// closed, and that the host reads nothing while it is open. DirectInput
+// registers the keyboard for raw input itself, and a process has one raw
+// input target per device class, so raw input and DirectInput are checked
+// in separate runs.
+int RunInputMode(HWND window, Host& host, bool useDirectInput) {
+    RAWINPUTDEVICE devices[] = {{0x01, 0x06, 0, window}, {0x01, 0x02, 0, window}};
+    if (!useDirectInput)
+        RegisterRawInputDevices(devices, 2, sizeof(RAWINPUTDEVICE));
+    IDirectInput8W* directInput = nullptr;
+    IDirectInputDevice8W* keyboard = nullptr;
+    if (useDirectInput && SUCCEEDED(DirectInput8Create(GetModuleHandleW(nullptr), DIRECTINPUT_VERSION, IID_IDirectInput8W, reinterpret_cast<void**>(&directInput), nullptr)) &&
+        SUCCEEDED(directInput->CreateDevice(GUID_SysKeyboard, &keyboard, nullptr))) {
+        keyboard->SetDataFormat(&c_dfDIKeyboard);
+        keyboard->SetCooperativeLevel(window, DISCL_BACKGROUND | DISCL_NONEXCLUSIVE);
+        keyboard->Acquire();
+    }
+
+    StartHook();
+    int result = 0;
+    for (int frame = 0; frame < 600 && uih::ActiveBackend() == uih::Backend::None; ++frame) {
+        PumpRawInput();
+        host.Frame();
+    }
+    SetForegroundWindow(window);
+    for (int frame = 0; frame < 30; ++frame) {
+        PumpRawInput();
+        host.Frame();
+    }
+
+    if (uih::ActiveBackend() == uih::Backend::None) {
+        result = Fail("backend was not detected");
+    } else if (GetForegroundWindow() != window) {
+        result = Skip("the host window does not have the focus");
+    } else {
+        InputState closed = PressAndRead(host, keyboard);
+        PrintInput("menu closed", closed);
+        bool reached = useDirectInput ? closed.directInputKey : closed.raw.keyPressed && closed.raw.mouseMotion != 0;
+        if (!closed.asyncKey || !closed.keyState || !closed.keyboardState || !reached) {
+            result = Skip("the key press or the mouse motion did not reach the host");
+        } else {
+            uih::SetMenuOpen(true);
+            POINT before{};
+            GetCursorPos(&before);
+            InputState open = PressAndRead(host, keyboard);
+            PrintInput("menu open", open);
+            uih::SetMenuOpen(false);
+            if (open.asyncKey || open.keyState || open.keyboardState)
+                result = Fail("the application reads the keyboard state while the menu is open");
+            else if (open.directInputKey)
+                result = Fail("DirectInput reports the key while the menu is open");
+            else if (open.raw.keyPressed || open.raw.mouseMotion != 0)
+                result = Fail("raw input reaches the application while the menu is open");
+            else if (open.cursor.x != before.x || open.cursor.y != before.y)
+                result = Fail("the cursor moves for the application while the menu is open");
+        }
+    }
+
+    uih::Stop();
+    if (keyboard) {
+        keyboard->Unacquire();
+        keyboard->Release();
+    }
+    if (directInput)
+        directInput->Release();
+    if (result == 0)
+        printf("PASS: input via %s\n", useDirectInput ? "DirectInput" : "raw input");
+    return result;
+}
+
 // Calls the export a target imports when the DLL is renamed to dinput8.dll.
 int RunProxyMode(const Options& options) {
     using DirectInput8CreateFn = HRESULT(WINAPI*)(HINSTANCE, DWORD, REFIID, void**, void*);
@@ -472,12 +622,13 @@ int main(int argc, char** argv) {
         else if (arg == "--warp") options.warp = true;
         else if (arg == "--capture") options.capture = true;
         else if (arg == "--device-proc-addr") options.deviceProcAddr = true;
+        else if (arg == "--input" && i + 1 < argc) options.input = argv[++i];
     }
     if (!options.proxy.empty())
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--warp] [--capture] [--device-proc-addr] [--dll path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--warp] [--capture] [--device-proc-addr] [--input raw|directinput] [--dll path]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -497,6 +648,12 @@ int main(int argc, char** argv) {
         printf("SKIP: %s is not available on this machine\n", options.api.c_str());
         uih::Stop();
         return kSkip;
+    }
+    if (!options.input.empty()) {
+        int result = RunInputMode(window, *host, options.input == "directinput");
+        host.reset();
+        DestroyWindow(window);
+        return result;
     }
     if (!options.dll.empty()) {
         int result = RunDllMode(window, *host, options);
