@@ -156,6 +156,26 @@ struct D3D12Host : Host {
     ID3D12Fence* fence = nullptr;
     HANDLE fenceEvent = nullptr;
     UINT64 fenceValue = 0;
+    // Direct queue of a second device, executing work after the presenting
+    // queue every frame, like a video decoder or a tool would.
+    ID3D12Device* decoyDevice = nullptr;
+    ID3D12CommandQueue* decoyQueue = nullptr;
+    ID3D12CommandAllocator* decoyAllocator = nullptr;
+    ID3D12GraphicsCommandList* decoyList = nullptr;
+
+    bool CreateDecoy(IDXGIFactory4* factory) {
+        IDXGIAdapter* warp = nullptr;
+        if (FAILED(factory->EnumWarpAdapter(IID_PPV_ARGS(&warp))))
+            return false;
+        HRESULT hr = D3D12CreateDevice(warp, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&decoyDevice));
+        warp->Release();
+        D3D12_COMMAND_QUEUE_DESC queueDesc{};
+        if (FAILED(hr) || FAILED(decoyDevice->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&decoyQueue))) ||
+            FAILED(decoyDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&decoyAllocator))) ||
+            FAILED(decoyDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, decoyAllocator, nullptr, IID_PPV_ARGS(&decoyList))))
+            return false;
+        return SUCCEEDED(decoyList->Close());
+    }
 
     bool Init(HWND window, const Options& options) override {
         IDXGIFactory4* factory = nullptr;
@@ -184,8 +204,10 @@ struct D3D12Host : Host {
         desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
         IDXGISwapChain1* swapChain1 = nullptr;
         hr = factory->CreateSwapChainForHwnd(queue, window, &desc, nullptr, nullptr, &swapChain1);
+        // WARP is the decoy's device, which has to differ from the presenting one.
+        bool decoyReady = !options.decoyQueue || (!options.warp && CreateDecoy(factory));
         factory->Release();
-        if (FAILED(hr))
+        if (FAILED(hr) || !decoyReady)
             return false;
         swapChain1->QueryInterface(IID_PPV_ARGS(&swapChain));
         swapChain1->Release();
@@ -228,6 +250,10 @@ struct D3D12Host : Host {
         commandList->Close();
         ID3D12CommandList* lists[] = {commandList};
         queue->ExecuteCommandLists(1, lists);
+        if (decoyQueue) {
+            ID3D12CommandList* decoyLists[] = {decoyList};
+            decoyQueue->ExecuteCommandLists(1, decoyLists);
+        }
         swapChain->Present(1, 0);
         queue->Signal(fence, ++fenceValue);
         if (fence->GetCompletedValue() < fenceValue) {
@@ -237,6 +263,10 @@ struct D3D12Host : Host {
     }
 
     ~D3D12Host() override {
+        Release(decoyList);
+        Release(decoyAllocator);
+        Release(decoyQueue);
+        Release(decoyDevice);
         if (fenceEvent)
             CloseHandle(fenceEvent);
         Release(fence);
@@ -472,12 +502,13 @@ int main(int argc, char** argv) {
         else if (arg == "--warp") options.warp = true;
         else if (arg == "--capture") options.capture = true;
         else if (arg == "--device-proc-addr") options.deviceProcAddr = true;
+        else if (arg == "--decoy-queue") options.decoyQueue = true;
     }
     if (!options.proxy.empty())
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--warp] [--capture] [--device-proc-addr] [--dll path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--dll path]\n       uih_host --proxy path\n");
         return 2;
     }
 
