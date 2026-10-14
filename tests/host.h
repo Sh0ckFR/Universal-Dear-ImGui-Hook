@@ -33,6 +33,7 @@ struct Options {
     bool warp = false;
     bool capture = false;
     bool deviceProcAddr = false;
+    bool decoyQueue = false;
     bool egl = false;
     bool lookup = false;
 };
