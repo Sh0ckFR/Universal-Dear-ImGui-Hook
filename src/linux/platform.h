@@ -13,6 +13,8 @@ bool WindowSize(NativeWindow window, uint32_t& width, uint32_t& height);
 void NewFrame();
 bool IsKeyDown(int keysym);
 bool IsFocused();
+// Xft.dpi of the X server relative to 96 DPI.
+float Scale();
 } // namespace input
 
 namespace interpose {

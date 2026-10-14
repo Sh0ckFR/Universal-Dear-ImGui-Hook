@@ -45,6 +45,12 @@ extern const Renderer kD3D12QueueRenderer;
 extern const Renderer kVulkanRenderer;
 extern const Renderer kOpenGLRenderer;
 
+// Input libraries hooked to hide the input from the application while the menu is open.
+extern const Renderer kDirectInputHooks;
+extern const Renderer kXInput14Hooks;
+extern const Renderer kXInput13Hooks;
+extern const Renderer kXInput910Hooks;
+
 // DXGI swap chain presenters implemented by the D3D10/11/12 backends.
 struct DxgiPresenter {
     Backend backend;
@@ -60,11 +66,25 @@ extern const DxgiPresenter kD3D12Presenter;
 
 // Format usable for a render target view on a swap chain buffer.
 DXGI_FORMAT RenderTargetFormat(DXGI_FORMAT format);
+// True for render target formats that store linear values.
+bool StoresLinear(DXGI_FORMAT format);
 // Hidden window for dummy swap chains.
 HWND CreateHiddenWindow();
 
 namespace input {
-void InstallCursorHooks();
+void InstallHooks();
+
+// Marks the calls made by the hook itself: they see the real input state.
+class OwnCalls {
+public:
+    OwnCalls();
+    ~OwnCalls();
+    OwnCalls(const OwnCalls&) = delete;
+    OwnCalls& operator=(const OwnCalls&) = delete;
+};
+// True when the menu is open and the caller is the application.
+bool BlockInput();
+SHORT RealAsyncKeyState(int key);
 } // namespace input
 
 } // namespace uih::detail

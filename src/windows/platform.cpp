@@ -27,6 +27,10 @@ RendererSlot g_renderers[] = {
     {&kD3D9Renderer},
     {&kDxgiRenderer},
     {&kD3D12QueueRenderer},
+    {&kDirectInputHooks},
+    {&kXInput14Hooks},
+    {&kXInput13Hooks},
+    {&kXInput910Hooks},
 };
 
 HWND g_window = nullptr;
@@ -56,7 +60,9 @@ bool RendererWanted(const Renderer* renderer) {
         return WantBackend(Backend::D3D12);
     if (renderer == &kOpenGLRenderer)
         return WantBackend(Backend::OpenGL);
-    return WantBackend(Backend::Vulkan);
+    if (renderer == &kVulkanRenderer)
+        return WantBackend(Backend::Vulkan);
+    return true;
 }
 
 bool IsWatchedModule(const UNICODE_STRING* name) {
@@ -96,7 +102,7 @@ DWORD WINAPI Worker(void*) {
         return 1;
     }
 
-    input::InstallCursorHooks();
+    input::InstallHooks();
 
     // Registered before the first pass: a module loaded meanwhile wakes the loop below.
     HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
@@ -216,9 +222,19 @@ void Stop() {
     g_stopEvent = g_wakeEvent = nullptr;
 }
 
-void NewFrame() { ImGui_ImplWin32_NewFrame(); }
+void NewFrame() {
+    input::OwnCalls own;
+    ImGui_ImplWin32_NewFrame();
+}
 
-bool IsKeyDown(int key) { return (GetAsyncKeyState(key) & 0x8000) != 0; }
+bool IsKeyDown(int key) { return (input::RealAsyncKeyState(key) & 0x8000) != 0; }
+
+float WindowScale() {
+    using GetDpiForWindowFn = UINT(WINAPI*)(HWND);
+    static auto getDpiForWindow = GetProc<GetDpiForWindowFn>(GetModuleHandleW(L"user32.dll"), "GetDpiForWindow");
+    UINT dpi = getDpiForWindow && g_window ? getDpiForWindow(g_window) : 0;
+    return dpi ? static_cast<float>(dpi) / USER_DEFAULT_SCREEN_DPI : 1.0f;
+}
 
 bool IsFocused() {
     HWND foreground = GetForegroundWindow();
