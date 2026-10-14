@@ -82,7 +82,7 @@ The build uses CMake and ships Dear ImGui, MinHook and the Vulkan headers, so th
 | Windows game, 64-bit | `Universal-ImGui-Hook.dll` | `msvc-x64`, `mingw-x64` |
 | Windows game, 32-bit | `Universal-ImGui-Hook.dll` | `msvc-x86`, `mingw-x86` |
 | Windows game running under Wine or Proton | `Universal-ImGui-Hook.dll` | same as above |
-| Native Linux game, 64-bit | `Universal-ImGui-Hook.so` | `linux` |
+| Native Linux game, x86-64 or ARM64 | `Universal-ImGui-Hook.so` | `linux` |
 
 Each preset writes to its own `build/<preset>` directory, so several of them can live side by side.
 
@@ -215,7 +215,7 @@ What to expect compared to Windows:
 - The mouse wheel, dead keys and input methods are not handled.
 - OpenGL ES contexts are left alone.
 - Games that link their OpenGL or Vulkan loader statically are not hooked.
-- Only x86-64 with glibc is built and tested.
+- Only x86-64 and ARM64 (aarch64) with glibc are built and tested; 32-bit games are not supported.
 
 ### Writing your own menu
 
@@ -294,7 +294,7 @@ The [build workflow](.github/workflows/build.yml) runs on every push and pull re
 | Visual Studio solution x64, x86 | `Universal-ImGui-Hook.sln` built with MSBuild, same two tests |
 | MinGW-w64 x86_64, i686 on Ubuntu and macOS | Cross-compilation of the DLL, name of the proxy export |
 | Linux GCC, Clang | Build, exported symbols, the six preload tests under Xvfb with llvmpipe and lavapipe |
-| Linux portable | The released library: built and tested in a glibc 2.28 container, glibc requirement checked |
+| Linux portable x86_64, aarch64 | The released libraries: built and tested in glibc 2.28 containers, glibc requirement checked |
 | DDNet OpenGL, Vulkan | The official DDNet build with the released library preloaded: overlay, menu hotkey, removal |
 | FetchContent consumer | The repository used as a dependency of another CMake project |
 

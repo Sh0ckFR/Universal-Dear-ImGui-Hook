@@ -128,9 +128,17 @@ jobs:
 
   # Built against an old glibc so the released library loads on older systems.
   linux-portable:
-    name: Linux portable (glibc 2.28)
-    runs-on: ubuntu-24.04
-    container: quay.io/pypa/manylinux_2_28_x86_64
+    name: Linux portable ${{ matrix.arch }} (glibc 2.28)
+    runs-on: ${{ matrix.runner }}
+    container: quay.io/pypa/manylinux_2_28_${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
@@ -157,7 +165,7 @@ jobs:
           if grep -E 'preload_(glx|egl).*Skipped' ctest.log; then exit 1; fi
       - uses: actions/upload-artifact@v4
         with:
-          name: Universal-ImGui-Hook-linux-x86_64
+          name: Universal-ImGui-Hook-linux-${{ matrix.arch }}
           path: build/linux/Universal-ImGui-Hook.so
 
   ddnet:
