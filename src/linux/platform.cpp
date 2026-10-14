@@ -55,6 +55,8 @@ bool IsKeyDown(int key) { return input::IsKeyDown(key); }
 
 bool IsFocused() { return input::IsFocused(); }
 
+float WindowScale() { return input::Scale(); }
+
 void Unload() {
     if (g_unloadRequested.exchange(true))
         return;

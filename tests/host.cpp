@@ -369,8 +369,9 @@ void PumpMessages() {
     }
 }
 
-void StartHook() {
+void StartHook(const Options& options) {
     uih::Config config;
+    config.scale = options.scale;
     config.render = DrawTestMenu;
     config.debugLog = true;
     uih::Start(config);
@@ -469,6 +470,7 @@ int main(int argc, char** argv) {
         else if (arg == "--inject-at" && i + 1 < argc) options.injectAt = atoi(argv[++i]);
         else if (arg == "--dll" && i + 1 < argc) options.dll = argv[++i];
         else if (arg == "--proxy" && i + 1 < argc) options.proxy = argv[++i];
+        else if (arg == "--scale" && i + 1 < argc) options.scale = static_cast<float>(atof(argv[++i]));
         else if (arg == "--warp") options.warp = true;
         else if (arg == "--capture") options.capture = true;
         else if (arg == "--device-proc-addr") options.deviceProcAddr = true;
@@ -477,7 +479,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--warp] [--capture] [--device-proc-addr] [--dll path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--warp] [--capture] [--device-proc-addr] [--dll path]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -490,7 +492,7 @@ int main(int argc, char** argv) {
     PumpMessages();
 
     if (options.injectAt == 0 && options.dll.empty())
-        StartHook();
+        StartHook(options);
 
     std::unique_ptr<Host> host = CreateHost(options.api);
     if (!host->Init(window, options)) {
@@ -512,7 +514,7 @@ int main(int argc, char** argv) {
     while (result == 0) {
         PumpMessages();
         if (frame == options.injectAt && frame > 0)
-            StartHook();
+            StartHook(options);
         host->Frame();
         ++frame;
 
@@ -530,6 +532,10 @@ int main(int argc, char** argv) {
                 break;
             }
             printf("ImGui rendered %d vertices\n", ImGui::GetIO().MetricsRenderVertices);
+            if (options.scale > 0.0f && ImGui::GetStyle().FontScaleDpi != options.scale) {
+                result = Fail("the interface scale was not applied");
+                break;
+            }
             if (options.capture) {
                 int pixels = CountOverlayPixels(window);
                 printf("%d overlay pixels captured\n", pixels);
