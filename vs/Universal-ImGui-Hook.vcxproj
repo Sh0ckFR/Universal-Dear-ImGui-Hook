@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{D66DA324-0564-4B87-ADEC-DADFFC44202A}</ProjectGuid>
+  </PropertyGroup>
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+  </PropertyGroup>
+  <Import Project="common.props" />
+  <ItemDefinitionGroup>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <ModuleDefinitionFile>$(UihRoot)example\proxy.def</ModuleDefinitionFile>
+      <AdditionalDependencies>d3dcompiler.lib;dxgi.lib;dwmapi.lib;imm32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="..\example\dllmain.cpp" />
+    <ClCompile Include="..\example\menu.cpp" />
+    <ClCompile Include="..\example\proxy.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\example\proxy.def" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="minhook.vcxproj">
+      <Project>{2D8BF300-F68F-47AC-9AAA-CAC531C19215}</Project>
+    </ProjectReference>
+    <ProjectReference Include="uih_imgui.vcxproj">
+      <Project>{AD1BAA83-7939-47C4-A58E-3D32F2358DC1}</Project>
+    </ProjectReference>
+    <ProjectReference Include="uih.vcxproj">
+      <Project>{169A0A14-2947-4475-ABDD-37DE47C475E8}</Project>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

@@ -29,6 +29,23 @@ jobs:
           name: Universal-ImGui-Hook-msvc-${{ matrix.arch }}
           path: build/Release/Universal-ImGui-Hook.dll
 
+  solution:
+    name: Visual Studio solution ${{ matrix.platform }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [x64, x86]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build
+        run: msbuild Universal-ImGui-Hook.sln -m -p:Configuration=Release -p:Platform=${{ matrix.platform }}
+      - name: Smoke test (WARP)
+        run: build\vs\${{ matrix.platform }}\Release\uih_host.exe --api d3d11 --warp
+      - name: Proxy test
+        run: build\vs\${{ matrix.platform }}\Release\uih_host.exe --proxy build\vs\${{ matrix.platform }}\Release\Universal-ImGui-Hook.dll
+
   mingw:
     name: MinGW-w64 ${{ matrix.arch }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
