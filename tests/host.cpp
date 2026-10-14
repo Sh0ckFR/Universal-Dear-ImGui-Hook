@@ -39,7 +39,9 @@ struct D3D9Host : Host {
     IDirect3D9* d3d = nullptr;
     IDirect3DDevice9* device = nullptr;
 
-    bool Init(HWND window, const Options&) override {
+    bool Init(HWND window, const Options& options) override {
+        if (!options.format.empty())
+            return false;
         d3d = Direct3DCreate9(D3D_SDK_VERSION);
         if (!d3d)
             return false;
@@ -65,12 +67,20 @@ struct D3D9Host : Host {
 
 // D3D10 ------------------------------------------------------------------
 
-DXGI_SWAP_CHAIN_DESC SwapChainDesc(HWND window) {
+DXGI_FORMAT BackBufferFormat(const Options& options) {
+    if (options.format == "srgb")
+        return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+    if (options.format == "float")
+        return DXGI_FORMAT_R16G16B16A16_FLOAT;
+    return DXGI_FORMAT_R8G8B8A8_UNORM;
+}
+
+DXGI_SWAP_CHAIN_DESC SwapChainDesc(HWND window, const Options& options) {
     DXGI_SWAP_CHAIN_DESC desc{};
     desc.BufferCount = 2;
     desc.BufferDesc.Width = kWidth;
     desc.BufferDesc.Height = kHeight;
-    desc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    desc.BufferDesc.Format = BackBufferFormat(options);
     desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     desc.OutputWindow = window;
     desc.SampleDesc.Count = 1;
@@ -85,7 +95,7 @@ struct D3D10Host : Host {
     ID3D10RenderTargetView* target = nullptr;
 
     bool Init(HWND window, const Options& options) override {
-        DXGI_SWAP_CHAIN_DESC desc = SwapChainDesc(window);
+        DXGI_SWAP_CHAIN_DESC desc = SwapChainDesc(window, options);
         D3D10_DRIVER_TYPE driver = options.warp ? D3D10_DRIVER_TYPE_WARP : D3D10_DRIVER_TYPE_HARDWARE;
         if (FAILED(D3D10CreateDeviceAndSwapChain(nullptr, driver, nullptr, 0, D3D10_SDK_VERSION, &desc, &swapChain, &device)))
             return false;
@@ -117,7 +127,7 @@ struct D3D11Host : Host {
     ID3D11RenderTargetView* target = nullptr;
 
     bool Init(HWND window, const Options& options) override {
-        DXGI_SWAP_CHAIN_DESC desc = SwapChainDesc(window);
+        DXGI_SWAP_CHAIN_DESC desc = SwapChainDesc(window, options);
         D3D_DRIVER_TYPE driver = options.warp ? D3D_DRIVER_TYPE_WARP : D3D_DRIVER_TYPE_HARDWARE;
         if (FAILED(D3D11CreateDeviceAndSwapChain(nullptr, driver, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &desc, &swapChain, &device, nullptr, &context)))
             return false;
@@ -177,12 +187,18 @@ struct D3D12Host : Host {
         DXGI_SWAP_CHAIN_DESC1 desc{};
         desc.Width = kWidth;
         desc.Height = kHeight;
-        desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        // Flip model swap chains cannot use sRGB formats.
+        if (options.format == "srgb") {
+            factory->Release();
+            return false;
+        }
+        desc.Format = BackBufferFormat(options);
         desc.SampleDesc.Count = 1;
         desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
         desc.BufferCount = kBuffers;
         desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
         IDXGISwapChain1* swapChain1 = nullptr;
+        Settle(options);
         hr = factory->CreateSwapChainForHwnd(queue, window, &desc, nullptr, nullptr, &swapChain1);
         factory->Release();
         if (FAILED(hr))
@@ -258,7 +274,10 @@ struct OpenGLHost : Host {
     HDC hdc = nullptr;
     HGLRC context = nullptr;
 
-    bool Init(HWND hwnd, const Options&) override {
+    bool Init(HWND hwnd, const Options& options) override {
+        constexpr GLenum kFramebufferSrgb = 0x8DB9;
+        if (options.format == "float")
+            return false;
         window = hwnd;
         hdc = GetDC(window);
         PIXELFORMATDESCRIPTOR pfd{};
@@ -274,6 +293,8 @@ struct OpenGLHost : Host {
         if (!context || !wglMakeCurrent(hdc, context))
             return false;
         const char* version = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+        if (options.format == "srgb")
+            glEnable(kFramebufferSrgb);
         return version && version[0] >= '3';
     }
 
@@ -294,9 +315,17 @@ struct OpenGLHost : Host {
 
 // Driver -----------------------------------------------------------------
 
+// Opaque color drawn by the test menu and checked on screen: it must come out
+// unchanged whatever the format of the back buffer.
+constexpr uint8_t kProbe[3] = {200, 100, 50};
+constexpr int kProbeX = 650;
+constexpr int kProbeY = 500;
+
 void DrawTestMenu() {
     if (!uih::IsMenuOpen())
         return;
+    ImGui::GetForegroundDrawList()->AddRectFilled(ImVec2(kProbeX - 50.0f, kProbeY - 50.0f), ImVec2(kProbeX + 50.0f, kProbeY + 50.0f),
+                                                  IM_COL32(kProbe[0], kProbe[1], kProbe[2], 255));
     ImGui::SetNextWindowPos(ImVec2(50, 50));
     ImGui::SetNextWindowSize(ImVec2(500, 400));
     ImGui::Begin("uih host", nullptr, ImGuiWindowFlags_NoResize);
@@ -305,7 +334,12 @@ void DrawTestMenu() {
     ImGui::End();
 }
 
-int CountOverlayPixels(HWND window) {
+struct Capture {
+    int overlayPixels = 0;
+    uint8_t probe[3] = {};
+};
+
+Capture CaptureWindow(HWND window) {
     RECT rect{};
     GetClientRect(window, &rect);
     POINT origin{};
@@ -327,18 +361,32 @@ int CountOverlayPixels(HWND window) {
     HGDIOBJ previous = SelectObject(memory, bitmap);
     BitBlt(memory, 0, 0, width, height, screen, origin.x, origin.y, SRCCOPY | CAPTUREBLT);
 
-    int count = 0;
+    Capture capture;
     const uint8_t* pixels = static_cast<const uint8_t*>(bits);
     for (int i = 0; i < width * height; ++i) {
         const uint8_t* p = pixels + i * 4;
         if (abs(p[2] - 26) > 12 || abs(p[1] - 51) > 12 || abs(p[0] - 77) > 12)
-            ++count;
+            ++capture.overlayPixels;
+    }
+    if (kProbeX < width && kProbeY < height) {
+        const uint8_t* p = pixels + (kProbeY * width + kProbeX) * 4;
+        capture.probe[0] = p[2];
+        capture.probe[1] = p[1];
+        capture.probe[2] = p[0];
     }
     SelectObject(memory, previous);
     DeleteObject(bitmap);
     DeleteDC(memory);
     ReleaseDC(nullptr, screen);
-    return count;
+    return capture;
+}
+
+bool ProbeMatches(const Capture& capture) {
+    printf("probe color %d %d %d, expected %d %d %d\n", capture.probe[0], capture.probe[1], capture.probe[2], kProbe[0], kProbe[1], kProbe[2]);
+    for (int i = 0; i < 3; ++i)
+        if (abs(capture.probe[i] - kProbe[i]) > 8)
+            return false;
+    return true;
 }
 
 uih::Backend ExpectedBackend(const std::string& api) {
@@ -415,7 +463,7 @@ int RunDllMode(HWND window, Host& host, const Options& options) {
         if (frame == options.injectAt + 95)
             HoldKey(VK_INSERT, false);
         if (frame == options.injectAt + 180) {
-            int pixels = CountOverlayPixels(window);
+            int pixels = CaptureWindow(window).overlayPixels;
             printf("%d overlay pixels captured\n", pixels);
             if (pixels < kWidth * kHeight / 100)
                 return Fail("overlay is not visible on screen");
@@ -472,12 +520,14 @@ int main(int argc, char** argv) {
         else if (arg == "--warp") options.warp = true;
         else if (arg == "--capture") options.capture = true;
         else if (arg == "--device-proc-addr") options.deviceProcAddr = true;
+        else if (arg == "--format" && i + 1 < argc) options.format = argv[++i];
+        else if (arg == "--settle" && i + 1 < argc) options.settleMs = atoi(argv[++i]);
     }
     if (!options.proxy.empty())
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--warp] [--capture] [--device-proc-addr] [--dll path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--warp] [--capture] [--device-proc-addr] [--format srgb|float] [--settle ms] [--dll path]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -531,10 +581,15 @@ int main(int argc, char** argv) {
             }
             printf("ImGui rendered %d vertices\n", ImGui::GetIO().MetricsRenderVertices);
             if (options.capture) {
-                int pixels = CountOverlayPixels(window);
-                printf("%d overlay pixels captured\n", pixels);
-                if (pixels < kWidth * kHeight / 100) {
+                Capture capture = CaptureWindow(window);
+                printf("%d overlay pixels captured\n", capture.overlayPixels);
+                // The clear color of a linear back buffer is not the reference one.
+                if (options.format.empty() && capture.overlayPixels < kWidth * kHeight / 100) {
                     result = Fail("overlay is not visible on screen");
+                    break;
+                }
+                if (!ProbeMatches(capture)) {
+                    result = Fail("overlay colors are altered");
                     break;
                 }
             }

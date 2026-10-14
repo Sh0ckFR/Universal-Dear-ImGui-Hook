@@ -17,6 +17,15 @@ if(WIN32)
     uih_add_host_test(vulkan_early --api vulkan --inject-at 0)
     uih_add_host_test(opengl --api opengl)
 
+    # Back buffers storing linear values: the overlay colors must come out unchanged.
+    uih_add_host_test(d3d10_srgb --api d3d10 --format srgb --capture)
+    uih_add_host_test(d3d11_srgb --api d3d11 --format srgb --capture)
+    uih_add_host_test(d3d11_float --api d3d11 --format float --capture)
+    uih_add_host_test(d3d12_float --api d3d12 --format float --capture)
+    uih_add_host_test(vulkan_srgb --api vulkan --format srgb --capture)
+    uih_add_host_test(vulkan_srgb_early --api vulkan --format srgb --capture --inject-at 0 --settle 3000)
+    uih_add_host_test(opengl_srgb --api opengl --format srgb --capture)
+
     if(TARGET uih_example)
         uih_add_host_test(dll_d3d11 --api d3d11 --dll $<TARGET_FILE:uih_example>)
         uih_add_host_test(dll_vulkan --api vulkan --dll $<TARGET_FILE:uih_example>)
