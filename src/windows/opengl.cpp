@@ -1,5 +1,6 @@
 #include "internal.h"
 
+#include "gl_srgb.h"
 #include "imgui_impl_opengl3.h"
 
 namespace uih::detail {
@@ -57,7 +58,9 @@ void Render(HDC hdc) {
     if (!BindWindow(window))
         return;
     ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplOpenGL3_RenderDrawData(Frame());
+    ImDrawData* drawData = Frame();
+    FramebufferSrgbOff srgbOff([](const char* name) { return GetProc<void*>(g_module, name); });
+    ImGui_ImplOpenGL3_RenderDrawData(drawData);
 }
 
 BOOL WINAPI HookSwapBuffers(HDC hdc) {

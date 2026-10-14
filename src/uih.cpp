@@ -1,6 +1,8 @@
 #include "internal.h"
 
+#include <array>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdarg>
 #include <cstdio>
@@ -24,6 +26,8 @@ std::mutex g_teardownMutex;
 std::condition_variable g_teardownSignal;
 bool g_teardownDone = false;
 
+float g_appliedScale = 1.0f;
+
 bool g_menuKeyDown = false;
 bool g_unloadKeyDown = false;
 
@@ -40,6 +44,17 @@ void PollKeys() {
         SetMenuOpen(!g_menuOpen);
     if (KeyPressed(g_config.unloadKey, g_unloadKeyDown, focused))
         platform::Unload();
+}
+
+void ApplyScale() {
+    float scale = g_config.scale > 0.0f ? g_config.scale : platform::WindowScale();
+    if (scale <= 0.0f || scale == g_appliedScale)
+        return;
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.ScaleAllSizes(scale / g_appliedScale);
+    style.FontScaleDpi = scale;
+    g_appliedScale = scale;
+    Log("Interface scale %.2f", scale);
 }
 
 } // namespace
@@ -133,18 +148,45 @@ bool CreateContext() {
     io.LogFilename = nullptr;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     ImGui::StyleColorsDark();
+    g_appliedScale = 1.0f;
     return true;
 }
 
 ImDrawData* Frame() {
     platform::NewFrame();
     PollKeys();
-    ImGui::GetIO().MouseDrawCursor = g_menuOpen;
+    ApplyScale();
+    ImGuiIO& io = ImGui::GetIO();
+    io.MouseDrawCursor = g_menuOpen;
+    // The game keeps its controller while the menu is closed.
+    if (g_menuOpen)
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+    else
+        io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableGamepad;
     ImGui::NewFrame();
     if (g_config.render)
         g_config.render();
     ImGui::Render();
     return ImGui::GetDrawData();
+}
+
+void LinearizeColors(ImDrawData* drawData) {
+    static const std::array<ImU32, 256> kLinear = [] {
+        std::array<ImU32, 256> table{};
+        for (int i = 0; i < 256; ++i) {
+            float c = i / 255.0f;
+            float linear = c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
+            table[i] = static_cast<ImU32>(linear * 255.0f + 0.5f);
+        }
+        return table;
+    }();
+    for (ImDrawList* list : drawData->CmdLists) {
+        for (ImDrawVert& vertex : list->VtxBuffer) {
+            ImU32 c = vertex.col;
+            vertex.col = (c & IM_COL32_A_MASK) | kLinear[(c >> IM_COL32_R_SHIFT) & 0xFF] << IM_COL32_R_SHIFT |
+                         kLinear[(c >> IM_COL32_G_SHIFT) & 0xFF] << IM_COL32_G_SHIFT | kLinear[(c >> IM_COL32_B_SHIFT) & 0xFF] << IM_COL32_B_SHIFT;
+        }
+    }
 }
 
 } // namespace detail

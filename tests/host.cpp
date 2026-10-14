@@ -37,42 +37,90 @@ void Release(T*& object) {
 
 // D3D9 -------------------------------------------------------------------
 
+// Renders like many D3D9 games: several scenes per frame, one of them into a
+// texture that is still bound when the frame is presented.
 struct D3D9Host : Host {
+    bool ex = false;
+    bool srgb = false;
     IDirect3D9* d3d = nullptr;
+    IDirect3D9Ex* d3dEx = nullptr;
     IDirect3DDevice9* device = nullptr;
+    IDirect3DDevice9Ex* deviceEx = nullptr;
+    IDirect3DSurface9* backBuffer = nullptr;
+    IDirect3DTexture9* texture = nullptr;
+    IDirect3DSurface9* offscreen = nullptr;
 
-    bool Init(HWND window, const Options&) override {
-        d3d = Direct3DCreate9(D3D_SDK_VERSION);
-        if (!d3d)
+    explicit D3D9Host(bool useEx) : ex(useEx) {}
+
+    bool Init(HWND window, const Options& options) override {
+        if (options.format == "float")
             return false;
+        srgb = options.format == "srgb";
         D3DPRESENT_PARAMETERS present{};
         present.Windowed = TRUE;
         present.SwapEffect = D3DSWAPEFFECT_DISCARD;
         present.hDeviceWindow = window;
-        return SUCCEEDED(d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, window, D3DCREATE_HARDWARE_VERTEXPROCESSING, &present, &device));
+        if (ex) {
+            if (FAILED(Direct3DCreate9Ex(D3D_SDK_VERSION, &d3dEx)) ||
+                FAILED(d3dEx->CreateDeviceEx(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, window, D3DCREATE_HARDWARE_VERTEXPROCESSING, &present, nullptr, &deviceEx)))
+                return false;
+            device = deviceEx;
+            device->AddRef();
+        } else {
+            d3d = Direct3DCreate9(D3D_SDK_VERSION);
+            if (!d3d || FAILED(d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, window, D3DCREATE_HARDWARE_VERTEXPROCESSING, &present, &device)))
+                return false;
+        }
+        return SUCCEEDED(device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &backBuffer)) &&
+               SUCCEEDED(device->CreateTexture(256, 256, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &texture, nullptr)) &&
+               SUCCEEDED(texture->GetSurfaceLevel(0, &offscreen));
     }
 
     void Frame() override {
+        device->SetRenderTarget(0, backBuffer);
+        device->SetRenderState(D3DRS_SRGBWRITEENABLE, srgb);
         device->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_XRGB(26, 51, 77), 1.0f, 0);
         device->BeginScene();
         device->EndScene();
-        device->Present(nullptr, nullptr, nullptr, nullptr);
+        device->SetRenderTarget(0, offscreen);
+        device->BeginScene();
+        device->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_XRGB(255, 255, 255), 1.0f, 0);
+        device->EndScene();
+        device->BeginScene();
+        device->EndScene();
+        if (ex)
+            deviceEx->PresentEx(nullptr, nullptr, nullptr, nullptr, 0);
+        else
+            device->Present(nullptr, nullptr, nullptr, nullptr);
     }
 
     ~D3D9Host() override {
+        Release(offscreen);
+        Release(texture);
+        Release(backBuffer);
+        Release(deviceEx);
         Release(device);
+        Release(d3dEx);
         Release(d3d);
     }
 };
 
 // D3D10 ------------------------------------------------------------------
 
-DXGI_SWAP_CHAIN_DESC SwapChainDesc(HWND window) {
+DXGI_FORMAT BackBufferFormat(const Options& options) {
+    if (options.format == "srgb")
+        return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+    if (options.format == "float")
+        return DXGI_FORMAT_R16G16B16A16_FLOAT;
+    return DXGI_FORMAT_R8G8B8A8_UNORM;
+}
+
+DXGI_SWAP_CHAIN_DESC SwapChainDesc(HWND window, const Options& options) {
     DXGI_SWAP_CHAIN_DESC desc{};
     desc.BufferCount = 2;
     desc.BufferDesc.Width = kWidth;
     desc.BufferDesc.Height = kHeight;
-    desc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    desc.BufferDesc.Format = BackBufferFormat(options);
     desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     desc.OutputWindow = window;
     desc.SampleDesc.Count = 1;
@@ -87,7 +135,7 @@ struct D3D10Host : Host {
     ID3D10RenderTargetView* target = nullptr;
 
     bool Init(HWND window, const Options& options) override {
-        DXGI_SWAP_CHAIN_DESC desc = SwapChainDesc(window);
+        DXGI_SWAP_CHAIN_DESC desc = SwapChainDesc(window, options);
         D3D10_DRIVER_TYPE driver = options.warp ? D3D10_DRIVER_TYPE_WARP : D3D10_DRIVER_TYPE_HARDWARE;
         if (FAILED(D3D10CreateDeviceAndSwapChain(nullptr, driver, nullptr, 0, D3D10_SDK_VERSION, &desc, &swapChain, &device)))
             return false;
@@ -119,7 +167,7 @@ struct D3D11Host : Host {
     ID3D11RenderTargetView* target = nullptr;
 
     bool Init(HWND window, const Options& options) override {
-        DXGI_SWAP_CHAIN_DESC desc = SwapChainDesc(window);
+        DXGI_SWAP_CHAIN_DESC desc = SwapChainDesc(window, options);
         D3D_DRIVER_TYPE driver = options.warp ? D3D_DRIVER_TYPE_WARP : D3D_DRIVER_TYPE_HARDWARE;
         if (FAILED(D3D11CreateDeviceAndSwapChain(nullptr, driver, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &desc, &swapChain, &device, nullptr, &context)))
             return false;
@@ -158,6 +206,26 @@ struct D3D12Host : Host {
     ID3D12Fence* fence = nullptr;
     HANDLE fenceEvent = nullptr;
     UINT64 fenceValue = 0;
+    // Direct queue of a second device, executing work after the presenting
+    // queue every frame, like a video decoder or a tool would.
+    ID3D12Device* decoyDevice = nullptr;
+    ID3D12CommandQueue* decoyQueue = nullptr;
+    ID3D12CommandAllocator* decoyAllocator = nullptr;
+    ID3D12GraphicsCommandList* decoyList = nullptr;
+
+    bool CreateDecoy(IDXGIFactory4* factory) {
+        IDXGIAdapter* warp = nullptr;
+        if (FAILED(factory->EnumWarpAdapter(IID_PPV_ARGS(&warp))))
+            return false;
+        HRESULT hr = D3D12CreateDevice(warp, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&decoyDevice));
+        warp->Release();
+        D3D12_COMMAND_QUEUE_DESC queueDesc{};
+        if (FAILED(hr) || FAILED(decoyDevice->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&decoyQueue))) ||
+            FAILED(decoyDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&decoyAllocator))) ||
+            FAILED(decoyDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, decoyAllocator, nullptr, IID_PPV_ARGS(&decoyList))))
+            return false;
+        return SUCCEEDED(decoyList->Close());
+    }
 
     bool Init(HWND window, const Options& options) override {
         IDXGIFactory4* factory = nullptr;
@@ -179,15 +247,23 @@ struct D3D12Host : Host {
         DXGI_SWAP_CHAIN_DESC1 desc{};
         desc.Width = kWidth;
         desc.Height = kHeight;
-        desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        // Flip model swap chains cannot use sRGB formats.
+        if (options.format == "srgb") {
+            factory->Release();
+            return false;
+        }
+        desc.Format = BackBufferFormat(options);
         desc.SampleDesc.Count = 1;
         desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
         desc.BufferCount = kBuffers;
         desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
         IDXGISwapChain1* swapChain1 = nullptr;
+        Settle(options);
         hr = factory->CreateSwapChainForHwnd(queue, window, &desc, nullptr, nullptr, &swapChain1);
+        // WARP is the decoy's device, which has to differ from the presenting one.
+        bool decoyReady = !options.decoyQueue || (!options.warp && CreateDecoy(factory));
         factory->Release();
-        if (FAILED(hr))
+        if (FAILED(hr) || !decoyReady)
             return false;
         swapChain1->QueryInterface(IID_PPV_ARGS(&swapChain));
         swapChain1->Release();
@@ -230,6 +306,10 @@ struct D3D12Host : Host {
         commandList->Close();
         ID3D12CommandList* lists[] = {commandList};
         queue->ExecuteCommandLists(1, lists);
+        if (decoyQueue) {
+            ID3D12CommandList* decoyLists[] = {decoyList};
+            decoyQueue->ExecuteCommandLists(1, decoyLists);
+        }
         swapChain->Present(1, 0);
         queue->Signal(fence, ++fenceValue);
         if (fence->GetCompletedValue() < fenceValue) {
@@ -239,6 +319,10 @@ struct D3D12Host : Host {
     }
 
     ~D3D12Host() override {
+        Release(decoyList);
+        Release(decoyAllocator);
+        Release(decoyQueue);
+        Release(decoyDevice);
         if (fenceEvent)
             CloseHandle(fenceEvent);
         Release(fence);
@@ -260,7 +344,10 @@ struct OpenGLHost : Host {
     HDC hdc = nullptr;
     HGLRC context = nullptr;
 
-    bool Init(HWND hwnd, const Options&) override {
+    bool Init(HWND hwnd, const Options& options) override {
+        constexpr GLenum kFramebufferSrgb = 0x8DB9;
+        if (options.format == "float")
+            return false;
         window = hwnd;
         hdc = GetDC(window);
         PIXELFORMATDESCRIPTOR pfd{};
@@ -276,6 +363,8 @@ struct OpenGLHost : Host {
         if (!context || !wglMakeCurrent(hdc, context))
             return false;
         const char* version = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+        if (options.format == "srgb")
+            glEnable(kFramebufferSrgb);
         return version && version[0] >= '3';
     }
 
@@ -296,9 +385,17 @@ struct OpenGLHost : Host {
 
 // Driver -----------------------------------------------------------------
 
+// Opaque color drawn by the test menu and checked on screen: it must come out
+// unchanged whatever the format of the back buffer.
+constexpr uint8_t kProbe[3] = {200, 100, 50};
+constexpr int kProbeX = 650;
+constexpr int kProbeY = 500;
+
 void DrawTestMenu() {
     if (!uih::IsMenuOpen())
         return;
+    ImGui::GetForegroundDrawList()->AddRectFilled(ImVec2(kProbeX - 50.0f, kProbeY - 50.0f), ImVec2(kProbeX + 50.0f, kProbeY + 50.0f),
+                                                  IM_COL32(kProbe[0], kProbe[1], kProbe[2], 255));
     ImGui::SetNextWindowPos(ImVec2(50, 50));
     ImGui::SetNextWindowSize(ImVec2(500, 400));
     ImGui::Begin("uih host", nullptr, ImGuiWindowFlags_NoResize);
@@ -307,7 +404,12 @@ void DrawTestMenu() {
     ImGui::End();
 }
 
-int CountOverlayPixels(HWND window) {
+struct Capture {
+    int overlayPixels = 0;
+    uint8_t probe[3] = {};
+};
+
+Capture CaptureWindow(HWND window) {
     RECT rect{};
     GetClientRect(window, &rect);
     POINT origin{};
@@ -329,22 +431,36 @@ int CountOverlayPixels(HWND window) {
     HGDIOBJ previous = SelectObject(memory, bitmap);
     BitBlt(memory, 0, 0, width, height, screen, origin.x, origin.y, SRCCOPY | CAPTUREBLT);
 
-    int count = 0;
+    Capture capture;
     const uint8_t* pixels = static_cast<const uint8_t*>(bits);
     for (int i = 0; i < width * height; ++i) {
         const uint8_t* p = pixels + i * 4;
         if (abs(p[2] - 26) > 12 || abs(p[1] - 51) > 12 || abs(p[0] - 77) > 12)
-            ++count;
+            ++capture.overlayPixels;
+    }
+    if (kProbeX < width && kProbeY < height) {
+        const uint8_t* p = pixels + (kProbeY * width + kProbeX) * 4;
+        capture.probe[0] = p[2];
+        capture.probe[1] = p[1];
+        capture.probe[2] = p[0];
     }
     SelectObject(memory, previous);
     DeleteObject(bitmap);
     DeleteDC(memory);
     ReleaseDC(nullptr, screen);
-    return count;
+    return capture;
+}
+
+bool ProbeMatches(const Capture& capture) {
+    printf("probe color %d %d %d, expected %d %d %d\n", capture.probe[0], capture.probe[1], capture.probe[2], kProbe[0], kProbe[1], kProbe[2]);
+    for (int i = 0; i < 3; ++i)
+        if (abs(capture.probe[i] - kProbe[i]) > 8)
+            return false;
+    return true;
 }
 
 uih::Backend ExpectedBackend(const std::string& api) {
-    if (api == "d3d9") return uih::Backend::D3D9;
+    if (api == "d3d9" || api == "d3d9ex") return uih::Backend::D3D9;
     if (api == "d3d10") return uih::Backend::D3D10;
     if (api == "d3d11") return uih::Backend::D3D11;
     if (api == "d3d12") return uih::Backend::D3D12;
@@ -354,7 +470,8 @@ uih::Backend ExpectedBackend(const std::string& api) {
 }
 
 std::unique_ptr<Host> CreateHost(const std::string& api) {
-    if (api == "d3d9") return std::make_unique<D3D9Host>();
+    if (api == "d3d9") return std::make_unique<D3D9Host>(false);
+    if (api == "d3d9ex") return std::make_unique<D3D9Host>(true);
     if (api == "d3d10") return std::make_unique<D3D10Host>();
     if (api == "d3d11") return std::make_unique<D3D11Host>();
     if (api == "d3d12") return std::make_unique<D3D12Host>();
@@ -371,8 +488,9 @@ void PumpMessages() {
     }
 }
 
-void StartHook() {
+void StartHook(const Options& options) {
     uih::Config config;
+    config.scale = options.scale;
     config.render = DrawTestMenu;
     config.debugLog = true;
     uih::Start(config);
@@ -417,7 +535,7 @@ int RunDllMode(HWND window, Host& host, const Options& options) {
         if (frame == options.injectAt + 95)
             HoldKey(VK_INSERT, false);
         if (frame == options.injectAt + 180) {
-            int pixels = CountOverlayPixels(window);
+            int pixels = CaptureWindow(window).overlayPixels;
             printf("%d overlay pixels captured\n", pixels);
             if (pixels < kWidth * kHeight / 100)
                 return Fail("overlay is not visible on screen");
@@ -532,7 +650,7 @@ int RunInputMode(HWND window, Host& host, bool useDirectInput) {
         keyboard->Acquire();
     }
 
-    StartHook();
+    StartHook(Options{});
     int result = 0;
     for (int frame = 0; frame < 600 && uih::ActiveBackend() == uih::Backend::None; ++frame) {
         PumpRawInput();
@@ -619,16 +737,20 @@ int main(int argc, char** argv) {
         else if (arg == "--inject-at" && i + 1 < argc) options.injectAt = atoi(argv[++i]);
         else if (arg == "--dll" && i + 1 < argc) options.dll = argv[++i];
         else if (arg == "--proxy" && i + 1 < argc) options.proxy = argv[++i];
+        else if (arg == "--scale" && i + 1 < argc) options.scale = static_cast<float>(atof(argv[++i]));
         else if (arg == "--warp") options.warp = true;
         else if (arg == "--capture") options.capture = true;
         else if (arg == "--device-proc-addr") options.deviceProcAddr = true;
+        else if (arg == "--decoy-queue") options.decoyQueue = true;
+        else if (arg == "--format" && i + 1 < argc) options.format = argv[++i];
+        else if (arg == "--settle" && i + 1 < argc) options.settleMs = atoi(argv[++i]);
         else if (arg == "--input" && i + 1 < argc) options.input = argv[++i];
     }
     if (!options.proxy.empty())
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--warp] [--capture] [--device-proc-addr] [--input raw|directinput] [--dll path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--dll path]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -641,7 +763,7 @@ int main(int argc, char** argv) {
     PumpMessages();
 
     if (options.injectAt == 0 && options.dll.empty())
-        StartHook();
+        StartHook(options);
 
     std::unique_ptr<Host> host = CreateHost(options.api);
     if (!host->Init(window, options)) {
@@ -664,18 +786,20 @@ int main(int argc, char** argv) {
 
     int frame = 0;
     int activeFrame = -1;
+    int activeImGuiFrame = 0;
     int stopFrame = -1;
     int result = 0;
     while (result == 0) {
         PumpMessages();
         if (frame == options.injectAt && frame > 0)
-            StartHook();
+            StartHook(options);
         host->Frame();
         ++frame;
 
         if (activeFrame < 0) {
             if (uih::ActiveBackend() == expected) {
                 activeFrame = frame;
+                activeImGuiFrame = ImGui::GetCurrentContext() ? ImGui::GetFrameCount() : 0;
                 printf("%s backend active after %d frames\n", options.api.c_str(), frame - options.injectAt);
                 uih::SetMenuOpen(true);
             } else if (frame > options.injectAt + 600) {
@@ -687,11 +811,30 @@ int main(int argc, char** argv) {
                 break;
             }
             printf("ImGui rendered %d vertices\n", ImGui::GetIO().MetricsRenderVertices);
+            int imguiFrames = ImGui::GetFrameCount() - activeImGuiFrame;
+            if (imguiFrames > frame - activeFrame + 1) {
+                printf("ImGui ran %d frames for %d presents\n", imguiFrames, frame - activeFrame);
+                result = Fail("the overlay is drawn more than once per frame");
+                break;
+            }
+            if (!(ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_NavEnableGamepad)) {
+                result = Fail("gamepad navigation is off while the menu is open");
+                break;
+            }
+            if (options.scale > 0.0f && ImGui::GetStyle().FontScaleDpi != options.scale) {
+                result = Fail("the interface scale was not applied");
+                break;
+            }
             if (options.capture) {
-                int pixels = CountOverlayPixels(window);
-                printf("%d overlay pixels captured\n", pixels);
-                if (pixels < kWidth * kHeight / 100) {
+                Capture capture = CaptureWindow(window);
+                printf("%d overlay pixels captured\n", capture.overlayPixels);
+                // The clear color of a linear back buffer is not the reference one.
+                if (options.format.empty() && capture.overlayPixels < kWidth * kHeight / 100) {
                     result = Fail("overlay is not visible on screen");
+                    break;
+                }
+                if (!ProbeMatches(capture)) {
+                    result = Fail("overlay colors are altered");
                     break;
                 }
             }

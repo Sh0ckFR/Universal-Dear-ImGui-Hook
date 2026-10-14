@@ -50,6 +50,7 @@
   <ItemGroup>
     <ClInclude Include="..\include\uih.h" />
     <ClInclude Include="..\src\internal.h" />
+    <ClInclude Include="..\src\gl_srgb.h" />
     <ClInclude Include="..\src\windows\platform.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

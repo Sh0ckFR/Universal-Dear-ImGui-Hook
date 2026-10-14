@@ -66,6 +66,8 @@ extern const DxgiPresenter kD3D12Presenter;
 
 // Format usable for a render target view on a swap chain buffer.
 DXGI_FORMAT RenderTargetFormat(DXGI_FORMAT format);
+// True for render target formats that store linear values.
+bool StoresLinear(DXGI_FORMAT format);
 // Hidden window for dummy swap chains.
 HWND CreateHiddenWindow();
 
