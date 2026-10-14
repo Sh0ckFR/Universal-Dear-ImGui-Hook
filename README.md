@@ -184,7 +184,7 @@ Pass them to the configure step, for example `cmake --preset linux -DUIH_BUILD_T
 
 Inject `Universal-ImGui-Hook.dll` into the target with any injector (or `LoadLibrary`). The hook can be injected before or after the target initializes its graphics API. When injected into a running Vulkan application, the swap chain format is assumed to be `VK_FORMAT_B8G8R8A8_UNORM` until the application recreates its swap chain.
 
-While the menu is open, keyboard and mouse messages are kept away from the target application and the cursor is released. `F11` removes the overlay and unloads the DLL.
+While the menu is open, keyboard and mouse messages are kept away from the target application, the cursor is released and an XInput controller navigates the menu. `F11` removes the overlay and unloads the DLL.
 
 #### Loading without an injector
 
@@ -225,6 +225,7 @@ Edit `example/menu.cpp` to draw your own interface: `DrawMenu` runs between `ImG
 uih::Config config;
 config.backend = uih::Backend::None;    // None = detect automatically
 config.debugLog = false;                // OutputDebugString (DebugView) on Windows, stderr on Linux
+config.scale = 0.0f;                    // size of the interface, 1.5 = 150%; 0 follows the DPI of the game window
 config.render = DrawMenu;               // called every frame
 #ifdef _WIN32
 config.module = module;                 // DLL to unload on `unloadKey`
