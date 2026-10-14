@@ -43,8 +43,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     bool unicode = g_unicode;
     if (ImGui::GetCurrentContext() && hwnd == g_window) {
         ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam);
-        if (IsMenuOpen() && IsInputMessage(msg))
+        if (IsMenuOpen() && IsInputMessage(msg)) {
+            // The system frees raw input data in DefWindowProc.
+            if (msg == WM_INPUT)
+                return unicode ? DefWindowProcW(hwnd, msg, wParam, lParam) : DefWindowProcA(hwnd, msg, wParam, lParam);
             return 0;
+        }
     }
     if (unicode)
         return CallWindowProcW(original, hwnd, msg, wParam, lParam);
