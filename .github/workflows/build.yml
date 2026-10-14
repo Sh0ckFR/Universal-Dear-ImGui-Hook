@@ -86,8 +86,8 @@ jobs:
           path: build/${{ matrix.preset }}/Universal-ImGui-Hook.dll
 
   linux:
-    name: Linux ${{ matrix.compiler }}
-    runs-on: ubuntu-24.04
+    name: Linux ${{ matrix.compiler }} ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
@@ -95,9 +95,18 @@ jobs:
           - compiler: GCC
             cc: gcc
             cxx: g++
+            arch: x86_64
+            runner: ubuntu-24.04
           - compiler: Clang
             cc: clang
             cxx: clang++
+            arch: x86_64
+            runner: ubuntu-24.04
+          - compiler: GCC
+            cc: gcc
+            cxx: g++
+            arch: aarch64
+            runner: ubuntu-24.04-arm
     env:
       CC: ${{ matrix.cc }}
       CXX: ${{ matrix.cxx }}

@@ -293,7 +293,7 @@ The [build workflow](.github/workflows/build.yml) runs on every push and pull re
 | MSVC x64, Win32 | Build, Direct3D 11 smoke test on WARP, `dinput8.dll` proxy test |
 | Visual Studio solution x64, x86 | `Universal-ImGui-Hook.sln` built with MSBuild, same two tests |
 | MinGW-w64 x86_64, i686 on Ubuntu and macOS | Cross-compilation of the DLL, name of the proxy export |
-| Linux GCC, Clang | Build, exported symbols, the six preload tests under Xvfb with llvmpipe and lavapipe |
+| Linux GCC, Clang x86_64, GCC aarch64 | Build, exported symbols, the six preload tests under Xvfb with llvmpipe and lavapipe |
 | Linux portable x86_64, aarch64 | The released libraries: built and tested in glibc 2.28 containers, glibc requirement checked |
 | DDNet OpenGL, Vulkan | The official DDNet build with the released library preloaded: overlay, menu hotkey, removal |
 | FetchContent consumer | The repository used as a dependency of another CMake project |
