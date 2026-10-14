@@ -39,6 +39,7 @@ void Release(T*& object) {
 // texture that is still bound when the frame is presented.
 struct D3D9Host : Host {
     bool ex = false;
+    bool srgb = false;
     IDirect3D9* d3d = nullptr;
     IDirect3D9Ex* d3dEx = nullptr;
     IDirect3DDevice9* device = nullptr;
@@ -50,8 +51,9 @@ struct D3D9Host : Host {
     explicit D3D9Host(bool useEx) : ex(useEx) {}
 
     bool Init(HWND window, const Options& options) override {
-        if (!options.format.empty())
+        if (options.format == "float")
             return false;
+        srgb = options.format == "srgb";
         D3DPRESENT_PARAMETERS present{};
         present.Windowed = TRUE;
         present.SwapEffect = D3DSWAPEFFECT_DISCARD;
@@ -74,6 +76,7 @@ struct D3D9Host : Host {
 
     void Frame() override {
         device->SetRenderTarget(0, backBuffer);
+        device->SetRenderState(D3DRS_SRGBWRITEENABLE, srgb);
         device->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_XRGB(26, 51, 77), 1.0f, 0);
         device->BeginScene();
         device->EndScene();

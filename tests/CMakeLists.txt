@@ -22,6 +22,7 @@ if(WIN32)
     uih_add_host_test(opengl --api opengl)
 
     # Back buffers storing linear values: the overlay colors must come out unchanged.
+    uih_add_host_test(d3d9_srgb --api d3d9 --format srgb --capture)
     uih_add_host_test(d3d10_srgb --api d3d10 --format srgb --capture)
     uih_add_host_test(d3d11_srgb --api d3d11 --format srgb --capture)
     uih_add_host_test(d3d11_float --api d3d11 --format float --capture)
