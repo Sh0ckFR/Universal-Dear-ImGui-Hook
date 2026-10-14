@@ -35,30 +35,65 @@ void Release(T*& object) {
 
 // D3D9 -------------------------------------------------------------------
 
+// Renders like many D3D9 games: several scenes per frame, one of them into a
+// texture that is still bound when the frame is presented.
 struct D3D9Host : Host {
+    bool ex = false;
     IDirect3D9* d3d = nullptr;
+    IDirect3D9Ex* d3dEx = nullptr;
     IDirect3DDevice9* device = nullptr;
+    IDirect3DDevice9Ex* deviceEx = nullptr;
+    IDirect3DSurface9* backBuffer = nullptr;
+    IDirect3DTexture9* texture = nullptr;
+    IDirect3DSurface9* offscreen = nullptr;
+
+    explicit D3D9Host(bool useEx) : ex(useEx) {}
 
     bool Init(HWND window, const Options&) override {
-        d3d = Direct3DCreate9(D3D_SDK_VERSION);
-        if (!d3d)
-            return false;
         D3DPRESENT_PARAMETERS present{};
         present.Windowed = TRUE;
         present.SwapEffect = D3DSWAPEFFECT_DISCARD;
         present.hDeviceWindow = window;
-        return SUCCEEDED(d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, window, D3DCREATE_HARDWARE_VERTEXPROCESSING, &present, &device));
+        if (ex) {
+            if (FAILED(Direct3DCreate9Ex(D3D_SDK_VERSION, &d3dEx)) ||
+                FAILED(d3dEx->CreateDeviceEx(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, window, D3DCREATE_HARDWARE_VERTEXPROCESSING, &present, nullptr, &deviceEx)))
+                return false;
+            device = deviceEx;
+            device->AddRef();
+        } else {
+            d3d = Direct3DCreate9(D3D_SDK_VERSION);
+            if (!d3d || FAILED(d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, window, D3DCREATE_HARDWARE_VERTEXPROCESSING, &present, &device)))
+                return false;
+        }
+        return SUCCEEDED(device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &backBuffer)) &&
+               SUCCEEDED(device->CreateTexture(256, 256, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &texture, nullptr)) &&
+               SUCCEEDED(texture->GetSurfaceLevel(0, &offscreen));
     }
 
     void Frame() override {
+        device->SetRenderTarget(0, backBuffer);
         device->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_XRGB(26, 51, 77), 1.0f, 0);
         device->BeginScene();
         device->EndScene();
-        device->Present(nullptr, nullptr, nullptr, nullptr);
+        device->SetRenderTarget(0, offscreen);
+        device->BeginScene();
+        device->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_XRGB(255, 255, 255), 1.0f, 0);
+        device->EndScene();
+        device->BeginScene();
+        device->EndScene();
+        if (ex)
+            deviceEx->PresentEx(nullptr, nullptr, nullptr, nullptr, 0);
+        else
+            device->Present(nullptr, nullptr, nullptr, nullptr);
     }
 
     ~D3D9Host() override {
+        Release(offscreen);
+        Release(texture);
+        Release(backBuffer);
+        Release(deviceEx);
         Release(device);
+        Release(d3dEx);
         Release(d3d);
     }
 };
@@ -372,7 +407,7 @@ int CountOverlayPixels(HWND window) {
 }
 
 uih::Backend ExpectedBackend(const std::string& api) {
-    if (api == "d3d9") return uih::Backend::D3D9;
+    if (api == "d3d9" || api == "d3d9ex") return uih::Backend::D3D9;
     if (api == "d3d10") return uih::Backend::D3D10;
     if (api == "d3d11") return uih::Backend::D3D11;
     if (api == "d3d12") return uih::Backend::D3D12;
@@ -382,7 +417,8 @@ uih::Backend ExpectedBackend(const std::string& api) {
 }
 
 std::unique_ptr<Host> CreateHost(const std::string& api) {
-    if (api == "d3d9") return std::make_unique<D3D9Host>();
+    if (api == "d3d9") return std::make_unique<D3D9Host>(false);
+    if (api == "d3d9ex") return std::make_unique<D3D9Host>(true);
     if (api == "d3d10") return std::make_unique<D3D10Host>();
     if (api == "d3d11") return std::make_unique<D3D11Host>();
     if (api == "d3d12") return std::make_unique<D3D12Host>();
@@ -399,8 +435,9 @@ void PumpMessages() {
     }
 }
 
-void StartHook() {
+void StartHook(const Options& options) {
     uih::Config config;
+    config.scale = options.scale;
     config.render = DrawTestMenu;
     config.debugLog = true;
     uih::Start(config);
@@ -499,6 +536,7 @@ int main(int argc, char** argv) {
         else if (arg == "--inject-at" && i + 1 < argc) options.injectAt = atoi(argv[++i]);
         else if (arg == "--dll" && i + 1 < argc) options.dll = argv[++i];
         else if (arg == "--proxy" && i + 1 < argc) options.proxy = argv[++i];
+        else if (arg == "--scale" && i + 1 < argc) options.scale = static_cast<float>(atof(argv[++i]));
         else if (arg == "--warp") options.warp = true;
         else if (arg == "--capture") options.capture = true;
         else if (arg == "--device-proc-addr") options.deviceProcAddr = true;
@@ -508,7 +546,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--dll path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--dll path]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -521,7 +559,7 @@ int main(int argc, char** argv) {
     PumpMessages();
 
     if (options.injectAt == 0 && options.dll.empty())
-        StartHook();
+        StartHook(options);
 
     std::unique_ptr<Host> host = CreateHost(options.api);
     if (!host->Init(window, options)) {
@@ -538,18 +576,20 @@ int main(int argc, char** argv) {
 
     int frame = 0;
     int activeFrame = -1;
+    int activeImGuiFrame = 0;
     int stopFrame = -1;
     int result = 0;
     while (result == 0) {
         PumpMessages();
         if (frame == options.injectAt && frame > 0)
-            StartHook();
+            StartHook(options);
         host->Frame();
         ++frame;
 
         if (activeFrame < 0) {
             if (uih::ActiveBackend() == expected) {
                 activeFrame = frame;
+                activeImGuiFrame = ImGui::GetCurrentContext() ? ImGui::GetFrameCount() : 0;
                 printf("%s backend active after %d frames\n", options.api.c_str(), frame - options.injectAt);
                 uih::SetMenuOpen(true);
             } else if (frame > options.injectAt + 600) {
@@ -561,6 +601,20 @@ int main(int argc, char** argv) {
                 break;
             }
             printf("ImGui rendered %d vertices\n", ImGui::GetIO().MetricsRenderVertices);
+            int imguiFrames = ImGui::GetFrameCount() - activeImGuiFrame;
+            if (imguiFrames > frame - activeFrame + 1) {
+                printf("ImGui ran %d frames for %d presents\n", imguiFrames, frame - activeFrame);
+                result = Fail("the overlay is drawn more than once per frame");
+                break;
+            }
+            if (!(ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_NavEnableGamepad)) {
+                result = Fail("gamepad navigation is off while the menu is open");
+                break;
+            }
+            if (options.scale > 0.0f && ImGui::GetStyle().FontScaleDpi != options.scale) {
+                result = Fail("the interface scale was not applied");
+                break;
+            }
             if (options.capture) {
                 int pixels = CountOverlayPixels(window);
                 printf("%d overlay pixels captured\n", pixels);

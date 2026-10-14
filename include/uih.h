@@ -39,6 +39,8 @@ struct Config {
     int menuKey = 0xff63;
     int unloadKey = 0xffc8;
 #endif
+    // Size of the interface, 1.5 for 150%. 0 follows the DPI of the target window.
+    float scale = 0.0f;
     bool debugLog = false;
     // Called every frame between ImGui::NewFrame() and ImGui::Render().
     void (*render)() = nullptr;

@@ -29,6 +29,7 @@ struct Options {
     std::string dll;
     std::string proxy;
     int injectAt = 30;
+    float scale = 0.0f;
     bool warp = false;
     bool capture = false;
     bool deviceProcAddr = false;
