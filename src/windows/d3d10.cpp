@@ -49,7 +49,7 @@ bool Init(IDXGISwapChain* swapChain) {
     return true;
 }
 
-ID3D10RenderTargetView* CreateTarget() {
+ID3D10RenderTargetView* CreateTarget(bool& linear) {
     ID3D10Texture2D* buffer = nullptr;
     if (FAILED(g_swapChain->GetBuffer(0, IID_PPV_ARGS(&buffer))))
         return nullptr;
@@ -57,6 +57,7 @@ ID3D10RenderTargetView* CreateTarget() {
     buffer->GetDesc(&textureDesc);
     D3D10_RENDER_TARGET_VIEW_DESC viewDesc{};
     viewDesc.Format = RenderTargetFormat(textureDesc.Format);
+    linear = StoresLinear(viewDesc.Format);
     viewDesc.ViewDimension = textureDesc.SampleDesc.Count > 1 ? D3D10_RTV_DIMENSION_TEXTURE2DMS : D3D10_RTV_DIMENSION_TEXTURE2D;
     ID3D10RenderTargetView* target = nullptr;
     HRESULT hr = g_device->CreateRenderTargetView(buffer, &viewDesc, &target);
@@ -69,12 +70,15 @@ ID3D10RenderTargetView* CreateTarget() {
 void Render(IDXGISwapChain* swapChain) {
     if (swapChain != g_swapChain && !Init(swapChain))
         return;
-    ID3D10RenderTargetView* target = CreateTarget();
+    bool linear = false;
+    ID3D10RenderTargetView* target = CreateTarget(linear);
     if (!target)
         return;
 
     ImGui_ImplDX10_NewFrame();
     ImDrawData* drawData = Frame();
+    if (linear)
+        LinearizeColors(drawData);
 
     ID3D10RenderTargetView* previous[D3D10_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
     ID3D10DepthStencilView* depth = nullptr;

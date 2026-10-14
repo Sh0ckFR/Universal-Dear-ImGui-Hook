@@ -380,7 +380,10 @@ void Render(IDXGISwapChain* swapChain) {
     g_commandList->SetDescriptorHeaps(1, &g_srvHeap);
 
     ImGui_ImplDX12_NewFrame();
-    ImGui_ImplDX12_RenderDrawData(Frame(), g_commandList);
+    ImDrawData* drawData = Frame();
+    if (StoresLinear(g_format))
+        LinearizeColors(drawData);
+    ImGui_ImplDX12_RenderDrawData(drawData, g_commandList);
 
     barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
     barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;

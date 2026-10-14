@@ -265,7 +265,7 @@ cmake --build --preset msvc-x64
 ctest --test-dir build/msvc-x64 -C Release
 ```
 
-`uih_host --api vulkan --capture` runs one backend (`d3d9`, `d3d9ex`, `d3d10`, `d3d11`, `d3d12`, `vulkan`, `opengl`) with the hook started in-process; `--inject-at 0` starts the hook before the API is initialized, `--dll <path>` loads the real DLL and drives it with its hotkeys, `--capture` compares the pixels on screen, `--warp` uses the software rasterizer and `--decoy-queue` makes a second D3D12 device execute work after the game every frame. `uih_host --proxy <path>` checks that the DLL can stand in for `dinput8.dll`.
+`uih_host --api vulkan --capture` runs one backend (`d3d9`, `d3d9ex`, `d3d10`, `d3d11`, `d3d12`, `vulkan`, `opengl`) with the hook started in-process; `--inject-at 0` starts the hook before the API is initialized, `--dll <path>` loads the real DLL and drives it with its hotkeys, `--capture` compares the pixels on screen, `--warp` uses the software rasterizer, `--decoy-queue` makes a second D3D12 device execute work after the game every frame and `--format srgb|float` creates a back buffer that stores linear values. `uih_host --proxy <path>` checks that the DLL can stand in for `dinput8.dll`.
 
 **Linux**
 

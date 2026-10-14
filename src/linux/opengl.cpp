@@ -2,6 +2,7 @@
 
 #include <unordered_map>
 
+#include "gl_srgb.h"
 #include "imgui_impl_opengl3.h"
 
 namespace uih::detail {
@@ -72,7 +73,9 @@ void Render(void* context, NativeWindow window, uint32_t width, uint32_t height)
         return;
     input::SetSurfaceSize(width, height);
     ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplOpenGL3_RenderDrawData(Frame());
+    ImDrawData* drawData = Frame();
+    FramebufferSrgbOff srgbOff([](const char* name) { return interpose::kGlx.Next(name); });
+    ImGui_ImplOpenGL3_RenderDrawData(drawData);
 }
 
 // Stop() gave up waiting for this thread: release here, where the context is current.

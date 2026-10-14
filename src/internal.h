@@ -66,6 +66,9 @@ bool CreateContext();
 bool BindWindow(NativeWindow window);
 // Platform NewFrame, key polling, user callback and ImGui::Render().
 ImDrawData* Frame();
+// Dear ImGui produces sRGB vertex colors. Render targets that store linear
+// values (sRGB and floating-point formats) need them converted.
+void LinearizeColors(ImDrawData* drawData);
 // Detaches the platform backend and destroys the ImGui context.
 void UnbindWindow();
 

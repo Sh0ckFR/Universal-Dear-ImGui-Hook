@@ -52,7 +52,7 @@ bool Init(IDXGISwapChain* swapChain) {
     return true;
 }
 
-ID3D11RenderTargetView* CreateTarget() {
+ID3D11RenderTargetView* CreateTarget(bool& linear) {
     ID3D11Texture2D* buffer = nullptr;
     if (FAILED(g_swapChain->GetBuffer(0, IID_PPV_ARGS(&buffer))))
         return nullptr;
@@ -60,6 +60,7 @@ ID3D11RenderTargetView* CreateTarget() {
     buffer->GetDesc(&textureDesc);
     D3D11_RENDER_TARGET_VIEW_DESC viewDesc{};
     viewDesc.Format = RenderTargetFormat(textureDesc.Format);
+    linear = StoresLinear(viewDesc.Format);
     viewDesc.ViewDimension = textureDesc.SampleDesc.Count > 1 ? D3D11_RTV_DIMENSION_TEXTURE2DMS : D3D11_RTV_DIMENSION_TEXTURE2D;
     ID3D11RenderTargetView* target = nullptr;
     HRESULT hr = g_device->CreateRenderTargetView(buffer, &viewDesc, &target);
@@ -72,12 +73,15 @@ ID3D11RenderTargetView* CreateTarget() {
 void Render(IDXGISwapChain* swapChain) {
     if (swapChain != g_swapChain && !Init(swapChain))
         return;
-    ID3D11RenderTargetView* target = CreateTarget();
+    bool linear = false;
+    ID3D11RenderTargetView* target = CreateTarget(linear);
     if (!target)
         return;
 
     ImGui_ImplDX11_NewFrame();
     ImDrawData* drawData = Frame();
+    if (linear)
+        LinearizeColors(drawData);
 
     ID3D11RenderTargetView* previous[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
     ID3D11DepthStencilView* depth = nullptr;

@@ -89,10 +89,15 @@ void Render(IDirect3DDevice9* device) {
     ImGui_ImplDX9_NewFrame();
     ImDrawData* drawData = Frame();
     device->SetRenderTarget(0, backBuffer);
+    // sRGB writes would encode the overlay's colors, already sRGB, a second time.
+    DWORD srgbWrite = FALSE;
+    device->GetRenderState(D3DRS_SRGBWRITEENABLE, &srgbWrite);
+    device->SetRenderState(D3DRS_SRGBWRITEENABLE, FALSE);
     if (SUCCEEDED(device->BeginScene())) {
         ImGui_ImplDX9_RenderDrawData(drawData);
         device->EndScene();
     }
+    device->SetRenderState(D3DRS_SRGBWRITEENABLE, srgbWrite);
     device->SetRenderTarget(0, previous);
     device->SetViewport(&viewport);
     Release(previous);
