@@ -66,8 +66,13 @@ bool CreateContext();
 bool BindWindow(NativeWindow window);
 // Platform NewFrame, key polling, user callback and ImGui::Render().
 ImDrawData* Frame();
+// Dear ImGui produces sRGB vertex colors. Render targets that store linear
+// values (sRGB and floating-point formats) need them converted.
+void LinearizeColors(ImDrawData* drawData);
 // Detaches the platform backend and destroys the ImGui context.
 void UnbindWindow();
+// Destroys the ImGui context, after the renderer backend released its textures.
+void DestroyContext();
 
 // Implemented once per platform -------------------------------------------
 
@@ -78,14 +83,17 @@ void Stop();
 void NewFrame();
 bool IsKeyDown(int key);
 bool IsFocused();
+// DPI scale of the bound window, 1 when unknown.
+float WindowScale();
 void Unload();
 } // namespace platform
 
 namespace input {
 void Attach(NativeWindow window);
 void Detach();
-// Undoes cursor clipping so the menu can be used.
-void ReleaseCursor();
+// Called when the menu opens or closes: releases the cursor and hides or
+// restores the input the application sees.
+void OnMenuToggled(bool open);
 // Best-effort lookup of the main window of this process.
 NativeWindow FindProcessWindow();
 } // namespace input

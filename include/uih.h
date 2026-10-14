@@ -10,6 +10,8 @@
 #include <windows.h>
 #endif
 
+struct ImTextureData;
+
 namespace uih {
 
 enum class Backend {
@@ -39,9 +41,15 @@ struct Config {
     int menuKey = 0xff63;
     int unloadKey = 0xffc8;
 #endif
+    // Size of the interface, 1.5 for 150%. 0 follows the DPI of the target window.
+    float scale = 0.0f;
     bool debugLog = false;
     // Called every frame between ImGui::NewFrame() and ImGui::Render().
     void (*render)() = nullptr;
+    // Called when the ImGui context is created, before its first frame: load
+    // fonts and set the style here. A new context is created when the game
+    // switches to another device or window, so this may run more than once.
+    void (*setup)() = nullptr;
 };
 
 // Installs the hooks. Safe to call from DllMain or from a library constructor.
@@ -55,5 +63,14 @@ bool IsMenuOpen();
 void SetMenuOpen(bool open);
 
 const char* BackendName(Backend backend);
+
+// Creates an image from `width` * `height` RGBA pixels, 8 bits per channel,
+// rows from top to bottom. Draw it with ImGui::Image(texture->GetTexRef(), size).
+// The pixels are copied and uploaded by the active backend on the next frame,
+// and again after a backend switch. Callable from any thread, before or
+// after Start().
+ImTextureData* CreateTexture(const void* rgba, int width, int height);
+// Releases a texture on the next frame. Do not draw it afterwards.
+void DestroyTexture(ImTextureData* texture);
 
 } // namespace uih

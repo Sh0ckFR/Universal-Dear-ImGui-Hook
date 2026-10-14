@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace uih::detail::input {
@@ -42,6 +43,8 @@ bool g_focused = false;
 uint8_t g_keys[kKeycodes / 8] = {};
 uint8_t g_sent[kKeycodes / 8] = {};
 
+float g_scale = 1.0f;
+
 uint32_t g_width = 0;
 uint32_t g_height = 0;
 std::chrono::steady_clock::time_point g_lastFrame;
@@ -56,6 +59,29 @@ void LoadKeyboardMapping() {
     g_keysyms.assign(keysyms, keysyms + xcb_get_keyboard_mapping_keysyms_length(reply.get()));
     g_minKeycode = setup->min_keycode;
     g_keysymsPerKeycode = reply->keysyms_per_keycode;
+}
+
+// Desktops publish their DPI as the Xft.dpi resource.
+void LoadScale() {
+    xcb_get_property_cookie_t cookie = xcb_get_property(g_connection, 0, g_root, XCB_ATOM_RESOURCE_MANAGER, XCB_ATOM_STRING, 0, 1 << 16);
+    Reply<xcb_get_property_reply_t> property(xcb_get_property_reply(g_connection, cookie, nullptr));
+    if (!property || property->format != 8)
+        return;
+    std::string resources(static_cast<const char*>(xcb_get_property_value(property.get())), xcb_get_property_value_length(property.get()));
+    static const char kDpi[] = "Xft.dpi:";
+    size_t line = 0;
+    while (line < resources.size()) {
+        if (resources.compare(line, sizeof(kDpi) - 1, kDpi) == 0) {
+            float dpi = strtof(resources.c_str() + line + sizeof(kDpi) - 1, nullptr);
+            if (dpi > 0.0f)
+                g_scale = dpi / 96.0f;
+            return;
+        }
+        size_t end = resources.find('\n', line);
+        if (end == std::string::npos)
+            return;
+        line = end + 1;
+    }
 }
 
 void Disconnect() {
@@ -89,6 +115,7 @@ bool Connect() {
     Reply<xcb_intern_atom_reply_t> atom(xcb_intern_atom_reply(connection, xcb_intern_atom(connection, 0, sizeof(kPid) - 1, kPid), nullptr));
     g_pidAtom = atom ? atom->atom : XCB_NONE;
     LoadKeyboardMapping();
+    LoadScale();
     return true;
 }
 
@@ -243,7 +270,7 @@ void Detach() {
 }
 
 // A grab held by the application cannot be released from another connection.
-void ReleaseCursor() {}
+void OnMenuToggled(bool) {}
 
 NativeWindow FindProcessWindow() {
     if (!Connect())
@@ -337,5 +364,7 @@ bool IsKeyDown(int keysym) {
 }
 
 bool IsFocused() { return g_focused; }
+
+float Scale() { return g_scale; }
 
 } // namespace uih::detail::input

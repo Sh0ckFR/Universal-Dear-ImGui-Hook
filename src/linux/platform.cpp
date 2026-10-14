@@ -29,7 +29,7 @@ void UnbindWindow() {
     if (!ImGui::GetCurrentContext())
         return;
     input::Detach();
-    ImGui::DestroyContext();
+    DestroyContext();
     g_window = 0;
 }
 
@@ -54,6 +54,8 @@ void NewFrame() { input::NewFrame(); }
 bool IsKeyDown(int key) { return input::IsKeyDown(key); }
 
 bool IsFocused() { return input::IsFocused(); }
+
+float WindowScale() { return input::Scale(); }
 
 void Unload() {
     if (g_unloadRequested.exchange(true))

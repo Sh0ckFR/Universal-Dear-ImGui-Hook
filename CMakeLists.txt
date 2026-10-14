@@ -74,6 +74,8 @@ if(WIN32)
     target_sources(uih PRIVATE
         src/windows/platform.cpp
         src/windows/input.cpp
+        src/windows/dinput.cpp
+        src/windows/xinput.cpp
         src/windows/d3d9.cpp
         src/windows/dxgi.cpp
         src/windows/d3d10.cpp

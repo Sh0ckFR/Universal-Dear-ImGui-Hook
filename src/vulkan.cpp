@@ -252,6 +252,19 @@ void Teardown() {
     g_renderer = VulkanState{};
 }
 
+bool StoresLinear(VkFormat format) {
+    switch (format) {
+    case VK_FORMAT_R8G8B8A8_SRGB:
+    case VK_FORMAT_B8G8R8A8_SRGB:
+    case VK_FORMAT_A8B8G8R8_SRGB_PACK32:
+    case VK_FORMAT_R16G16B16A16_SFLOAT:
+    case VK_FORMAT_R32G32B32A32_SFLOAT:
+        return true;
+    default:
+        return false;
+    }
+}
+
 PFN_vkVoidFunction ImGuiLoader(const char* name, void* device) {
     if (PFN_vkVoidFunction fn = g_getDeviceProcAddr(static_cast<VkDevice>(device), name))
         return fn;
@@ -543,6 +556,8 @@ const VkPresentInfoKHR* Render(VkQueue queue, VkDevice device, const VkPresentIn
 
     ImGui_ImplVulkan_NewFrame();
     ImDrawData* drawData = Frame();
+    if (StoresLinear(r.format))
+        LinearizeColors(drawData);
 
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;

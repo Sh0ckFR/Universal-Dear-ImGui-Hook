@@ -179,10 +179,17 @@ struct VulkanHost : Host {
         vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, nullptr);
         std::vector<VkSurfaceFormatKHR> formats(formatCount);
         vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, formats.data());
-        VkSurfaceFormatKHR format = formats[0];
+        VkFormat wanted = VK_FORMAT_B8G8R8A8_UNORM;
+        if (options.format == "srgb")
+            wanted = VK_FORMAT_B8G8R8A8_SRGB;
+        else if (!options.format.empty())
+            return false;
+        VkSurfaceFormatKHR format{VK_FORMAT_UNDEFINED, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
         for (const VkSurfaceFormatKHR& candidate : formats)
-            if (candidate.format == VK_FORMAT_B8G8R8A8_UNORM)
+            if (candidate.format == wanted)
                 format = candidate;
+        if (format.format == VK_FORMAT_UNDEFINED)
+            return false;
 
         VkSwapchainCreateInfoKHR swapchainInfo{};
         swapchainInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
@@ -198,6 +205,7 @@ struct VulkanHost : Host {
         swapchainInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
         swapchainInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;
         swapchainInfo.clipped = VK_TRUE;
+        Settle(options);
         if (vkCreateSwapchainKHR(device, &swapchainInfo, nullptr, &swapchain) != VK_SUCCESS)
             return false;
         uint32_t imageCount = 0;
