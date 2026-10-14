@@ -270,7 +270,7 @@ void Detach() {
 }
 
 // A grab held by the application cannot be released from another connection.
-void ReleaseCursor() {}
+void OnMenuToggled(bool) {}
 
 NativeWindow FindProcessWindow() {
     if (!Connect())

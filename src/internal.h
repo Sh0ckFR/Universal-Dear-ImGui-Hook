@@ -89,8 +89,9 @@ void Unload();
 namespace input {
 void Attach(NativeWindow window);
 void Detach();
-// Undoes cursor clipping so the menu can be used.
-void ReleaseCursor();
+// Called when the menu opens or closes: releases the cursor and hides or
+// restores the input the application sees.
+void OnMenuToggled(bool open);
 // Best-effort lookup of the main window of this process.
 NativeWindow FindProcessWindow();
 } // namespace input

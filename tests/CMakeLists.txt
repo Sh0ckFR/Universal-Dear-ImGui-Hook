@@ -5,7 +5,7 @@ endfunction()
 
 if(WIN32)
     add_executable(uih_host host.cpp host_vulkan.cpp)
-    target_link_libraries(uih_host PRIVATE uih d3d9 d3d10 d3d11 d3d12 dxgi opengl32)
+    target_link_libraries(uih_host PRIVATE uih d3d9 d3d10 d3d11 d3d12 dxgi opengl32 dinput8 dxguid)
     target_compile_definitions(uih_host PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 
     uih_add_host_test(d3d9 --api d3d9)
@@ -20,6 +20,8 @@ if(WIN32)
     uih_add_host_test(vulkan --api vulkan)
     uih_add_host_test(vulkan_early --api vulkan --inject-at 0)
     uih_add_host_test(opengl --api opengl)
+    uih_add_host_test(input_raw --api d3d11 --input raw)
+    uih_add_host_test(input_directinput --api d3d11 --input directinput)
 
     # Back buffers storing linear values: the overlay colors must come out unchanged.
     uih_add_host_test(d3d9_srgb --api d3d9 --format srgb --capture)

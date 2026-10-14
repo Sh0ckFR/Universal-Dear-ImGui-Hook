@@ -40,6 +40,8 @@ struct Options {
     bool decoyQueue = false;
     // "srgb" or "float": a back buffer that stores linear values.
     std::string format;
+    // "raw" or "directinput": checks the input the host reads while the menu is open.
+    std::string input;
     bool egl = false;
     bool lookup = false;
 };
