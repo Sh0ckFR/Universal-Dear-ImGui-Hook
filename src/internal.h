@@ -81,6 +81,8 @@ void Stop();
 void NewFrame();
 bool IsKeyDown(int key);
 bool IsFocused();
+// DPI scale of the bound window, 1 when unknown.
+float WindowScale();
 void Unload();
 } // namespace platform
 

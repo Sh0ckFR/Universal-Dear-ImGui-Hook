@@ -31,11 +31,13 @@ struct Options {
     std::string dll;
     std::string proxy;
     int injectAt = 30;
+    float scale = 0.0f;
     // Delay before the swap chain is created, so hooks started earlier are in place.
     int settleMs = 0;
     bool warp = false;
     bool capture = false;
     bool deviceProcAddr = false;
+    bool decoyQueue = false;
     // "srgb" or "float": a back buffer that stores linear values.
     std::string format;
     bool egl = false;

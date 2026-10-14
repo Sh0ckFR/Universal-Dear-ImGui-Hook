@@ -13,18 +13,53 @@ namespace {
 using ExecuteCommandListsFn = void(STDMETHODCALLTYPE*)(ID3D12CommandQueue*, UINT, ID3D12CommandList* const*);
 using D3D12CreateDeviceFn = HRESULT(WINAPI*)(IUnknown*, D3D_FEATURE_LEVEL, REFIID, void**);
 using CreateDXGIFactory1Fn = HRESULT(WINAPI*)(REFIID, void**);
+using CreateSwapChainFn = HRESULT(STDMETHODCALLTYPE*)(IDXGIFactory*, IUnknown*, DXGI_SWAP_CHAIN_DESC*, IDXGISwapChain**);
+using CreateSwapChainForHwndFn = HRESULT(STDMETHODCALLTYPE*)(IDXGIFactory2*, IUnknown*, HWND, const DXGI_SWAP_CHAIN_DESC1*,
+                                                             const DXGI_SWAP_CHAIN_FULLSCREEN_DESC*, IDXGIOutput*, IDXGISwapChain1**);
+using CreateSwapChainForCoreWindowFn = HRESULT(STDMETHODCALLTYPE*)(IDXGIFactory2*, IUnknown*, IUnknown*, const DXGI_SWAP_CHAIN_DESC1*,
+                                                                   IDXGIOutput*, IDXGISwapChain1**);
+using CreateSwapChainForCompositionFn = HRESULT(STDMETHODCALLTYPE*)(IDXGIFactory2*, IUnknown*, const DXGI_SWAP_CHAIN_DESC1*, IDXGIOutput*,
+                                                                    IDXGISwapChain1**);
 
 constexpr size_t kExecuteCommandListsIndex = 10;
+constexpr size_t kCreateSwapChainIndex = 10;
+constexpr size_t kCreateSwapChainForHwndIndex = 15;
+constexpr size_t kCreateSwapChainForCoreWindowIndex = 16;
+constexpr size_t kCreateSwapChainForCompositionIndex = 24;
+// Swap chains and direct queues remembered; the oldest entry goes first.
+constexpr size_t kMaxSwapChains = 16;
+constexpr size_t kMaxDirectQueues = 16;
 constexpr UINT kSrvHeapSize = 64;
 // Presents to wait before following an application that moved to another direct queue.
 constexpr int kQueueSwitchFrames = 60;
 
 HMODULE g_module = nullptr;
+HMODULE g_dxgiModule = nullptr;
 ExecuteCommandListsFn g_executeCommandLists = nullptr;
+CreateSwapChainFn g_createSwapChain = nullptr;
+CreateSwapChainForHwndFn g_createSwapChainForHwnd = nullptr;
+CreateSwapChainForCoreWindowFn g_createSwapChainForCoreWindow = nullptr;
+CreateSwapChainForCompositionFn g_createSwapChainForComposition = nullptr;
 
-// Most recent direct queue seen executing command lists.
+// The queue a swap chain presents on is only known when the swap chain is
+// created. When the hook comes later, a direct queue of the swap chain's
+// device stands in for it: the one the presenting thread submitted to last,
+// as engines usually present from the thread that submits the frame, or else
+// the most recently used one.
+struct SwapChainQueue {
+    IUnknown* swapChain;
+    ID3D12CommandQueue* queue;
+};
+
+struct DirectQueue {
+    ID3D12Device* device;
+    ID3D12CommandQueue* queue;
+};
+
 std::mutex g_queueMutex;
-ID3D12CommandQueue* g_capturedQueue = nullptr;
+std::vector<SwapChainQueue> g_swapChainQueues;
+std::vector<DirectQueue> g_directQueues;
+thread_local ID3D12CommandQueue* t_lastQueue = nullptr;
 
 struct FrameContext {
     ID3D12CommandAllocator* allocator = nullptr;
@@ -49,11 +84,85 @@ int g_queueMisses = 0;
 bool g_framesDirty = false;
 bool g_imguiReady = false;
 
-ID3D12CommandQueue* CapturedQueue() {
+IUnknown* Identity(IUnknown* object) {
+    IUnknown* identity = nullptr;
+    if (object && SUCCEEDED(object->QueryInterface(IID_PPV_ARGS(&identity))))
+        identity->Release();
+    return identity;
+}
+
+void RecordSwapChain(IUnknown* device, IUnknown* swapChain) {
+    ID3D12CommandQueue* queue = nullptr;
+    if (!device || !swapChain || FAILED(device->QueryInterface(IID_PPV_ARGS(&queue))))
+        return;
+    IUnknown* identity = Identity(swapChain);
     std::lock_guard<std::mutex> lock(g_queueMutex);
-    if (g_capturedQueue)
-        g_capturedQueue->AddRef();
-    return g_capturedQueue;
+    for (SwapChainQueue& entry : g_swapChainQueues) {
+        if (entry.swapChain == identity) {
+            entry.queue->Release();
+            entry.queue = queue;
+            return;
+        }
+    }
+    if (g_swapChainQueues.size() == kMaxSwapChains) {
+        g_swapChainQueues.front().queue->Release();
+        g_swapChainQueues.erase(g_swapChainQueues.begin());
+    }
+    g_swapChainQueues.push_back({identity, queue});
+}
+
+void RecordDirectQueue(ID3D12CommandQueue* queue) {
+    if (queue == t_lastQueue)
+        return;
+    t_lastQueue = queue;
+    std::lock_guard<std::mutex> lock(g_queueMutex);
+    for (size_t i = 0; i < g_directQueues.size(); ++i) {
+        if (g_directQueues[i].queue == queue) {
+            DirectQueue entry = g_directQueues[i];
+            g_directQueues.erase(g_directQueues.begin() + i);
+            g_directQueues.push_back(entry);
+            return;
+        }
+    }
+    ID3D12Device* device = nullptr;
+    if (FAILED(queue->GetDevice(IID_PPV_ARGS(&device))))
+        return;
+    device->Release();
+    if (g_directQueues.size() == kMaxDirectQueues) {
+        g_directQueues.front().queue->Release();
+        g_directQueues.erase(g_directQueues.begin());
+    }
+    queue->AddRef();
+    g_directQueues.push_back({device, queue});
+}
+
+// Queue `swapChain` presents on, with a reference. `known` is false for a guess.
+ID3D12CommandQueue* QueueFor(IDXGISwapChain* swapChain, bool& known) {
+    IUnknown* identity = Identity(swapChain);
+    ID3D12Device* device = nullptr;
+    if (FAILED(swapChain->GetDevice(IID_PPV_ARGS(&device))))
+        return nullptr;
+    device->Release();
+
+    std::lock_guard<std::mutex> lock(g_queueMutex);
+    ID3D12CommandQueue* queue = nullptr;
+    known = false;
+    for (const SwapChainQueue& entry : g_swapChainQueues) {
+        if (entry.swapChain == identity) {
+            queue = entry.queue;
+            known = true;
+        }
+    }
+    for (const DirectQueue& entry : g_directQueues) {
+        if (known || entry.device != device)
+            continue;
+        queue = entry.queue;
+        if (queue == t_lastQueue)
+            break;
+    }
+    if (queue)
+        queue->AddRef();
+    return queue;
 }
 
 void WaitForGpu() {
@@ -218,10 +327,11 @@ bool Init(IDXGISwapChain* swapChain, ID3D12CommandQueue* queue) {
 }
 
 void Render(IDXGISwapChain* swapChain) {
-    ID3D12CommandQueue* queue = CapturedQueue();
+    bool known = false;
+    ID3D12CommandQueue* queue = QueueFor(swapChain, known);
     if (!queue)
         return;
-    if (g_queue && queue != g_queue && ++g_queueMisses < kQueueSwitchFrames) {
+    if (!known && g_queue && queue != g_queue && ++g_queueMisses < kQueueSwitchFrames) {
         queue->Release();
         queue = g_queue;
         queue->AddRef();
@@ -296,15 +406,63 @@ void PreResize(IDXGISwapChain* swapChain) {
 
 void STDMETHODCALLTYPE HookExecuteCommandLists(ID3D12CommandQueue* queue, UINT count, ID3D12CommandList* const* lists) {
     ScopedCall call;
-    if (count && lists && lists[0] && lists[0]->GetType() == D3D12_COMMAND_LIST_TYPE_DIRECT) {
-        std::lock_guard<std::mutex> lock(g_queueMutex);
-        if (queue != g_capturedQueue) {
-            queue->AddRef();
-            Release(g_capturedQueue);
-            g_capturedQueue = queue;
-        }
-    }
+    if (count && lists && lists[0] && lists[0]->GetType() == D3D12_COMMAND_LIST_TYPE_DIRECT)
+        RecordDirectQueue(queue);
     g_executeCommandLists(queue, count, lists);
+}
+
+HRESULT STDMETHODCALLTYPE HookCreateSwapChain(IDXGIFactory* factory, IUnknown* device, DXGI_SWAP_CHAIN_DESC* desc, IDXGISwapChain** swapChain) {
+    ScopedCall call;
+    HRESULT hr = g_createSwapChain(factory, device, desc, swapChain);
+    if (SUCCEEDED(hr) && swapChain)
+        RecordSwapChain(device, *swapChain);
+    return hr;
+}
+
+HRESULT STDMETHODCALLTYPE HookCreateSwapChainForHwnd(IDXGIFactory2* factory, IUnknown* device, HWND window, const DXGI_SWAP_CHAIN_DESC1* desc,
+                                                     const DXGI_SWAP_CHAIN_FULLSCREEN_DESC* fullscreen, IDXGIOutput* output, IDXGISwapChain1** swapChain) {
+    ScopedCall call;
+    HRESULT hr = g_createSwapChainForHwnd(factory, device, window, desc, fullscreen, output, swapChain);
+    if (SUCCEEDED(hr) && swapChain)
+        RecordSwapChain(device, *swapChain);
+    return hr;
+}
+
+HRESULT STDMETHODCALLTYPE HookCreateSwapChainForCoreWindow(IDXGIFactory2* factory, IUnknown* device, IUnknown* window, const DXGI_SWAP_CHAIN_DESC1* desc,
+                                                           IDXGIOutput* output, IDXGISwapChain1** swapChain) {
+    ScopedCall call;
+    HRESULT hr = g_createSwapChainForCoreWindow(factory, device, window, desc, output, swapChain);
+    if (SUCCEEDED(hr) && swapChain)
+        RecordSwapChain(device, *swapChain);
+    return hr;
+}
+
+HRESULT STDMETHODCALLTYPE HookCreateSwapChainForComposition(IDXGIFactory2* factory, IUnknown* device, const DXGI_SWAP_CHAIN_DESC1* desc,
+                                                            IDXGIOutput* output, IDXGISwapChain1** swapChain) {
+    ScopedCall call;
+    HRESULT hr = g_createSwapChainForComposition(factory, device, desc, output, swapChain);
+    if (SUCCEEDED(hr) && swapChain)
+        RecordSwapChain(device, *swapChain);
+    return hr;
+}
+
+void HookFactory() {
+    g_dxgiModule = LoadLibraryW(L"dxgi.dll");
+    auto createFactory = GetProc<CreateDXGIFactory1Fn>(g_dxgiModule, "CreateDXGIFactory1");
+    IDXGIFactory2* factory = nullptr;
+    if (!createFactory || FAILED(createFactory(IID_PPV_ARGS(&factory)))) {
+        Log("DXGI factory creation failed, swap chain queues will be guessed");
+        return;
+    }
+    CreateHook("IDXGIFactory::CreateSwapChain", VirtualMethod(factory, kCreateSwapChainIndex),
+               reinterpret_cast<void*>(HookCreateSwapChain), reinterpret_cast<void**>(&g_createSwapChain));
+    CreateHook("IDXGIFactory2::CreateSwapChainForHwnd", VirtualMethod(factory, kCreateSwapChainForHwndIndex),
+               reinterpret_cast<void*>(HookCreateSwapChainForHwnd), reinterpret_cast<void**>(&g_createSwapChainForHwnd));
+    CreateHook("IDXGIFactory2::CreateSwapChainForCoreWindow", VirtualMethod(factory, kCreateSwapChainForCoreWindowIndex),
+               reinterpret_cast<void*>(HookCreateSwapChainForCoreWindow), reinterpret_cast<void**>(&g_createSwapChainForCoreWindow));
+    CreateHook("IDXGIFactory2::CreateSwapChainForComposition", VirtualMethod(factory, kCreateSwapChainForCompositionIndex),
+               reinterpret_cast<void*>(HookCreateSwapChainForComposition), reinterpret_cast<void**>(&g_createSwapChainForComposition));
+    factory->Release();
 }
 
 ID3D12Device* CreateDummyDevice() {
@@ -332,6 +490,7 @@ ID3D12Device* CreateDummyDevice() {
 
 bool InstallQueueHook() {
     g_module = LoadLibraryW(L"d3d12.dll");
+    HookFactory();
     ID3D12Device* device = CreateDummyDevice();
     if (!device) {
         Log("D3D12 dummy device creation failed");
@@ -351,12 +510,25 @@ bool InstallQueueHook() {
 }
 
 void UninstallQueueHook() {
-    std::lock_guard<std::mutex> lock(g_queueMutex);
-    Release(g_capturedQueue);
+    {
+        std::lock_guard<std::mutex> lock(g_queueMutex);
+        for (SwapChainQueue& entry : g_swapChainQueues)
+            entry.queue->Release();
+        for (DirectQueue& entry : g_directQueues)
+            entry.queue->Release();
+        g_swapChainQueues.clear();
+        g_directQueues.clear();
+    }
     g_executeCommandLists = nullptr;
-    if (g_module) {
-        FreeLibrary(g_module);
-        g_module = nullptr;
+    g_createSwapChain = nullptr;
+    g_createSwapChainForHwnd = nullptr;
+    g_createSwapChainForCoreWindow = nullptr;
+    g_createSwapChainForComposition = nullptr;
+    for (HMODULE* module : {&g_module, &g_dxgiModule}) {
+        if (*module) {
+            FreeLibrary(*module);
+            *module = nullptr;
+        }
     }
 }
 
