@@ -18,7 +18,7 @@
     },
     {
       "name": "mingw-x64",
-      "displayName": "MinGW-w64 x86_64 (cross-compile from Linux)",
+      "displayName": "Windows DLL with MinGW-w64 x86_64",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/mingw-x64",
       "toolchainFile": "${sourceDir}/cmake/mingw-w64-x86_64.cmake",
@@ -26,17 +26,26 @@
     },
     {
       "name": "mingw-x86",
-      "displayName": "MinGW-w64 i686 (cross-compile from Linux)",
+      "displayName": "Windows DLL with MinGW-w64 i686",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/mingw-x86",
       "toolchainFile": "${sourceDir}/cmake/mingw-w64-i686.cmake",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "linux",
+      "displayName": "Linux (GCC or Clang)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/linux",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" },
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" }
     }
   ],
   "buildPresets": [
     { "name": "msvc-x64", "configurePreset": "msvc-x64", "configuration": "Release" },
     { "name": "msvc-x86", "configurePreset": "msvc-x86", "configuration": "Release" },
     { "name": "mingw-x64", "configurePreset": "mingw-x64" },
-    { "name": "mingw-x86", "configurePreset": "mingw-x86" }
+    { "name": "mingw-x86", "configurePreset": "mingw-x86" },
+    { "name": "linux", "configurePreset": "linux" }
   ]
 }

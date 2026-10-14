@@ -1,6 +1,19 @@
 #include "internal.h"
 
+#ifndef _WIN32
+#include <xcb/xcb.h>
+
+// Xlib types named by vulkan_xlib.h.
+typedef struct _XDisplay Display;
+typedef unsigned long Window;
+typedef unsigned long VisualID;
+#endif
+
 #include <vulkan/vulkan.h>
+#ifndef _WIN32
+#include <vulkan/vulkan_xcb.h>
+#include <vulkan/vulkan_xlib.h>
+#endif
 
 #include <algorithm>
 #include <cstring>
@@ -98,7 +111,7 @@ struct SwapchainInfo {
     VkDevice device = VK_NULL_HANDLE;
     VkFormat format = VK_FORMAT_UNDEFINED;
     VkExtent2D extent{};
-    HWND window = nullptr;
+    NativeWindow window{};
 };
 
 struct QueueInfo {
@@ -133,7 +146,6 @@ struct VulkanState {
     std::vector<VkSemaphore> semaphores;
 };
 
-HMODULE g_module = nullptr;
 PFN_vkGetInstanceProcAddr g_getInstanceProcAddr = nullptr;
 PFN_vkGetDeviceProcAddr g_getDeviceProcAddr = nullptr;
 VkInstance g_instance = VK_NULL_HANDLE;
@@ -141,7 +153,6 @@ InstanceFunctions g_vk;
 std::vector<Icd> g_icds;
 
 PFN_vkCreateDevice g_createDevice = nullptr;
-PFN_vkCreateWin32SurfaceKHR g_createWin32Surface = nullptr;
 PFN_vkDestroySurfaceKHR g_destroySurface = nullptr;
 
 std::mutex g_mutex;
@@ -149,12 +160,11 @@ std::unordered_map<VkSwapchainKHR, SwapchainInfo> g_swapchains;
 std::unordered_map<VkQueue, QueueInfo> g_queues;
 std::unordered_map<VkDevice, VkPhysicalDevice> g_devices;
 std::unordered_map<VkDevice, size_t> g_deviceIcd;
-std::unordered_map<VkSurfaceKHR, HWND> g_surfaces;
+std::unordered_map<VkSurfaceKHR, NativeWindow> g_surfaces;
 
 VulkanState g_renderer;
 uint32_t g_setupFailures = 0;
 constexpr uint32_t kMaxSetupFailures = 5;
-constexpr size_t kMaxIcds = 4;
 
 // ICD lookup --------------------------------------------------------------
 
@@ -271,7 +281,7 @@ uint32_t FindQueueFamily(VkDevice device, VkQueue queue, VkPhysicalDevice physic
     return fallback;
 }
 
-bool CreateDeviceResources(VkDevice device, VkQueue queue, uint32_t family, VkPhysicalDevice physicalDevice, VkFormat format, uint32_t imageCount, HWND window) {
+bool CreateDeviceResources(VkDevice device, VkQueue queue, uint32_t family, VkPhysicalDevice physicalDevice, VkFormat format, uint32_t imageCount, NativeWindow window) {
     VulkanState& r = g_renderer;
     r.device = device;
     r.fn.Load(g_getDeviceProcAddr, device);
@@ -348,7 +358,8 @@ bool CreateDeviceResources(VkDevice device, VkQueue queue, uint32_t family, VkPh
 
     if (!BindWindow(window))
         return false;
-    ImGui_ImplVulkan_LoadFunctions(VK_API_VERSION_1_0, ImGuiLoader, device);
+    if (!ImGui_ImplVulkan_LoadFunctions(VK_API_VERSION_1_0, ImGuiLoader, device))
+        return false;
     ImGui_ImplVulkan_InitInfo info{};
     info.ApiVersion = VK_API_VERSION_1_0;
     info.Instance = g_instance;
@@ -376,6 +387,9 @@ bool CreateSwapchainResources(VkSwapchainKHR swapchain, VkExtent2D extent) {
 
     r.swapchain = swapchain;
     r.extent = extent;
+#ifndef _WIN32
+    input::SetSurfaceSize(extent.width, extent.height);
+#endif
     r.views.resize(count);
     r.framebuffers.resize(count);
     for (uint32_t i = 0; i < count; ++i) {
@@ -401,10 +415,46 @@ bool CreateSwapchainResources(VkSwapchainKHR swapchain, VkExtent2D extent) {
     return true;
 }
 
-VkExtent2D WindowExtent(HWND window) {
+VkExtent2D WindowExtent(NativeWindow window) {
+#ifdef _WIN32
     RECT rect{};
     GetClientRect(window, &rect);
     return {static_cast<uint32_t>(std::max<LONG>(rect.right - rect.left, 1)), static_cast<uint32_t>(std::max<LONG>(rect.bottom - rect.top, 1))};
+#else
+    VkExtent2D extent{1, 1};
+    input::WindowSize(window, extent.width, extent.height);
+    return extent;
+#endif
+}
+
+bool CreateDummyInstance() {
+    auto createInstance = reinterpret_cast<PFN_vkCreateInstance>(g_getInstanceProcAddr(VK_NULL_HANDLE, "vkCreateInstance"));
+    if (!createInstance)
+        return false;
+    VkApplicationInfo appInfo{};
+    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    appInfo.pApplicationName = "uih";
+    appInfo.apiVersion = VK_API_VERSION_1_0;
+    const char* extensions[] = {
+        VK_KHR_SURFACE_EXTENSION_NAME,
+#ifdef _WIN32
+        VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
+#endif
+    };
+    VkInstanceCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    info.pApplicationInfo = &appInfo;
+    info.enabledExtensionCount = static_cast<uint32_t>(sizeof(extensions) / sizeof(extensions[0]));
+    info.ppEnabledExtensionNames = extensions;
+    VkResult result = createInstance(&info, nullptr, &g_instance);
+    if (result != VK_SUCCESS) {
+        Log("vkCreateInstance failed: %d", result);
+        return false;
+    }
+#define UIH_VK_LOAD(name) g_vk.name = reinterpret_cast<PFN_##name>(g_getInstanceProcAddr(g_instance, #name));
+    UIH_VK_INSTANCE_FUNCTIONS(UIH_VK_LOAD)
+#undef UIH_VK_LOAD
+    return true;
 }
 
 bool Setup(VkDevice device, VkQueue queue, VkSwapchainKHR swapchain) {
@@ -425,6 +475,10 @@ bool Setup(VkDevice device, VkQueue queue, VkSwapchainKHR swapchain) {
     }
     if (physicalDevice == VK_NULL_HANDLE)
         physicalDevice = g_icds[IcdForDevice(device)].physicalDevice;
+    if (physicalDevice == VK_NULL_HANDLE || (g_instance == VK_NULL_HANDLE && !CreateDummyInstance())) {
+        ++g_setupFailures;
+        return false;
+    }
     if (swapchainInfo.format == VK_FORMAT_UNDEFINED) {
         swapchainInfo.format = VK_FORMAT_B8G8R8A8_UNORM;
         Log("Vulkan swap chain %p was created before injection, assuming VK_FORMAT_B8G8R8A8_UNORM", swapchain);
@@ -547,7 +601,7 @@ void RecordQueue(VkDevice device, uint32_t family, VkQueue queue) {
 void OnSwapchainCreated(VkDevice device, const VkSwapchainCreateInfoKHR& info, VkSwapchainKHR swapchain) {
     std::lock_guard<std::mutex> lock(g_mutex);
     auto surface = g_surfaces.find(info.surface);
-    g_swapchains[swapchain] = {device, info.imageFormat, info.imageExtent, surface != g_surfaces.end() ? surface->second : nullptr};
+    g_swapchains[swapchain] = {device, info.imageFormat, info.imageExtent, surface != g_surfaces.end() ? surface->second : NativeWindow{}};
     g_setupFailures = 0;
 }
 
@@ -659,31 +713,12 @@ struct IcdHooks {
     }
 };
 
-void* const* DetourTable(size_t icd) {
-    switch (icd) {
-    case 0: return IcdHooks<0>::Detours();
-    case 1: return IcdHooks<1>::Detours();
-    case 2: return IcdHooks<2>::Detours();
-    default: return IcdHooks<3>::Detours();
-    }
-}
-
 VkResult VKAPI_CALL HookCreateDevice(VkPhysicalDevice physicalDevice, const VkDeviceCreateInfo* info, const VkAllocationCallbacks* allocator, VkDevice* device) {
     ScopedCall call;
     VkResult result = g_createDevice(physicalDevice, info, allocator, device);
     if (result == VK_SUCCESS && device) {
         std::lock_guard<std::mutex> lock(g_mutex);
         g_devices[*device] = physicalDevice;
-    }
-    return result;
-}
-
-VkResult VKAPI_CALL HookCreateWin32SurfaceKHR(VkInstance instance, const VkWin32SurfaceCreateInfoKHR* info, const VkAllocationCallbacks* allocator, VkSurfaceKHR* surface) {
-    ScopedCall call;
-    VkResult result = g_createWin32Surface(instance, info, allocator, surface);
-    if (result == VK_SUCCESS && info && surface) {
-        std::lock_guard<std::mutex> lock(g_mutex);
-        g_surfaces[*surface] = info->hwnd;
     }
     return result;
 }
@@ -697,31 +732,33 @@ void VKAPI_CALL HookDestroySurfaceKHR(VkInstance instance, VkSurfaceKHR surface,
     g_destroySurface(instance, surface, allocator);
 }
 
-// Installation -----------------------------------------------------------
+void RecordSurface(VkSurfaceKHR surface, NativeWindow window) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_surfaces[surface] = window;
+}
 
-bool CreateDummyInstance() {
-    auto createInstance = reinterpret_cast<PFN_vkCreateInstance>(g_getInstanceProcAddr(VK_NULL_HANDLE, "vkCreateInstance"));
-    if (!createInstance)
-        return false;
-    VkApplicationInfo appInfo{};
-    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.pApplicationName = "uih";
-    appInfo.apiVersion = VK_API_VERSION_1_0;
-    const char* extensions[] = {VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_WIN32_SURFACE_EXTENSION_NAME};
-    VkInstanceCreateInfo info{};
-    info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    info.pApplicationInfo = &appInfo;
-    info.enabledExtensionCount = 2;
-    info.ppEnabledExtensionNames = extensions;
-    VkResult result = createInstance(&info, nullptr, &g_instance);
-    if (result != VK_SUCCESS) {
-        Log("vkCreateInstance failed: %d", result);
-        return false;
+#ifdef _WIN32
+
+constexpr size_t kMaxIcds = 4;
+
+HMODULE g_module = nullptr;
+PFN_vkCreateWin32SurfaceKHR g_createWin32Surface = nullptr;
+
+VkResult VKAPI_CALL HookCreateWin32SurfaceKHR(VkInstance instance, const VkWin32SurfaceCreateInfoKHR* info, const VkAllocationCallbacks* allocator, VkSurfaceKHR* surface) {
+    ScopedCall call;
+    VkResult result = g_createWin32Surface(instance, info, allocator, surface);
+    if (result == VK_SUCCESS && info && surface)
+        RecordSurface(*surface, info->hwnd);
+    return result;
+}
+
+void* const* DetourTable(size_t icd) {
+    switch (icd) {
+    case 0: return IcdHooks<0>::Detours();
+    case 1: return IcdHooks<1>::Detours();
+    case 2: return IcdHooks<2>::Detours();
+    default: return IcdHooks<3>::Detours();
     }
-#define UIH_VK_LOAD(name) g_vk.name = reinterpret_cast<PFN_##name>(g_getInstanceProcAddr(g_instance, #name));
-    UIH_VK_INSTANCE_FUNCTIONS(UIH_VK_LOAD)
-#undef UIH_VK_LOAD
-    return true;
 }
 
 bool SupportsSwapchain(VkPhysicalDevice physicalDevice) {
@@ -869,5 +906,149 @@ void Uninstall() {
 } // namespace
 
 const Renderer kVulkanRenderer = {"Vulkan", L"vulkan-1.dll", Install, Uninstall, Teardown};
+
+#else
+
+// The hooks are exported and call the loader, which dispatches to the right driver.
+
+PFN_vkCreateXcbSurfaceKHR g_createXcbSurface = nullptr;
+PFN_vkCreateXlibSurfaceKHR g_createXlibSurface = nullptr;
+
+template <typename Fn>
+Fn Next(const char* name) {
+    return reinterpret_cast<Fn>(interpose::kVulkan.Next(name));
+}
+
+void Load() {
+    static const bool loaded = [] {
+        g_getInstanceProcAddr = Next<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr");
+        g_getDeviceProcAddr = Next<PFN_vkGetDeviceProcAddr>("vkGetDeviceProcAddr");
+        g_createDevice = Next<PFN_vkCreateDevice>("vkCreateDevice");
+        g_destroySurface = Next<PFN_vkDestroySurfaceKHR>("vkDestroySurfaceKHR");
+        g_createXcbSurface = Next<PFN_vkCreateXcbSurfaceKHR>("vkCreateXcbSurfaceKHR");
+        g_createXlibSurface = Next<PFN_vkCreateXlibSurfaceKHR>("vkCreateXlibSurfaceKHR");
+        Icd loader;
+        for (int i = 0; i < kHookCount; ++i)
+            loader.originals[i] = interpose::kVulkan.Next(kHookNames[i]);
+        g_icds.push_back(loader);
+        return true;
+    }();
+    static_cast<void>(loaded);
+}
+
+PFN_vkVoidFunction Substitute(PFN_vkVoidFunction function, const char* name, const void* caller) {
+    return reinterpret_cast<PFN_vkVoidFunction>(interpose::kVulkan.Substitute(reinterpret_cast<void*>(function), name, caller));
+}
+
+} // namespace
+
+void TeardownVulkan() { Teardown(); }
+
+UIH_EXPORT PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instance, const char* name) {
+    Load();
+    return Substitute(g_getInstanceProcAddr(instance, name), name, __builtin_return_address(0));
+}
+
+UIH_EXPORT PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device, const char* name) {
+    Load();
+    return Substitute(g_getDeviceProcAddr(device, name), name, __builtin_return_address(0));
+}
+
+UIH_EXPORT VkResult VKAPI_CALL vkCreateDevice(VkPhysicalDevice physicalDevice, const VkDeviceCreateInfo* info, const VkAllocationCallbacks* allocator, VkDevice* device) {
+    Load();
+    return HookCreateDevice(physicalDevice, info, allocator, device);
+}
+
+UIH_EXPORT void VKAPI_CALL vkDestroyDevice(VkDevice device, const VkAllocationCallbacks* allocator) {
+    Load();
+    IcdHooks<0>::DestroyDevice(device, allocator);
+}
+
+UIH_EXPORT void VKAPI_CALL vkGetDeviceQueue(VkDevice device, uint32_t family, uint32_t index, VkQueue* queue) {
+    Load();
+    IcdHooks<0>::GetDeviceQueue(device, family, index, queue);
+}
+
+UIH_EXPORT void VKAPI_CALL vkGetDeviceQueue2(VkDevice device, const VkDeviceQueueInfo2* info, VkQueue* queue) {
+    Load();
+    IcdHooks<0>::GetDeviceQueue2(device, info, queue);
+}
+
+UIH_EXPORT VkResult VKAPI_CALL vkCreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR* info, const VkAllocationCallbacks* allocator, VkSwapchainKHR* swapchain) {
+    Load();
+    return IcdHooks<0>::CreateSwapchainKHR(device, info, allocator, swapchain);
+}
+
+UIH_EXPORT void VKAPI_CALL vkDestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapchain, const VkAllocationCallbacks* allocator) {
+    Load();
+    IcdHooks<0>::DestroySwapchainKHR(device, swapchain, allocator);
+}
+
+UIH_EXPORT VkResult VKAPI_CALL vkAcquireNextImageKHR(VkDevice device, VkSwapchainKHR swapchain, uint64_t timeout, VkSemaphore semaphore, VkFence fence, uint32_t* index) {
+    Load();
+    return IcdHooks<0>::AcquireNextImageKHR(device, swapchain, timeout, semaphore, fence, index);
+}
+
+UIH_EXPORT VkResult VKAPI_CALL vkAcquireNextImage2KHR(VkDevice device, const VkAcquireNextImageInfoKHR* info, uint32_t* index) {
+    Load();
+    return IcdHooks<0>::AcquireNextImage2KHR(device, info, index);
+}
+
+UIH_EXPORT VkResult VKAPI_CALL vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* info) {
+    Load();
+    return IcdHooks<0>::QueuePresentKHR(queue, info);
+}
+
+UIH_EXPORT VkResult VKAPI_CALL vkCreateXcbSurfaceKHR(VkInstance instance, const VkXcbSurfaceCreateInfoKHR* info, const VkAllocationCallbacks* allocator, VkSurfaceKHR* surface) {
+    Load();
+    ScopedCall call;
+    VkResult result = g_createXcbSurface(instance, info, allocator, surface);
+    if (result == VK_SUCCESS && info && surface)
+        RecordSurface(*surface, info->window);
+    return result;
+}
+
+UIH_EXPORT VkResult VKAPI_CALL vkCreateXlibSurfaceKHR(VkInstance instance, const VkXlibSurfaceCreateInfoKHR* info, const VkAllocationCallbacks* allocator, VkSurfaceKHR* surface) {
+    Load();
+    ScopedCall call;
+    VkResult result = g_createXlibSurface(instance, info, allocator, surface);
+    if (result == VK_SUCCESS && info && surface)
+        RecordSurface(*surface, static_cast<NativeWindow>(info->window));
+    return result;
+}
+
+UIH_EXPORT void VKAPI_CALL vkDestroySurfaceKHR(VkInstance instance, VkSurfaceKHR surface, const VkAllocationCallbacks* allocator) {
+    Load();
+    HookDestroySurfaceKHR(instance, surface, allocator);
+}
+
+namespace {
+
+const char* const kSonames[] = {"libvulkan.so.1", nullptr};
+
+#define UIH_VK_EXPORT(name) {#name, reinterpret_cast<void*>(&name)}
+const interpose::Function kExports[] = {
+    UIH_VK_EXPORT(vkGetInstanceProcAddr),
+    UIH_VK_EXPORT(vkGetDeviceProcAddr),
+    UIH_VK_EXPORT(vkCreateDevice),
+    UIH_VK_EXPORT(vkDestroyDevice),
+    UIH_VK_EXPORT(vkGetDeviceQueue),
+    UIH_VK_EXPORT(vkGetDeviceQueue2),
+    UIH_VK_EXPORT(vkCreateSwapchainKHR),
+    UIH_VK_EXPORT(vkDestroySwapchainKHR),
+    UIH_VK_EXPORT(vkAcquireNextImageKHR),
+    UIH_VK_EXPORT(vkAcquireNextImage2KHR),
+    UIH_VK_EXPORT(vkQueuePresentKHR),
+    UIH_VK_EXPORT(vkCreateXcbSurfaceKHR),
+    UIH_VK_EXPORT(vkCreateXlibSurfaceKHR),
+    UIH_VK_EXPORT(vkDestroySurfaceKHR),
+};
+#undef UIH_VK_EXPORT
+
+} // namespace
+
+const interpose::Library interpose::kVulkan = {kSonames, kExports, sizeof(kExports) / sizeof(kExports[0])};
+
+#endif
 
 } // namespace uih::detail

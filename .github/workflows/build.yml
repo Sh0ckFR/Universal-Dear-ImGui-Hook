@@ -68,6 +68,113 @@ jobs:
           name: Universal-ImGui-Hook-mingw-${{ matrix.arch }}
           path: build/${{ matrix.preset }}/Universal-ImGui-Hook.dll
 
+  linux:
+    name: Linux ${{ matrix.compiler }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: GCC
+            cc: gcc
+            cxx: g++
+          - compiler: Clang
+            cc: clang
+            cxx: clang++
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config libxcb1-dev libx11-dev libxtst-dev libgl-dev libegl-dev xvfb libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libvulkan1 mesa-vulkan-drivers
+      - name: Configure
+        run: cmake --preset linux -DUIH_BUILD_TESTS=ON
+      - name: Build
+        run: cmake --build --preset linux
+      - name: Check the exported functions
+        run: |
+          sed -n 's/^ *\([A-Za-z0-9_]*\);$/\1/p' src/linux/exports.map | sort > expected.txt
+          nm -D --defined-only build/linux/Universal-ImGui-Hook.so | awk '{print $NF}' | sort > exported.txt
+          diff expected.txt exported.txt
+      - name: Check the runtime dependencies
+        run: |
+          readelf -d build/linux/Universal-ImGui-Hook.so | grep NEEDED
+          if readelf -d build/linux/Universal-ImGui-Hook.so | grep -E 'libstdc\+\+|libgcc_s'; then exit 1; fi
+      - name: Test
+        shell: bash
+        run: |
+          xvfb-run -a -s "-screen 0 1280x720x24" ctest --test-dir build/linux --output-on-failure | tee ctest.log
+          if grep Skipped ctest.log; then exit 1; fi
+
+  # Built against an old glibc so the released library loads on older systems.
+  linux-portable:
+    name: Linux portable (glibc 2.28)
+    runs-on: ubuntu-24.04
+    container: quay.io/pypa/manylinux_2_28_x86_64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          dnf install -y pkgconf-pkg-config libxcb-devel libX11-devel libXtst-devel libglvnd-devel mesa-libGL-devel mesa-libEGL-devel \
+            xorg-x11-server-Xvfb xorg-x11-xauth mesa-dri-drivers mesa-vulkan-drivers vulkan-loader
+          command -v cmake || pipx install cmake
+          command -v ninja || pipx install ninja
+      - name: Configure
+        run: cmake --preset linux -DUIH_BUILD_TESTS=ON
+      - name: Build
+        run: cmake --build --preset linux
+      - name: Check the runtime dependencies
+        run: |
+          readelf -d build/linux/Universal-ImGui-Hook.so | grep NEEDED
+          if readelf -d build/linux/Universal-ImGui-Hook.so | grep -E 'libstdc\+\+|libgcc_s'; then exit 1; fi
+          required=$(objdump -T build/linux/Universal-ImGui-Hook.so | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -n 1)
+          echo "$required"
+          test "$(printf '%s\n' "$required" GLIBC_2.28 | sort -V | tail -n 1)" = GLIBC_2.28
+      - name: Test
+        shell: bash
+        run: |
+          xvfb-run -a -s "-screen 0 1280x720x24" ctest --test-dir build/linux --output-on-failure | tee ctest.log
+          if grep -E 'preload_(glx|egl).*Skipped' ctest.log; then exit 1; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Universal-ImGui-Hook-linux-x86_64
+          path: build/linux/Universal-ImGui-Hook.so
+
+  ddnet:
+    name: DDNet (${{ matrix.backend }})
+    needs: linux-portable
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [OpenGL, Vulkan]
+    env:
+      DDNET: DDNet-20.1.1-linux_x86_64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Universal-ImGui-Hook-linux-x86_64
+      # The distribution package brings the libraries the official build needs.
+      - name: Install DDNet
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ddnet xvfb xdotool imagemagick libgl1-mesa-dri libglx-mesa0 libvulkan1 mesa-vulkan-drivers
+          curl -fsSL --retry 3 --connect-timeout 20 --max-time 300 -o ddnet.tar.xz https://ddnet.org/downloads/$DDNET.tar.xz
+          tar -xJf ddnet.tar.xz
+      - name: Run DDNet with the hook preloaded
+        run: xvfb-run -a -s "-screen 0 1280x800x24" sh tests/ddnet.sh Universal-ImGui-Hook.so $DDNET/DDNet ${{ matrix.backend }} ddnet-${{ matrix.backend }}.png
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ddnet-${{ matrix.backend }}
+          path: ddnet-${{ matrix.backend }}.png
+          if-no-files-found: ignore
+
   consumer:
     name: FetchContent consumer
     runs-on: windows-latest
@@ -81,7 +188,7 @@ jobs:
   release:
     name: Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [msvc, mingw, consumer]
+    needs: [msvc, mingw, linux, linux-portable, consumer]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -89,15 +196,14 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Name the DLLs after their toolchain
+      - name: Name the libraries after their toolchain
         run: |
           mkdir release
-          for dir in artifacts/*/; do
-            name=$(basename "$dir")
-            cp "$dir/Universal-ImGui-Hook.dll" "release/$name.dll"
+          for file in artifacts/*/Universal-ImGui-Hook.*; do
+            cp "$file" "release/$(basename "$(dirname "$file")").${file##*.}"
           done
           ls -l release
       - uses: softprops/action-gh-release@v2
         with:
-          files: release/*.dll
+          files: release/*
           generate_release_notes: true
