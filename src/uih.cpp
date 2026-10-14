@@ -24,6 +24,8 @@ std::mutex g_teardownMutex;
 std::condition_variable g_teardownSignal;
 bool g_teardownDone = false;
 
+float g_appliedScale = 1.0f;
+
 bool g_menuKeyDown = false;
 bool g_unloadKeyDown = false;
 
@@ -40,6 +42,17 @@ void PollKeys() {
         SetMenuOpen(!g_menuOpen);
     if (KeyPressed(g_config.unloadKey, g_unloadKeyDown, focused))
         platform::Unload();
+}
+
+void ApplyScale() {
+    float scale = g_config.scale > 0.0f ? g_config.scale : platform::WindowScale();
+    if (scale <= 0.0f || scale == g_appliedScale)
+        return;
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.ScaleAllSizes(scale / g_appliedScale);
+    style.FontScaleDpi = scale;
+    g_appliedScale = scale;
+    Log("Interface scale %.2f", scale);
 }
 
 } // namespace
@@ -133,12 +146,14 @@ bool CreateContext() {
     io.LogFilename = nullptr;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     ImGui::StyleColorsDark();
+    g_appliedScale = 1.0f;
     return true;
 }
 
 ImDrawData* Frame() {
     platform::NewFrame();
     PollKeys();
+    ApplyScale();
     ImGuiIO& io = ImGui::GetIO();
     io.MouseDrawCursor = g_menuOpen;
     // The game keeps its controller while the menu is closed.

@@ -225,6 +225,7 @@ Edit `example/menu.cpp` to draw your own interface: `DrawMenu` runs between `ImG
 uih::Config config;
 config.backend = uih::Backend::None;    // None = detect automatically
 config.debugLog = false;                // OutputDebugString (DebugView) on Windows, stderr on Linux
+config.scale = 0.0f;                    // size of the interface, 1.5 = 150%; 0 follows the DPI of the game window
 config.render = DrawMenu;               // called every frame
 #ifdef _WIN32
 config.module = module;                 // DLL to unload on `unloadKey`

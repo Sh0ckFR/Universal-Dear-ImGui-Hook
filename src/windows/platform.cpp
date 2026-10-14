@@ -220,6 +220,13 @@ void NewFrame() { ImGui_ImplWin32_NewFrame(); }
 
 bool IsKeyDown(int key) { return (GetAsyncKeyState(key) & 0x8000) != 0; }
 
+float WindowScale() {
+    using GetDpiForWindowFn = UINT(WINAPI*)(HWND);
+    static auto getDpiForWindow = GetProc<GetDpiForWindowFn>(GetModuleHandleW(L"user32.dll"), "GetDpiForWindow");
+    UINT dpi = getDpiForWindow && g_window ? getDpiForWindow(g_window) : 0;
+    return dpi ? static_cast<float>(dpi) / USER_DEFAULT_SCREEN_DPI : 1.0f;
+}
+
 bool IsFocused() {
     HWND foreground = GetForegroundWindow();
     return foreground && (foreground == g_window || IsChild(g_window, foreground));
