@@ -71,6 +71,7 @@ LD_PRELOAD=$PWD/build/linux/Universal-ImGui-Hook.so ./game
 | `tests/` | Test applications, the DDNet script and a `FetchContent` consumer |
 | `third_party/` | Dear ImGui, MinHook and the Vulkan headers |
 | `cmake/` | Toolchain files for MinGW-w64 |
+| `Universal-ImGui-Hook.sln`, `vs/` | Visual Studio solution for Windows, built from the same sources as CMake |
 
 ## Building
 
@@ -103,16 +104,9 @@ Visual Studio 2019 is not tested. The mingw-w64 8.0 headers shipped by Ubuntu 22
 
 Requirements: Visual Studio 2022 or newer with the "Desktop development with C++" workload, which includes CMake and the Windows SDK. There are three ways to build; they all produce the same DLL.
 
+**Open the solution.** Open `Universal-ImGui-Hook.sln` from the root of the repository, pick `Release` and `x64` (or `x86`), then Build > Build Solution. The `Universal-ImGui-Hook` project is the DLL, written to `build/vs/x64/Release/Universal-ImGui-Hook.dll`; the solution also builds `uih_host`, the test application described in [Tests](#tests). The solution needs no CMake and uses whichever toolset the installed Visual Studio provides. It only covers Windows: a source file added to `CMakeLists.txt` has to be added to the matching project in `vs/` too.
+
 **Open the folder.** In Visual Studio, choose "Open a local folder" and select the repository. Pick `Visual Studio x64` (or `x86`) in the configuration dropdown, then Build > Build All. The DLL is written to `build/msvc-x64/Release/Universal-ImGui-Hook.dll`. Visual Studio Code with the CMake Tools extension works the same way.
-
-**Open the solution.** Generate it once from a "Developer PowerShell for VS" prompt, then open it like any other solution:
-
-```sh
-cmake --preset msvc-x64          # or msvc-x86
-start build\msvc-x64\UniversalImGuiHook.sln
-```
-
-Select the `Release` configuration and build the solution; the `uih_example` project is the DLL. Run the `cmake --preset` line again after pulling changes that add or remove source files.
 
 **Command line.**
 
@@ -297,6 +291,7 @@ The [build workflow](.github/workflows/build.yml) runs on every push and pull re
 | Job | What it checks |
 | --- | --- |
 | MSVC x64, Win32 | Build, Direct3D 11 smoke test on WARP, `dinput8.dll` proxy test |
+| Visual Studio solution x64, x86 | `Universal-ImGui-Hook.sln` built with MSBuild, same two tests |
 | MinGW-w64 x86_64, i686 on Ubuntu and macOS | Cross-compilation of the DLL, name of the proxy export |
 | Linux GCC, Clang | Build, exported symbols, the six preload tests under Xvfb with llvmpipe and lavapipe |
 | Linux portable | The released library: built and tested in a glibc 2.28 container, glibc requirement checked |

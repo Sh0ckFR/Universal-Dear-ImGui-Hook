@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{169A0A14-2947-4475-ABDD-37DE47C475E8}</ProjectGuid>
+  </PropertyGroup>
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+  </PropertyGroup>
+  <Import Project="common.props" />
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(UihRoot)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <WarningLevel>Level4</WarningLevel>
+      <ConformanceMode>true</ConformanceMode>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="..\src\uih.cpp" />
+    <ClCompile Include="..\src\vulkan.cpp" />
+    <ClCompile Include="..\src\windows\platform.cpp" />
+    <ClCompile Include="..\src\windows\input.cpp" />
+    <ClCompile Include="..\src\windows\d3d9.cpp" />
+    <ClCompile Include="..\src\windows\dxgi.cpp" />
+    <ClCompile Include="..\src\windows\d3d10.cpp" />
+    <ClCompile Include="..\src\windows\d3d11.cpp" />
+    <ClCompile Include="..\src\windows\d3d12.cpp" />
+    <ClCompile Include="..\src\windows\opengl.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\include\uih.h" />
+    <ClInclude Include="..\src\internal.h" />
+    <ClInclude Include="..\src\windows\platform.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>
