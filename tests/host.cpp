@@ -1276,6 +1276,13 @@ int RunGamepadMode(HWND window, Host& host, const std::string& fake) {
     StartHook(Options{});
     for (ULONGLONG start = GetTickCount64(); WaitingForBackend(start);)
         run(1);
+    // XInput is hooked after the graphics API, by MinHook, which writes a jump at the start of the function.
+    auto hooked = [&] {
+        uint8_t first = *reinterpret_cast<const volatile uint8_t*>(reinterpret_cast<void*>(getState));
+        return first == 0xE9 || first == 0xEB;
+    };
+    for (ULONGLONG start = GetTickCount64(); !hooked() && GetTickCount64() - start < kDetectionTimeoutMs;)
+        run(1);
     BringToFront(window);
     run(30);
 
@@ -1283,6 +1290,8 @@ int RunGamepadMode(HWND window, Host& host, const std::string& fake) {
     const WORD menuButtons = XINPUT_GAMEPAD_LEFT_THUMB | XINPUT_GAMEPAD_RIGHT_THUMB;
     if (uih::ActiveBackend() == uih::Backend::None) {
         result = Fail("backend was not detected");
+    } else if (!hooked()) {
+        result = Fail("XInput was not hooked");
     } else if (GetForegroundWindow() != window) {
         result = Skip("the host window does not have the focus");
     } else {
