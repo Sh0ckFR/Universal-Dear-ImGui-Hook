@@ -107,6 +107,8 @@ config.module = module;        // Windows: DLL unloaded by unloadKey
 uih::Start(config);
 ```
 
+The example menu is a tour of the common widgets (buttons, combo and list boxes, inputs, sliders, colors, tabs, trees, tables, plots, popups, draw lists) with `imgui.png` shown under the slider, and its *Menu* bar opens Dear ImGui's own demo window, which covers every function. `example/image.cpp` embeds the picture in the library and decodes it with [stb_image](https://github.com/nothings/stb).
+
 Images are created once from RGBA pixels and drawn like any ImGui texture:
 
 ```cpp
@@ -256,6 +258,7 @@ Without a GPU, as on the CI runners, Direct3D uses WARP, and Mesa's software dri
 | `--dll <path>` | Loads the real DLL and drives it with `INSERT` and `F11` |
 | `--menu-key <vk>`, `--unload-key <vk>` | The keys a DLL built with other settings uses, such as `0x70` for F1 (X11 keysyms on Linux) |
 | `--proxy <path>` | Loads the DLL as `dinput8.dll` |
+| `--preview <path>` | Not a test: loads the DLL, opens its menu and renders until the window is closed, to look at a menu without a game |
 
 On Linux, `uih_host` does not link the hook: each test preloads the `.so`, opens the menu, checks the pixels and removes the overlay, through GLX, EGL, `dlsym()` lookups and Vulkan, with `--resize` and `--reload` variants. It needs `libx11-dev libxtst-dev libgl-dev libegl-dev`; without a display, run `xvfb-run -a ctest --test-dir build/linux`. `tests/ddnet.sh` runs the same scenario on the game [DDNet](https://ddnet.org/).
 
@@ -283,10 +286,10 @@ Pushing a `v*` tag publishes the libraries as a release.
 | `src/vulkan.cpp` | Vulkan renderer, shared by both platforms |
 | `src/windows/` | MinHook, Direct3D, WGL, Win32 input, DirectInput, XInput |
 | `src/linux/` | Symbol interposition, GLX, EGL, X11 input, `exports.map` |
-| `example/` | The built library: `config.cpp` (settings), `menu.cpp`, `dllmain.cpp`, `proxy.cpp`, `preload.cpp` |
+| `example/` | The built library: `config.cpp` (settings), `menu.cpp` (the widget tour), `image.cpp` and `image.rc` (`imgui.png` embedded), `dllmain.cpp`, `proxy.cpp`, `preload.cpp` |
 | `tests/` | `uih_host`, the DDNet script, the `FetchContent` consumer |
 | `vs/`, `Universal-ImGui-Hook.sln` | Visual Studio projects |
-| `third_party/` | Dear ImGui, MinHook, Vulkan headers |
+| `third_party/` | Dear ImGui, MinHook, Vulkan headers, stb_image (example only) |
 
 - A new source file goes into `CMakeLists.txt` **and** the matching project in `vs/`.
 - A fix comes with a `uih_host` scenario that fails without it.
@@ -305,6 +308,7 @@ Pushing a `v*` tag publishes the libraries as a release.
 * [Dear ImGui](https://github.com/ocornut/imgui)
 * [MinHook](https://github.com/TsudaKageyu/minhook)
 * [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers)
+* [stb_image](https://github.com/nothings/stb) (the example's picture)
 
 ## Authors
 

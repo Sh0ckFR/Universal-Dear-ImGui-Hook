@@ -30,6 +30,8 @@ struct Options {
     std::string api;
     std::string dll;
     std::string proxy;
+    // Library shown with its menu open until the window is closed.
+    std::string preview;
     int injectAt = 30;
     // Hotkeys the library was built with, 0 for INSERT and F11.
     int menuKey = 0;

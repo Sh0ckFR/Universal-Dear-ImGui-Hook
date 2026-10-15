@@ -1,0 +1,2 @@
+// imgui.png from the root of the repository, read by image.cpp.
+IMGUI_PNG RCDATA "imgui.png"

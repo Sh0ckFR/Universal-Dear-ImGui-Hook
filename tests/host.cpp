@@ -728,6 +728,23 @@ bool PressKey(HWND window, int key) {
 // loaded the way a game loads a proxy: F11 only removes the overlay, and
 // INSERT brings it back. Otherwise F11 unloads the DLL, and --reload injects
 // it again.
+// Loads a library, opens its menu and renders until the window is closed:
+// a quick look at a menu without a game.
+int RunPreviewMode(HWND window, Host& host, const Options& options) {
+    std::wstring path(options.preview.begin(), options.preview.end());
+    if (!LoadLibraryW(path.c_str()))
+        return Fail("LoadLibrary failed");
+    BringToFront(window);
+    for (int frame = 0; IsWindow(window); ++frame) {
+        if (frame == 60 && PressKey(window, options.menuKey ? options.menuKey : VK_INSERT))
+            HoldKey(options.menuKey ? options.menuKey : VK_INSERT, false);
+        PumpMessages();
+        if (IsWindow(window))
+            host.Frame();
+    }
+    return 0;
+}
+
 int RunDllMode(HWND window, Host& host, const Options& options) {
     const int menuKey = options.menuKey ? options.menuKey : VK_INSERT;
     const int unloadKey = options.unloadKey ? options.unloadKey : VK_F11;
@@ -1132,6 +1149,7 @@ int main(int argc, char** argv) {
         if (arg == "--api" && i + 1 < argc) options.api = argv[++i];
         else if (arg == "--inject-at" && i + 1 < argc) options.injectAt = atoi(argv[++i]);
         else if (arg == "--dll" && i + 1 < argc) options.dll = argv[++i];
+        else if (arg == "--preview" && i + 1 < argc) options.preview = argv[++i];
         else if (arg == "--proxy" && i + 1 < argc) options.proxy = argv[++i];
         else if (arg == "--scale" && i + 1 < argc) options.scale = static_cast<float>(atof(argv[++i]));
         else if (arg == "--menu-key" && i + 1 < argc) options.menuKey = static_cast<int>(strtol(argv[++i], nullptr, 0));
@@ -1153,7 +1171,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--fullscreen] [--reload] [--remove] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -1199,6 +1217,11 @@ int main(int argc, char** argv) {
         int result = RunInputMode(window, *host, options.input == "directinput");
         host.reset();
         DestroyWindow(window);
+        return result;
+    }
+    if (!options.preview.empty()) {
+        int result = RunPreviewMode(window, *host, options);
+        host.reset();
         return result;
     }
     if (!options.dll.empty()) {

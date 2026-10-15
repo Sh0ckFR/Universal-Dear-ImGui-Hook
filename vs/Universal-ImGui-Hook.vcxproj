@@ -26,6 +26,12 @@
   </PropertyGroup>
   <Import Project="common.props" />
   <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(UihRoot)third_party\stb;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>$(UihRoot);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <ModuleDefinitionFile>$(UihRoot)example\proxy.def</ModuleDefinitionFile>
@@ -36,10 +42,14 @@
     <ClCompile Include="..\example\dllmain.cpp" />
     <ClCompile Include="..\example\config.cpp" />
     <ClCompile Include="..\example\menu.cpp" />
+    <ClCompile Include="..\example\image.cpp" />
     <ClCompile Include="..\example\proxy.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\example\proxy.def" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="..\example\image.rc" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="minhook.vcxproj">
