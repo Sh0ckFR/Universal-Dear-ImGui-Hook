@@ -34,6 +34,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\example\dllmain.cpp" />
+    <ClCompile Include="..\example\config.cpp" />
     <ClCompile Include="..\example\menu.cpp" />
     <ClCompile Include="..\example\proxy.cpp" />
   </ItemGroup>

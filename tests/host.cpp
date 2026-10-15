@@ -431,7 +431,8 @@ void SaveCapture(const Capture& capture, const std::string& name) {
     file.bfOffBits = sizeof(file) + sizeof(header);
     file.bfSize = file.bfOffBits + static_cast<DWORD>(capture.pixels.size());
     std::string path = "capture-" + name + ".bmp";
-    if (FILE* out = fopen(path.c_str(), "wb")) {
+    FILE* out = nullptr;
+    if (fopen_s(&out, path.c_str(), "wb") == 0 && out) {
         fwrite(&file, sizeof(file), 1, out);
         fwrite(&header, sizeof(header), 1, out);
         fwrite(capture.pixels.data(), 1, capture.pixels.size(), out);
@@ -586,6 +587,8 @@ bool PressKey(HWND window, int key) {
 // INSERT opens the menu, F11 unloads the DLL. The DLL installs its hooks on
 // a thread of its own, so INSERT is pressed until the overlay shows up.
 int RunDllMode(HWND window, Host& host, const Options& options) {
+    const int menuKey = options.menuKey ? options.menuKey : VK_INSERT;
+    const int unloadKey = options.unloadKey ? options.unloadKey : VK_F11;
     std::wstring path(options.dll.begin(), options.dll.end());
     size_t separator = path.find_last_of(L"\\/");
     std::wstring name = separator == std::wstring::npos ? path : path.substr(separator + 1);
@@ -603,10 +606,10 @@ int RunDllMode(HWND window, Host& host, const Options& options) {
 
     int pixels = 0;
     for (ULONGLONG start = GetTickCount64(); GetTickCount64() - start < kDetectionTimeoutMs;) {
-        if (!PressKey(window, VK_INSERT))
+        if (!PressKey(window, menuKey))
             return Skip("the host window does not have the focus");
         run(5);
-        HoldKey(VK_INSERT, false);
+        HoldKey(menuKey, false);
         run(55);
         pixels = CaptureWindow(window).overlayPixels;
         if (pixels >= kWidth * kHeight / 100)
@@ -616,10 +619,10 @@ int RunDllMode(HWND window, Host& host, const Options& options) {
     if (pixels < kWidth * kHeight / 100)
         return Fail("overlay is not visible on screen");
 
-    if (!PressKey(window, VK_F11))
+    if (!PressKey(window, unloadKey))
         return Skip("the host window lost the focus");
     run(5);
-    HoldKey(VK_F11, false);
+    HoldKey(unloadKey, false);
     for (ULONGLONG start = GetTickCount64(); GetModuleHandleW(name.c_str()) && GetTickCount64() - start < 10000;)
         run(1);
     if (GetModuleHandleW(name.c_str()))
@@ -897,6 +900,8 @@ int main(int argc, char** argv) {
         else if (arg == "--dll" && i + 1 < argc) options.dll = argv[++i];
         else if (arg == "--proxy" && i + 1 < argc) options.proxy = argv[++i];
         else if (arg == "--scale" && i + 1 < argc) options.scale = static_cast<float>(atof(argv[++i]));
+        else if (arg == "--menu-key" && i + 1 < argc) options.menuKey = static_cast<int>(strtol(argv[++i], nullptr, 0));
+        else if (arg == "--unload-key" && i + 1 < argc) options.unloadKey = static_cast<int>(strtol(argv[++i], nullptr, 0));
         else if (arg == "--warp") options.warp = true;
         else if (arg == "--capture") options.capture = true;
         else if (arg == "--device-proc-addr") options.deviceProcAddr = true;
@@ -910,7 +915,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]]\n       uih_host --proxy path\n");
         return 2;
     }
 
