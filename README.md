@@ -296,7 +296,7 @@ Pushing a `v*` tag publishes the libraries as a release.
 - Linux reads input from the X server: native Wayland windows get no menu input (run SDL games with `SDL_VIDEODRIVER=x11`), and the game still receives the keyboard and the mouse while the menu is open. The mouse wheel and input methods are not handled.
 - Linux: 32-bit games, OpenGL ES, and games that link their GL or Vulkan loader statically are not supported.
 - HDR10 swap chains (PQ color space) show the overlay with wrong colors.
-- A Vulkan swap chain created before the hook is assumed to be `B8G8R8A8_UNORM` until the game recreates it.
+- A Vulkan swap chain created before the hook has no overlay until the game recreates it: its presents report `VK_SUBOPTIMAL_KHR`, which games answer by recreating it.
 - Native ARM64 Windows games are not supported: MinHook only handles x86 and x64.
 
 ## Built With
