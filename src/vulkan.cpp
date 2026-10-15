@@ -492,10 +492,8 @@ bool Setup(VkDevice device, VkQueue queue, VkSwapchainKHR swapchain) {
         ++g_setupFailures;
         return false;
     }
-    if (swapchainInfo.format == VK_FORMAT_UNDEFINED) {
-        swapchainInfo.format = VK_FORMAT_B8G8R8A8_UNORM;
-        Log("Vulkan swap chain %p was created before injection, assuming VK_FORMAT_B8G8R8A8_UNORM", swapchain);
-    }
+    if (swapchainInfo.format == VK_FORMAT_UNDEFINED)
+        return false;
     if (!swapchainInfo.window)
         swapchainInfo.window = input::FindProcessWindow();
     if (swapchainInfo.extent.width == 0 || swapchainInfo.extent.height == 0)
@@ -644,16 +642,39 @@ void OnDeviceDestroyed(VkDevice device) {
         it = it->second.device == device ? g_swapchains.erase(it) : std::next(it);
 }
 
+bool FormatKnown(VkSwapchainKHR swapchain) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    auto it = g_swapchains.find(swapchain);
+    return it != g_swapchains.end() && it->second.format != VK_FORMAT_UNDEFINED;
+}
+
+// The format of a swap chain created before the hook cannot be queried.
+// Nothing is drawn on it, and its presents report VK_SUBOPTIMAL_KHR so that
+// the game recreates it, as after a resize: the new one is seen created.
 VkResult PresentFrame(size_t icd, VkQueue queue, const VkPresentInfoKHR* info) {
     const VkPresentInfoKHR* forward = info;
     VkPresentInfoKHR patched;
+    bool unknownFormat = false;
     if (info && info->swapchainCount > 0 && info->pSwapchains && info->pImageIndices && ShouldRender(Backend::Vulkan)) {
-        VkDevice device = DeviceForQueue(queue, info->pSwapchains[0]);
-        if (device != VK_NULL_HANDLE)
+        VkSwapchainKHR swapchain = info->pSwapchains[0];
+        VkDevice device = DeviceForQueue(queue, swapchain);
+        if (device != VK_NULL_HANDLE && FormatKnown(swapchain)) {
             forward = Render(queue, device, info, patched);
+        } else if (device != VK_NULL_HANDLE) {
+            static VkSwapchainKHR reported = VK_NULL_HANDLE;
+            if (reported != swapchain)
+                Log("Vulkan swap chain %p was created before the hook, asking the game to recreate it", swapchain);
+            reported = swapchain;
+            unknownFormat = true;
+        }
     }
     VkResult result = Original<PFN_vkQueuePresentKHR>(icd, kQueuePresentKHR)(queue, forward);
     ServiceTeardown(Backend::Vulkan, Teardown);
+    if (unknownFormat && result == VK_SUCCESS) {
+        if (info->pResults && info->pResults[0] == VK_SUCCESS)
+            info->pResults[0] = VK_SUBOPTIMAL_KHR;
+        return VK_SUBOPTIMAL_KHR;
+    }
     return result;
 }
 

@@ -11,6 +11,7 @@
 #endif
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <vector>
 
@@ -323,8 +324,12 @@ struct VulkanHost : Host {
         present.swapchainCount = 1;
         present.pSwapchains = &swapchain;
         present.pImageIndices = &imageIndex;
-        vkQueuePresentKHR(queue, &present);
+        VkResult presented = vkQueuePresentKHR(queue, &present);
         ++frame;
+        if (presented == VK_SUBOPTIMAL_KHR || presented == VK_ERROR_OUT_OF_DATE_KHR) {
+            printf("swap chain recreated after %s\n", presented == VK_SUBOPTIMAL_KHR ? "VK_SUBOPTIMAL_KHR" : "VK_ERROR_OUT_OF_DATE_KHR");
+            Resize(0, 0);
+        }
     }
 
     ~VulkanHost() override {

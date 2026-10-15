@@ -239,7 +239,7 @@ ctest --test-dir build/msvc-x64 -C Release
 
 Some tests press real keys and move the mouse. They are skipped when the host window does not have the focus: leave the machine alone while they run. A test whose screen check fails saves the capture as `build/tests/capture-*.bmp`.
 
-Without a GPU, as on the CI runners, Direct3D uses WARP, and Mesa's software drivers from [mesa-dist-win](https://github.com/pal1000/mesa-dist-win) cover the rest: copy `opengl32.dll` and `libgallium_wgl.dll` next to `uih_host.exe` with `GALLIUM_DRIVER=llvmpipe`, and register `lvp_icd.*.json` under `HKLM\SOFTWARE\Khronos\Vulkan\Drivers` with a `vulkan-1.dll` from the Vulkan runtime.
+Without a GPU, as on the CI runners, Direct3D uses WARP, and Mesa's software drivers from [mesa-dist-win](https://github.com/pal1000/mesa-dist-win) cover the rest: copy `opengl32.dll`, `libgallium_wgl.dll` and `dxil.dll` next to `uih_host.exe` with `GALLIUM_DRIVER=llvmpipe` (or `d3d12` for the D3D12-based driver of Microsoft's OpenGL compatibility pack, which needs `dxil.dll` to sign its shaders), and register `lvp_icd.*.json` under `HKLM\SOFTWARE\Khronos\Vulkan\Drivers` with a `vulkan-1.dll` from the Vulkan runtime.
 
 | `uih_host` option (Windows) | Scenario |
 | --- | --- |
@@ -249,7 +249,8 @@ Without a GPU, as on the CI runners, Direct3D uses WARP, and Mesa's software dri
 | `--format srgb\|float` | Back buffer storing linear values |
 | `--decoy-queue` | A second D3D12 device executes work every frame |
 | `--scale <s>`, `--warp` | Fixed interface scale; software rasterizer |
-| `--resize` | Window and back buffers resized to 1024x768, then 720x560, with the menu open |
+| `--resize` | Window and back buffers resized to 960x640, then 720x560, with the menu open |
+| `--fullscreen` | 800x600 exclusive fullscreen (D3D9, DXGI) or display mode change with a borderless window (Vulkan, OpenGL), then back; the window must cover the display and the overlay follow it. Skipped unless `UIH_TEST_FULLSCREEN=1`, set by the CI |
 | `--reload` | The overlay is started a second time: `Start()` after `Stop()`, or with `--dll` the DLL injected again, or, for a DLL named `dinput8.dll`, brought back by `INSERT` after `F11` |
 | `--remove` | `F11` removes the overlay and `INSERT` brings it back, twice, without a module to free |
 | `--input raw\|directinput` | What the game reads while the menu is open |
@@ -266,7 +267,7 @@ The [CI](.github/workflows/build.yml) runs on every push and pull request:
 | Job | Checks |
 | --- | --- |
 | MSVC x64, Win32 | Build, D3D11 on WARP, `dinput8.dll` proxy |
-| Windows tests x64, Win32 | The whole CTest suite without GPU: WARP for Direct3D, Mesa's llvmpipe and lavapipe for OpenGL and Vulkan; no test may be skipped |
+| Windows tests x64, Win32 | The whole CTest suite without GPU: WARP for Direct3D, Mesa's llvmpipe and lavapipe for OpenGL and Vulkan, then the OpenGL scenarios again on Mesa's D3D12-based driver; no test may be skipped |
 | Visual Studio solution x64, x86 | The `.sln` built with MSBuild, same tests |
 | MinGW-w64 on Ubuntu and macOS | Cross-compiled DLLs, proxy export |
 | Linux GCC, Clang x86_64, GCC aarch64 | The preload tests under Xvfb with llvmpipe and lavapipe, including resizes and the overlay brought back after `F11` |
@@ -299,7 +300,7 @@ Pushing a `v*` tag publishes the libraries as a release.
 - Linux reads input from the X server: native Wayland windows get no menu input (run SDL games with `SDL_VIDEODRIVER=x11`), and the game still receives the keyboard and the mouse while the menu is open. The mouse wheel and input methods are not handled.
 - Linux: 32-bit games, OpenGL ES, and games that link their GL or Vulkan loader statically are not supported.
 - HDR10 swap chains (PQ color space) show the overlay with wrong colors.
-- A Vulkan swap chain created before the hook is assumed to be `B8G8R8A8_UNORM` until the game recreates it.
+- A Vulkan swap chain created before the hook has no overlay until the game recreates it: its presents report `VK_SUBOPTIMAL_KHR`, which games answer by recreating it.
 - Native ARM64 Windows games are not supported: MinHook only handles x86 and x64.
 
 ## Built With
