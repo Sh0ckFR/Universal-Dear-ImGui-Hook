@@ -24,6 +24,7 @@ Windows games running under Wine or Proton use the Windows DLL.
 - [Tests](#tests)
 - [Contributing](#contributing)
 - [Limitations](#limitations)
+- [Support](#support)
 
 ## Features
 
@@ -54,6 +55,16 @@ sudo apt install cmake ninja-build g++ pkg-config libxcb1-dev
 cmake --preset linux && cmake --build --preset linux
 LD_PRELOAD=$PWD/build/linux/Universal-ImGui-Hook.so ./game
 ```
+
+To make the overlay your own, you only edit the example:
+
+| To change | Edit |
+| --- | --- |
+| The menu | `example/menu.cpp`, plain Dear ImGui code run every frame |
+| Hotkeys, controller buttons, graphics API, interface scale | `example/config.cpp` |
+| Fonts and style | a `config.setup` callback, run when the ImGui context is created, set next to `config.render` in `example/dllmain.cpp` (Windows) or `example/preload.cpp` (Linux) |
+
+The hook itself, in `src/`, needs no change.
 
 ## Usage
 
@@ -334,7 +345,7 @@ Pushing a `v*` tag publishes the libraries as a release.
 
 ## Support
 
-This project is free and MIT-licensed. Building it from scratch represents roughly 33 days of senior C++ work, about €22,000 at French freelance rates. If it saved you time, consider [sponsoring](https://github.com/sponsors/Sh0ckFR) or starring the repository.
+This project is free and MIT-licensed. Building it from scratch represents roughly 57 days of senior C++ work, about €37,000 at French freelance rates: six graphics backends on two operating systems, input blocking, crash protection, and about 80 test scenarios run on every commit. If it saved you time, consider [sponsoring](https://github.com/sponsors/Sh0ckFR) or starring the repository.
 
 ## License
 
