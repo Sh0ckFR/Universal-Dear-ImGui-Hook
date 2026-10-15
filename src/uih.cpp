@@ -40,6 +40,9 @@ struct UserTexture {
 };
 std::mutex g_texturesMutex;
 std::vector<UserTexture> g_textures;
+// A texture created by the render callback is drawn in the same frame, so it
+// is registered at once instead of before the next frame.
+thread_local bool t_inRenderCallback = false;
 
 bool g_menuButtonsDown = false;
 bool g_menuKeyDown = false;
@@ -280,8 +283,10 @@ ImDrawData* Frame() {
     else
         io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableGamepad;
     ImGui::NewFrame();
+    t_inRenderCallback = true;
     if (g_config.render)
         g_config.render();
+    t_inRenderCallback = false;
     ImGui::Render();
     return ImGui::GetDrawData();
 }
@@ -358,7 +363,9 @@ ImTextureData* CreateTexture(const void* rgba, int width, int height) {
     memcpy(texture->GetPixels(), rgba, static_cast<size_t>(width) * height * 4);
     texture->UseColors = true;
     std::lock_guard<std::mutex> lock(g_texturesMutex);
-    g_textures.push_back({texture, false, false});
+    g_textures.push_back({texture, t_inRenderCallback, false});
+    if (t_inRenderCallback)
+        ImGui::RegisterUserTexture(texture);
     return texture;
 }
 

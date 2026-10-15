@@ -12,10 +12,38 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
 namespace {
+
+// With UIH_TEST_VULKAN_VALIDATION set, the host enables the Khronos
+// validation layer, which also checks the commands the hook records on the
+// host's device, and counts its errors.
+int g_validationErrors = 0;
+
+VKAPI_ATTR VkBool32 VKAPI_CALL OnValidationMessage(VkDebugUtilsMessageSeverityFlagBitsEXT severity, VkDebugUtilsMessageTypeFlagsEXT,
+                                                   const VkDebugUtilsMessengerCallbackDataEXT* data, void*) {
+    if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
+        ++g_validationErrors;
+        printf("VALIDATION ERROR: %s\n", data->pMessage);
+    }
+    return VK_FALSE;
+}
+
+bool HasLayer(PFN_vkGetInstanceProcAddr getInstanceProcAddr, const char* name) {
+    auto enumerate = reinterpret_cast<PFN_vkEnumerateInstanceLayerProperties>(getInstanceProcAddr(VK_NULL_HANDLE, "vkEnumerateInstanceLayerProperties"));
+    uint32_t count = 0;
+    if (!enumerate || enumerate(&count, nullptr) != VK_SUCCESS)
+        return false;
+    std::vector<VkLayerProperties> layers(count);
+    enumerate(&count, layers.data());
+    for (const VkLayerProperties& layer : layers)
+        if (strcmp(layer.layerName, name) == 0)
+            return true;
+    return false;
+}
 
 #ifdef _WIN32
 const char* const kSurfaceExtension = VK_KHR_WIN32_SURFACE_EXTENSION_NAME;
@@ -114,14 +142,36 @@ struct VulkanHost : Host {
         VkApplicationInfo appInfo{};
         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
         appInfo.apiVersion = VK_API_VERSION_1_0;
-        const char* instanceExtensions[] = {VK_KHR_SURFACE_EXTENSION_NAME, kSurfaceExtension};
+        std::vector<const char*> instanceExtensions = {VK_KHR_SURFACE_EXTENSION_NAME, kSurfaceExtension};
+        const char* const validationLayer = "VK_LAYER_KHRONOS_validation";
+        const bool validation = getenv("UIH_TEST_VULKAN_VALIDATION") != nullptr;
+        if (validation) {
+            if (!HasLayer(getInstanceProcAddr, validationLayer)) {
+                printf("VK_LAYER_KHRONOS_validation is not installed\n");
+                return false;
+            }
+            instanceExtensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+        }
         VkInstanceCreateInfo instanceInfo{};
         instanceInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
         instanceInfo.pApplicationInfo = &appInfo;
-        instanceInfo.enabledExtensionCount = 2;
-        instanceInfo.ppEnabledExtensionNames = instanceExtensions;
+        instanceInfo.enabledExtensionCount = static_cast<uint32_t>(instanceExtensions.size());
+        instanceInfo.ppEnabledExtensionNames = instanceExtensions.data();
+        instanceInfo.enabledLayerCount = validation ? 1 : 0;
+        instanceInfo.ppEnabledLayerNames = &validationLayer;
         if (createInstance(&instanceInfo, nullptr, &instance) != VK_SUCCESS)
             return false;
+        if (validation) {
+            auto createMessenger = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(getInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
+            VkDebugUtilsMessengerCreateInfoEXT messengerInfo{};
+            messengerInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+            messengerInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+            messengerInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
+            messengerInfo.pfnUserCallback = OnValidationMessage;
+            VkDebugUtilsMessengerEXT messenger = VK_NULL_HANDLE;
+            if (!createMessenger || createMessenger(instance, &messengerInfo, nullptr, &messenger) != VK_SUCCESS)
+                return false;
+        }
 #define HOST_VK_LOAD(name) name = reinterpret_cast<PFN_##name>(getInstanceProcAddr(instance, #name));
         HOST_VK_INSTANCE_FUNCTIONS(HOST_VK_LOAD)
         HOST_VK_DEVICE_FUNCTIONS(HOST_VK_LOAD)
@@ -331,6 +381,8 @@ struct VulkanHost : Host {
             Resize(0, 0);
         }
     }
+
+    int ValidationErrors() const override { return g_validationErrors; }
 
     ~VulkanHost() override {
         if (device)

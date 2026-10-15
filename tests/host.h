@@ -78,6 +78,8 @@ struct Host {
     // Exclusive fullscreen at kFullscreen, or back to the window, through the
     // API. False when the API has no exclusive mode.
     virtual bool Fullscreen(bool) { return false; }
+    // Errors reported by the validation layers enabled for the test, 0 without them.
+    virtual int ValidationErrors() const { return 0; }
 };
 
 inline void Settle(const Options& options) {

@@ -103,6 +103,8 @@ struct Icd {
     VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
     VkDevice dummyDevice = VK_NULL_HANDLE;
     DeviceFunctions fn;
+    // The driver's own vkAllocateCommandBuffers, null when not found.
+    PFN_vkAllocateCommandBuffers allocateCommandBuffers = nullptr;
     void* targets[kHookCount] = {};
     void* originals[kHookCount] = {};
 };
@@ -193,6 +195,43 @@ size_t IcdForDevice(VkDevice device) {
     return match;
 }
 
+#ifdef _WIN32
+// The loader's vkAllocateCommandBuffers is not the driver's: it calls the
+// layers of the device it is given, which do not know the command pools the
+// hook creates in the driver, then gives the new command buffers the dispatch
+// table of the device. The driver's function is found in the dispatch table of
+// the dummy device, which has no layers, between the functions around it.
+PFN_vkAllocateCommandBuffers FindDriverAllocateCommandBuffers(VkDevice dummyDevice) {
+    void* neighbors[6] = {};
+    const char* const names[6] = {"vkCreateCommandPool", "vkDestroyCommandPool", "vkResetCommandPool", nullptr, "vkFreeCommandBuffers",
+                                  "vkBeginCommandBuffer"};
+    for (int i = 0; i < 6; ++i)
+        if (names[i] && !(neighbors[i] = reinterpret_cast<void*>(g_getDeviceProcAddr(dummyDevice, names[i]))))
+            return nullptr;
+    void* const* table = *reinterpret_cast<void* const* const*>(dummyDevice);
+    constexpr int kSlots = 256;
+    for (int slot = 0; slot + 6 <= kSlots; ++slot) {
+        bool match = table[slot + 3] != nullptr;
+        for (int i = 0; i < 6 && match; ++i)
+            match = !names[i] || table[slot + i] == neighbors[i];
+        if (match)
+            return reinterpret_cast<PFN_vkAllocateCommandBuffers>(table[slot + 3]);
+    }
+    return nullptr;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL AllocateCommandBuffers(VkDevice device, const VkCommandBufferAllocateInfo* info, VkCommandBuffer* buffers) {
+    const Icd& icd = g_icds[IcdForDevice(device)];
+    if (!icd.allocateCommandBuffers)
+        return icd.fn.vkAllocateCommandBuffers(device, info, buffers);
+    VkResult result = icd.allocateCommandBuffers(device, info, buffers);
+    if (result == VK_SUCCESS)
+        for (uint32_t i = 0; i < info->commandBufferCount; ++i)
+            *reinterpret_cast<void**>(buffers[i]) = *reinterpret_cast<void**>(device);
+    return result;
+}
+#endif
+
 VkDevice DeviceForQueue(VkQueue queue, VkSwapchainKHR swapchain) {
     std::lock_guard<std::mutex> lock(g_mutex);
     auto queueIt = g_queues.find(queue);
@@ -265,7 +304,33 @@ bool StoresLinear(VkFormat format) {
     }
 }
 
+// On Windows the hooks sit in the driver, below the layers: the handles they
+// receive are the driver's, which a layer above may wrap. The hook then calls
+// the driver's own functions, resolved on the dummy device of that driver,
+// never the application's layered ones. On Linux the hooks are the loader's
+// exports, above the layers, and use the application's device.
+VkDevice FunctionSource(VkDevice device) {
+#ifdef _WIN32
+    return g_icds[IcdForDevice(device)].dummyDevice;
+#else
+    return device;
+#endif
+}
+
+DeviceFunctions DeviceFunctionsFor(VkDevice device) {
+    DeviceFunctions fn;
+    fn.Load(g_getDeviceProcAddr, FunctionSource(device));
+#ifdef _WIN32
+    fn.vkAllocateCommandBuffers = AllocateCommandBuffers;
+#endif
+    return fn;
+}
+
 PFN_vkVoidFunction ImGuiLoader(const char* name, void* device) {
+#ifdef _WIN32
+    if (strcmp(name, "vkAllocateCommandBuffers") == 0)
+        return reinterpret_cast<PFN_vkVoidFunction>(AllocateCommandBuffers);
+#endif
     if (PFN_vkVoidFunction fn = g_getDeviceProcAddr(static_cast<VkDevice>(device), name))
         return fn;
     return g_getInstanceProcAddr(g_instance, name);
@@ -297,7 +362,7 @@ uint32_t FindQueueFamily(VkDevice device, VkQueue queue, VkPhysicalDevice physic
 bool CreateDeviceResources(VkDevice device, VkQueue queue, uint32_t family, VkPhysicalDevice physicalDevice, VkFormat format, uint32_t imageCount, NativeWindow window) {
     VulkanState& r = g_renderer;
     r.device = device;
-    r.fn.Load(g_getDeviceProcAddr, device);
+    r.fn = DeviceFunctionsFor(device);
     r.queue = queue;
     r.family = family;
     r.format = format;
@@ -371,7 +436,7 @@ bool CreateDeviceResources(VkDevice device, VkQueue queue, uint32_t family, VkPh
 
     if (!BindWindow(window))
         return false;
-    if (!ImGui_ImplVulkan_LoadFunctions(VK_API_VERSION_1_0, ImGuiLoader, device))
+    if (!ImGui_ImplVulkan_LoadFunctions(VK_API_VERSION_1_0, ImGuiLoader, FunctionSource(device)))
         return false;
     ImGui_ImplVulkan_InitInfo info{};
     info.ApiVersion = VK_API_VERSION_1_0;
@@ -499,8 +564,7 @@ bool Setup(VkDevice device, VkQueue queue, VkSwapchainKHR swapchain) {
     if (swapchainInfo.extent.width == 0 || swapchainInfo.extent.height == 0)
         swapchainInfo.extent = WindowExtent(swapchainInfo.window);
 
-    DeviceFunctions fn;
-    fn.Load(g_getDeviceProcAddr, device);
+    DeviceFunctions fn = DeviceFunctionsFor(device);
     uint32_t imageCount = 0;
     if (fn.vkGetSwapchainImagesKHR(device, swapchain, &imageCount, nullptr) != VK_SUCCESS || imageCount == 0) {
         ++g_setupFailures;
@@ -658,6 +722,13 @@ VkResult PresentFrame(size_t icd, VkQueue queue, const VkPresentInfoKHR* info) {
     if (info && info->swapchainCount > 0 && info->pSwapchains && info->pImageIndices && ShouldRender(Backend::Vulkan)) {
         VkSwapchainKHR swapchain = info->pSwapchains[0];
         VkDevice device = DeviceForQueue(queue, swapchain);
+#ifdef _WIN32
+        // The present went through the hooks of this driver.
+        if (device != VK_NULL_HANDLE) {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            g_deviceIcd[device] = icd;
+        }
+#endif
         if (device != VK_NULL_HANDLE && FormatKnown(swapchain)) {
             forward = Render(queue, device, info, patched);
         } else if (device != VK_NULL_HANDLE) {
@@ -860,6 +931,9 @@ bool Install() {
         if (icd.dummyDevice == VK_NULL_HANDLE)
             continue;
         icd.fn.Load(g_getDeviceProcAddr, icd.dummyDevice);
+        icd.allocateCommandBuffers = FindDriverAllocateCommandBuffers(icd.dummyDevice);
+        if (!icd.allocateCommandBuffers)
+            Log("vkAllocateCommandBuffers of the Vulkan driver not found: the layers of the game see the overlay's command buffers");
         for (int i = 0; i < kHookCount; ++i)
             icd.targets[i] = reinterpret_cast<void*>(g_getDeviceProcAddr(icd.dummyDevice, kHookNames[i]));
         bool duplicate = false;

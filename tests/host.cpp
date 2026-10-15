@@ -8,6 +8,7 @@
 #include <d3d10_1.h>
 #include <d3d11.h>
 #include <d3d12.h>
+#include <d3d12sdklayers.h>
 #include <d3d9.h>
 #include <dxgi1_4.h>
 #include <GL/gl.h>
@@ -173,6 +174,40 @@ DXGI_SWAP_CHAIN_DESC SwapChainDesc(HWND window, const Options& options) {
     return desc;
 }
 
+// With UIH_TEST_D3D_DEBUG set, the D3D10, 11 and 12 hosts create their
+// device with the debug layer, which also checks what the hook does on that
+// device, and count the errors it stored.
+bool D3DDebug() { return getenv("UIH_TEST_D3D_DEBUG") != nullptr; }
+
+template <typename Message, typename InfoQueue>
+int CountDebugErrors(InfoQueue* queue) {
+    if (!queue)
+        return 0;
+    int errors = 0;
+    UINT64 count = queue->GetNumStoredMessages();
+    for (UINT64 i = 0; i < count; ++i) {
+        SIZE_T size = 0;
+        queue->GetMessage(i, nullptr, &size);
+        std::vector<char> buffer(size);
+        auto* message = reinterpret_cast<Message*>(buffer.data());
+        // Severity 0 is corruption, 1 error.
+        if (SUCCEEDED(queue->GetMessage(i, message, &size)) && static_cast<int>(message->Severity) <= 1) {
+            ++errors;
+            printf("DEBUG LAYER ERROR: %.*s\n", static_cast<int>(message->DescriptionByteLength), message->pDescription);
+        }
+    }
+    queue->Release();
+    return errors;
+}
+
+template <typename InfoQueue, typename Message, typename Device>
+int DebugErrors(Device* device) {
+    InfoQueue* queue = nullptr;
+    if (!D3DDebug() || !device || FAILED(device->QueryInterface(IID_PPV_ARGS(&queue))))
+        return 0;
+    return CountDebugErrors<Message>(queue);
+}
+
 // Exclusive fullscreen through DXGI, as D3D10, 11 and 12 games do: the
 // output's mode closest to kFullscreen, set before and after the switch.
 bool DxgiFullscreen(IDXGISwapChain* swapChain, bool on) {
@@ -222,7 +257,8 @@ struct D3D10Host : Host {
     bool Init(HWND window, const Options& options) override {
         DXGI_SWAP_CHAIN_DESC desc = SwapChainDesc(window, options);
         D3D10_DRIVER_TYPE driver = options.warp ? D3D10_DRIVER_TYPE_WARP : D3D10_DRIVER_TYPE_HARDWARE;
-        if (FAILED(D3D10CreateDeviceAndSwapChain(nullptr, driver, nullptr, 0, D3D10_SDK_VERSION, &desc, &swapChain, &device)))
+        UINT flags = D3DDebug() ? D3D10_CREATE_DEVICE_DEBUG : 0;
+        if (FAILED(D3D10CreateDeviceAndSwapChain(nullptr, driver, nullptr, flags, D3D10_SDK_VERSION, &desc, &swapChain, &device)))
             return false;
         return CreateTarget();
     }
@@ -231,6 +267,8 @@ struct D3D10Host : Host {
         device->ClearRenderTargetView(target, kClear);
         swapChain->Present(1, 0);
     }
+
+    int ValidationErrors() const override { return DebugErrors<ID3D10InfoQueue, D3D10_MESSAGE>(device); }
 
     ~D3D10Host() override {
         Release(target);
@@ -266,7 +304,8 @@ struct D3D11Host : Host {
     bool Init(HWND window, const Options& options) override {
         DXGI_SWAP_CHAIN_DESC desc = SwapChainDesc(window, options);
         D3D_DRIVER_TYPE driver = options.warp ? D3D_DRIVER_TYPE_WARP : D3D_DRIVER_TYPE_HARDWARE;
-        if (FAILED(D3D11CreateDeviceAndSwapChain(nullptr, driver, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &desc, &swapChain, &device, nullptr, &context)))
+        UINT flags = D3DDebug() ? D3D11_CREATE_DEVICE_DEBUG : 0;
+        if (FAILED(D3D11CreateDeviceAndSwapChain(nullptr, driver, nullptr, flags, nullptr, 0, D3D11_SDK_VERSION, &desc, &swapChain, &device, nullptr, &context)))
             return false;
         return CreateTarget();
     }
@@ -275,6 +314,8 @@ struct D3D11Host : Host {
         context->ClearRenderTargetView(target, kClear);
         swapChain->Present(1, 0);
     }
+
+    int ValidationErrors() const override { return DebugErrors<ID3D11InfoQueue, D3D11_MESSAGE>(device); }
 
     ~D3D11Host() override {
         Release(target);
@@ -327,6 +368,11 @@ struct D3D12Host : Host {
         IDXGIAdapter* adapter = nullptr;
         if (options.warp)
             factory->EnumWarpAdapter(IID_PPV_ARGS(&adapter));
+        ID3D12Debug* debug = nullptr;
+        if (D3DDebug() && SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)))) {
+            debug->EnableDebugLayer();
+            debug->Release();
+        }
         HRESULT hr = D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device));
         Release(adapter);
         if (FAILED(hr)) {
@@ -427,6 +473,8 @@ struct D3D12Host : Host {
         }
     }
 
+    int ValidationErrors() const override { return DebugErrors<ID3D12InfoQueue, D3D12_MESSAGE>(device); }
+
     ~D3D12Host() override {
         Release(decoyList);
         Release(decoyAllocator);
@@ -517,6 +565,13 @@ void DrawTestMenu() {
     ImGui::Begin("uih host", nullptr, ImGuiWindowFlags_NoResize);
     ImGui::Text("Backend: %s", uih::BackendName(uih::ActiveBackend()));
     ImGui::Image(g_texture->GetTexRef(), ImVec2(64, 64));
+    // Created and drawn in the same frame, as menus often do.
+    static ImTextureData* late = [] {
+        std::vector<uint32_t> pixels(16 * 16, IM_COL32(50, 200, 100, 255));
+        return uih::CreateTexture(pixels.data(), 16, 16);
+    }();
+    ImGui::SameLine();
+    ImGui::Image(late->GetTexRef(), ImVec2(64, 64));
     ImGui::Button("Button", ImVec2(400, 200));
     ImGui::End();
 }
@@ -1391,6 +1446,9 @@ int main(int argc, char** argv) {
 
     uih::Stop();
     uih::DestroyTexture(g_texture);
+    int validationErrors = host->ValidationErrors();
+    if (result == 0 && validationErrors > 0)
+        result = Fail("the validation layer reported errors");
     host.reset();
     DestroyWindow(window);
     if (result == 0)

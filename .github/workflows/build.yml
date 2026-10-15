@@ -86,6 +86,39 @@ jobs:
         run: |
           ctest --test-dir build -C Release --output-on-failure --timeout 120 -R opengl | tee ctest-d3d12.log
           if grep Skipped ctest-d3d12.log; then exit 1; fi
+      # The D3D debug layers are an optional Windows feature.
+      - name: Install the Direct3D debug layers
+        shell: pwsh
+        run: Add-WindowsCapability -Online -Name "Tools.Graphics.DirectX~~~~0.0.1.0"
+      - name: Test Direct3D 10 to 12 with the debug layers
+        shell: bash
+        env:
+          UIH_TEST_D3D_DEBUG: 1
+        run: |
+          ctest --test-dir build -C Release -V -R "d3d1[012]" -E fullscreen --timeout 120 > ctest-debug.log 2>&1 || true
+          grep -E "Test +#|DEBUG LAYER ERROR|tests passed" ctest-debug.log
+          if grep -qE "Skipped|Failed|DEBUG LAYER ERROR" ctest-debug.log; then exit 1; fi
+      # The Vulkan SDK ships its validation layer for 64-bit applications only.
+      - name: Install the Vulkan validation layer
+        if: matrix.arch == 'x64'
+        shell: pwsh
+        run: |
+          curl.exe -fsSL --retry 3 -o vulkansdk.exe "https://sdk.lunarg.com/sdk/download/$env:VULKAN_RUNTIME/windows/vulkansdk-windows-X64-$env:VULKAN_RUNTIME.exe"
+          $installer = Start-Process -Wait -PassThru -NoNewWindow -FilePath .\vulkansdk.exe -ArgumentList "--root", "C:\VulkanSDK", "--accept-licenses", "--default-answer", "--confirm-command", "install"
+          if ($installer.ExitCode -ne 0) { throw "Vulkan SDK installer exit code $($installer.ExitCode)" }
+          # Registered like lavapipe: the elevated loader ignores VK_LAYER_PATH.
+          $key = "HKLM:\SOFTWARE\Khronos\Vulkan\ExplicitLayers"
+          New-Item -Path $key -Force | Out-Null
+          New-ItemProperty -Path $key -Name "C:\VulkanSDK\Bin\VkLayer_khronos_validation.json" -Value 0 -PropertyType DWord -Force | Out-Null
+      - name: Test Vulkan with the validation layer
+        if: matrix.arch == 'x64'
+        shell: bash
+        env:
+          UIH_TEST_VULKAN_VALIDATION: 1
+        run: |
+          ctest --test-dir build -C Release -V -R vulkan --timeout 120 > ctest-validation.log 2>&1 || true
+          grep -E "Test +#|VALIDATION ERROR|tests passed" ctest-validation.log
+          if grep -qE "Skipped|Failed|VALIDATION ERROR" ctest-validation.log; then exit 1; fi
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -179,7 +212,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build pkg-config libxcb1-dev libx11-dev libxtst-dev libgl-dev libegl-dev xvfb libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libvulkan1 mesa-vulkan-drivers
+          sudo apt-get install -y ninja-build pkg-config libxcb1-dev libx11-dev libxtst-dev libgl-dev libegl-dev xvfb libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libvulkan1 mesa-vulkan-drivers vulkan-validationlayers
       - name: Configure
         run: cmake --preset linux -DUIH_BUILD_TESTS=ON
       - name: Build
@@ -198,6 +231,14 @@ jobs:
         run: |
           xvfb-run -a -s "-screen 0 1280x720x24" ctest --test-dir build/linux --output-on-failure | tee ctest.log
           if grep Skipped ctest.log; then exit 1; fi
+      - name: Test Vulkan with the validation layer
+        shell: bash
+        env:
+          UIH_TEST_VULKAN_VALIDATION: 1
+        run: |
+          xvfb-run -a -s "-screen 0 1280x720x24" ctest --test-dir build/linux -V -R vulkan > ctest-validation.log 2>&1 || true
+          grep -E "Test +#|VALIDATION ERROR|tests passed" ctest-validation.log
+          if grep -qE "Skipped|Failed|VALIDATION ERROR" ctest-validation.log; then exit 1; fi
 
   # Built against an old glibc so the released library loads on older systems.
   linux-portable:

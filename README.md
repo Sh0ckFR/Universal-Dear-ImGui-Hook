@@ -241,6 +241,8 @@ Some tests press real keys and move the mouse. They are skipped when the host wi
 
 Without a GPU, as on the CI runners, Direct3D uses WARP, and Mesa's software drivers from [mesa-dist-win](https://github.com/pal1000/mesa-dist-win) cover the rest: copy `opengl32.dll`, `libgallium_wgl.dll` and `dxil.dll` next to `uih_host.exe` with `GALLIUM_DRIVER=llvmpipe` (or `d3d12` for the D3D12-based driver of Microsoft's OpenGL compatibility pack, which needs `dxil.dll` to sign its shaders), and register `lvp_icd.*.json` under `HKLM\SOFTWARE\Khronos\Vulkan\Drivers` with a `vulkan-1.dll` from the Vulkan runtime.
 
+`UIH_TEST_VULKAN_VALIDATION=1` runs the Vulkan host under `VK_LAYER_KHRONOS_validation`, from the Vulkan SDK on Windows or `vulkan-validationlayers` on Linux, and `UIH_TEST_D3D_DEBUG=1` creates the Direct3D 10, 11 and 12 devices with the debug layer, from the Graphics Tools optional feature of Windows. Any error they report, from the host or from the hook, fails the test.
+
 | `uih_host` option (Windows) | Scenario |
 | --- | --- |
 | `--api d3d9\|d3d9ex\|d3d10\|d3d11\|d3d12\|vulkan\|opengl` | Hook started in-process, overlay drawn once per frame, then `Stop()` |
@@ -267,10 +269,10 @@ The [CI](.github/workflows/build.yml) runs on every push and pull request:
 | Job | Checks |
 | --- | --- |
 | MSVC x64, Win32 | Build, D3D11 on WARP, `dinput8.dll` proxy |
-| Windows tests x64, Win32 | The whole CTest suite without GPU: WARP for Direct3D, Mesa's llvmpipe and lavapipe for OpenGL and Vulkan, then the OpenGL scenarios again on Mesa's D3D12-based driver; no test may be skipped |
+| Windows tests x64, Win32 | The whole CTest suite without GPU: WARP for Direct3D, Mesa's llvmpipe and lavapipe for OpenGL and Vulkan, then the OpenGL scenarios again on Mesa's D3D12-based driver, the Direct3D 10 to 12 ones under the debug layers and, on x64, the Vulkan ones under the validation layer; no test may be skipped |
 | Visual Studio solution x64, x86 | The `.sln` built with MSBuild, same tests |
 | MinGW-w64 on Ubuntu and macOS | Cross-compiled DLLs, proxy export |
-| Linux GCC, Clang x86_64, GCC aarch64 | The preload tests under Xvfb with llvmpipe and lavapipe, including resizes and the overlay brought back after `F11` |
+| Linux GCC, Clang x86_64, GCC aarch64 | The preload tests under Xvfb with llvmpipe and lavapipe, including resizes and the overlay brought back after `F11`, then the Vulkan ones under the validation layer |
 | Linux portable x86_64, aarch64 | The released libraries, built and tested against glibc 2.28 |
 | DDNet OpenGL, Vulkan | The released library in a real game |
 | FetchContent consumer | The repository as a CMake dependency |
