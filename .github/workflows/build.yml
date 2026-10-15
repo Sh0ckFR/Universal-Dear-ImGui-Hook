@@ -29,6 +29,59 @@ jobs:
           name: Universal-ImGui-Hook-msvc-${{ matrix.arch }}
           path: build/Release/Universal-ImGui-Hook.dll
 
+  # The CTest suite on a runner without GPU: WARP for Direct3D, Mesa's
+  # llvmpipe and lavapipe for OpenGL and Vulkan.
+  windows-tests:
+    name: Windows tests ${{ matrix.arch }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            dir: x64
+            registry: HKLM:\SOFTWARE\Khronos\Vulkan\Drivers
+          - arch: Win32
+            dir: x86
+            registry: HKLM:\SOFTWARE\WOW6432Node\Khronos\Vulkan\Drivers
+    env:
+      MESA: 26.2.4
+      VULKAN_RUNTIME: 1.4.363.0
+      # Mesa's default D3D12-based driver crashes in SwapBuffers; llvmpipe is the reference.
+      GALLIUM_DRIVER: llvmpipe
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -A ${{ matrix.arch }} -DUIH_BUILD_TESTS=ON
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Install software drivers
+        shell: pwsh
+        run: |
+          curl.exe -fsSL --retry 3 -o mesa.7z "https://github.com/pal1000/mesa-dist-win/releases/download/$env:MESA/mesa3d-$env:MESA-release-msvc.7z"
+          7z x mesa.7z -omesa | Out-Null
+          curl.exe -fsSL --retry 3 -o vulkan.zip "https://sdk.lunarg.com/sdk/download/$env:VULKAN_RUNTIME/windows/vulkan-runtime-components.zip"
+          Expand-Archive vulkan.zip vulkan
+          $tests = "build/tests/Release"
+          Copy-Item mesa/${{ matrix.dir }}/opengl32.dll, mesa/${{ matrix.dir }}/libgallium_wgl.dll $tests
+          Copy-Item (Get-ChildItem vulkan -Recurse -Filter vulkan-1.dll | Where-Object { $_.Directory.Name -eq "${{ matrix.dir }}" }).FullName $tests
+          # The runner is elevated, so the Vulkan loader ignores VK_DRIVER_FILES: lavapipe is registered instead.
+          $icd = (Get-ChildItem mesa/${{ matrix.dir }} -Filter "lvp_icd.*.json").FullName
+          New-Item -Path "${{ matrix.registry }}" -Force | Out-Null
+          New-ItemProperty -Path "${{ matrix.registry }}" -Name $icd -Value 0 -PropertyType DWord -Force | Out-Null
+      - name: Test
+        shell: bash
+        run: |
+          ctest --test-dir build -C Release --output-on-failure --timeout 120 | tee ctest.log
+          # DirectInput does not see simulated key presses on the runner.
+          if grep Skipped ctest.log | grep -v input_directinput; then exit 1; fi
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: windows-tests-${{ matrix.arch }}
+          path: build/tests/*.bmp
+          if-no-files-found: ignore
+
   solution:
     name: Visual Studio solution ${{ matrix.platform }}
     runs-on: windows-latest
