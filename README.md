@@ -28,7 +28,7 @@ Windows games running under Wine or Proton use the Windows DLL.
 ## Features
 
 - **One library for every API**: the backend is picked from the first API that presents a frame. Inject before or after the game initializes its graphics.
-- **Menu input**: `INSERT`, or L3 + R3 on a controller, opens the menu; `F11` removes the overlay and unloads the DLL. While the menu is open the game sees no keyboard, mouse or controller input (Windows), and an XInput controller navigates the menu.
+- **Menu input**: `INSERT`, or L3 + R3 on a controller, opens the menu; `F11` removes the overlay and unloads the DLL. The keys are set in a [configuration file](#changing-the-hotkeys), no rebuild needed. While the menu is open the game sees no keyboard, mouse or controller input (Windows), and an XInput controller navigates the menu.
 - **Readable on any display**: the interface follows the DPI of the game window, or a fixed scale.
 - **Correct colors** on sRGB and floating-point back buffers.
 - **Images**: `uih::CreateTexture()` turns RGBA pixels into an image for `ImGui::Image()`, on every backend.
@@ -44,6 +44,8 @@ Prebuilt libraries are attached to each [release](../../releases), and every com
 | Windows, 64-bit | `Universal-ImGui-Hook-msvc-x64.dll` or `-mingw-x86_64.dll` |
 | Windows, 32-bit | `Universal-ImGui-Hook-msvc-Win32.dll` or `-mingw-i686.dll` |
 | Linux, x86-64 or ARM64 | `Universal-ImGui-Hook-linux-x86_64.so` or `-linux-aarch64.so` (glibc 2.28 or later) |
+
+Each release also has `Universal-ImGui-Hook.ini`, the [hotkeys file](#changing-the-hotkeys): put it next to the library to change the keys.
 
 To build it yourself on Windows, open `Universal-ImGui-Hook.sln` in Visual Studio 2022 or newer and build `Release|x64`: the DLL is `build/vs/x64/Release/Universal-ImGui-Hook.dll`. On Linux:
 
@@ -71,6 +73,24 @@ LD_PRELOAD=/path/to/Universal-ImGui-Hook.so ./game
 
 For a Steam game, set the launch options to `LD_PRELOAD=/path/to/Universal-ImGui-Hook.so %command%`. `UIH_DEBUG=1` prints the log on stderr. `F11` removes the overlay; the library itself stays loaded.
 
+### Changing the hotkeys
+
+The example library reads its hotkeys from `Universal-ImGui-Hook.ini` when it is loaded. It looks for the file next to the DLL or the `.so`, or at the path set in the `UIH_CONFIG` environment variable. The build copies the default file next to the library, and each release ships it:
+
+```ini
+[keys]
+menu_key = INSERT       ; opens and closes the menu
+unload_key = F11        ; removes the overlay, and unloads the DLL on Windows
+menu_buttons = L3+R3    ; controller buttons held together to toggle the menu (Windows)
+```
+
+| Entry | Values |
+| --- | --- |
+| `menu_key`, `unload_key` | `A`-`Z`, `0`-`9`, `F1`-`F24`, `NUMPAD0`-`NUMPAD9`, `INSERT`, `DELETE`, `HOME`, `END`, `PAGEUP`, `PAGEDOWN`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `TAB`, `ESCAPE`, `SPACE`, `BACKSPACE`, `ENTER`, `PAUSE`, `SCROLLLOCK`, `GRAVE`, `NONE` to disable, or a raw code such as `0x2D` (virtual-key code on Windows, X11 keysym on Linux) |
+| `menu_buttons` | `A`, `B`, `X`, `Y`, `L1`, `R1`, `L3`, `R3`, `START`, `BACK`, `DPAD_UP`, `DPAD_DOWN`, `DPAD_LEFT`, `DPAD_RIGHT` joined with `+`, or `NONE` |
+
+Names are case-insensitive, and `;` or `#` starts a comment. Without the file, or for an entry that is missing or not understood, the default stays. When the DLL is loaded as `dinput8.dll`, the file still goes next to it under the name `Universal-ImGui-Hook.ini`. For a Steam game on Linux, the launch options can point to the file: `UIH_CONFIG=/path/to/keys.ini LD_PRELOAD=/path/to/Universal-ImGui-Hook.so %command%`.
+
 ### Writing your menu
 
 The interface lives in `example/menu.cpp`. `DrawMenu()` is called every frame between `ImGui::NewFrame()` and `ImGui::Render()`, so any Dear ImGui code works there. The entry points, `example/dllmain.cpp` on Windows and `example/preload.cpp` on Linux, configure and start the hook:
@@ -81,6 +101,7 @@ config.render = DrawMenu;      // every frame
 config.setup = LoadFonts;      // when the ImGui context is created: fonts, style
 config.scale = 0.0f;           // 0 follows the window's DPI, 1.5 = 150%
 config.module = module;        // Windows: DLL unloaded by unloadKey
+uih::LoadKeyFile(config, path); // hotkeys from the INI file, or keep the defaults
 uih::Start(config);
 ```
 
@@ -116,6 +137,7 @@ Everything is in `include/uih.h`, namespace `uih`.
 | `IsMenuOpen()`, `SetMenuOpen(open)` | Menu state, also toggled by `menuKey`. |
 | `CreateTexture(rgba, width, height)` | Image from RGBA pixels, uploaded by the active backend on the next frame and again after a backend switch. Any thread. |
 | `DestroyTexture(texture)` | Releases an image on the next frame. |
+| `LoadKeyFile(config, path)` | Sets `menuKey`, `unloadKey` and `menuButtons` from an INI file (`const wchar_t*` path on Windows). Entries missing or not understood keep their value; returns `false` when the file cannot be read. Safe from `DllMain`. |
 
 | `Config` field | Default | Description |
 | --- | --- | --- |
@@ -225,9 +247,11 @@ Without a GPU, as on the CI runners, Direct3D uses WARP, and Mesa's software dri
 | `--input raw\|directinput` | What the game reads while the menu is open |
 | `--gamepad <fake xinput1_4.dll>` | Controller toggling the menu and hidden from the game while it is open |
 | `--dll <path>` | Loads the real DLL and drives it with `INSERT` and `F11` |
+| `--menu-key <vk>`, `--unload-key <vk>` | Other keys for `--dll`, set through `UIH_CONFIG` |
+| `--parse-key-file <path>` | Reads `tests/keys.ini` with `uih::LoadKeyFile` |
 | `--proxy <path>` | Loads the DLL as `dinput8.dll` |
 
-On Linux, `uih_host` does not link the hook: each test preloads the `.so`, opens the menu, checks the pixels and removes the overlay, through GLX, EGL, `dlsym()` lookups and Vulkan. It needs `libx11-dev libxtst-dev libgl-dev libegl-dev`; without a display, run `xvfb-run -a ctest --test-dir build/linux`. `tests/ddnet.sh` runs the same scenario on the game [DDNet](https://ddnet.org/).
+On Linux, `uih_host` does not link the hook: each test preloads the `.so`, opens the menu, checks the pixels and removes the overlay, through GLX, EGL, `dlsym()` lookups and Vulkan, and once with the hotkeys of `tests/keys.ini`. It needs `libx11-dev libxtst-dev libgl-dev libegl-dev`; without a display, run `xvfb-run -a ctest --test-dir build/linux`. `tests/ddnet.sh` runs the same scenario on the game [DDNet](https://ddnet.org/).
 
 The [CI](.github/workflows/build.yml) runs on every push and pull request:
 
@@ -237,7 +261,7 @@ The [CI](.github/workflows/build.yml) runs on every push and pull request:
 | Windows tests x64, Win32 | The whole CTest suite without GPU: WARP for Direct3D, Mesa's llvmpipe and lavapipe for OpenGL and Vulkan; no test may be skipped |
 | Visual Studio solution x64, x86 | The `.sln` built with MSBuild, same tests |
 | MinGW-w64 on Ubuntu and macOS | Cross-compiled DLLs, proxy export |
-| Linux GCC, Clang x86_64, GCC aarch64 | The six preload tests under Xvfb with llvmpipe and lavapipe |
+| Linux GCC, Clang x86_64, GCC aarch64 | The preload tests under Xvfb with llvmpipe and lavapipe |
 | Linux portable x86_64, aarch64 | The released libraries, built and tested against glibc 2.28 |
 | DDNet OpenGL, Vulkan | The released library in a real game |
 | FetchContent consumer | The repository as a CMake dependency |

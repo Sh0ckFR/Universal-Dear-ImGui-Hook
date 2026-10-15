@@ -283,12 +283,16 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+      - uses: actions/checkout@v4
+        with:
+          path: source
       - name: Name the libraries after their toolchain
         run: |
           mkdir release
           for file in artifacts/*/Universal-ImGui-Hook.*; do
             cp "$file" "release/$(basename "$(dirname "$file")").${file##*.}"
           done
+          cp source/example/Universal-ImGui-Hook.ini release/
           ls -l release
       - uses: softprops/action-gh-release@v2
         with:

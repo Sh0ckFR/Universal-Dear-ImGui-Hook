@@ -85,6 +85,16 @@ void SetMenuOpen(bool open);
 
 const char* BackendName(Backend backend);
 
+// Reads menuKey, unloadKey and menuButtons from an INI file: `menu_key`,
+// `unload_key` and `menu_buttons` entries (see example/Universal-ImGui-Hook.ini).
+// Entries that are missing or not understood keep their value. Returns false
+// when the file cannot be read. Safe to call from DllMain.
+#ifdef _WIN32
+bool LoadKeyFile(Config& config, const wchar_t* path);
+#else
+bool LoadKeyFile(Config& config, const char* path);
+#endif
+
 // Creates an image from `width` * `height` RGBA pixels, 8 bits per channel,
 // rows from top to bottom. Draw it with ImGui::Image(texture->GetTexRef(), size).
 // The pixels are copied and uploaded by the active backend on the next frame,

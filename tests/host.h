@@ -31,6 +31,9 @@ struct Options {
     std::string dll;
     std::string proxy;
     int injectAt = 30;
+    // Hotkeys the DLL scenarios press, 0 for INSERT and F11.
+    int menuKey = 0;
+    int unloadKey = 0;
     float scale = 0.0f;
     // Delay before the swap chain is created, so hooks started earlier are in place.
     int settleMs = 0;

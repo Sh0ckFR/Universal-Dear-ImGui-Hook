@@ -35,6 +35,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\src\uih.cpp" />
+    <ClCompile Include="..\src\keys.cpp" />
     <ClCompile Include="..\src\vulkan.cpp" />
     <ClCompile Include="..\src\windows\platform.cpp" />
     <ClCompile Include="..\src\windows\input.cpp" />

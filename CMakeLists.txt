@@ -68,7 +68,7 @@ else()
 endif()
 add_library(uih::imgui ALIAS uih_imgui)
 
-add_library(uih STATIC src/uih.cpp src/vulkan.cpp)
+add_library(uih STATIC src/uih.cpp src/keys.cpp src/vulkan.cpp)
 target_include_directories(uih PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 if(WIN32)
     target_sources(uih PRIVATE
@@ -116,6 +116,9 @@ if(UIH_BUILD_EXAMPLE)
     endif()
     target_link_libraries(uih_example PRIVATE uih)
     set_target_properties(uih_example PROPERTIES OUTPUT_NAME Universal-ImGui-Hook PREFIX "")
+    # The hotkeys file the library reads, next to it.
+    add_custom_command(TARGET uih_example POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/example/Universal-ImGui-Hook.ini $<TARGET_FILE_DIR:uih_example>)
     if(MINGW)
         target_link_options(uih_example PRIVATE -Wl,--enable-stdcall-fixup)
     endif()

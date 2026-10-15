@@ -31,6 +31,10 @@
       <ModuleDefinitionFile>$(UihRoot)example\proxy.def</ModuleDefinitionFile>
       <AdditionalDependencies>d3dcompiler.lib;dxgi.lib;dwmapi.lib;imm32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Message>Copying the hotkeys file next to the DLL</Message>
+      <Command>copy /Y "$(UihRoot)example\Universal-ImGui-Hook.ini" "$(OutDir)" &gt; nul</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\example\dllmain.cpp" />
@@ -39,6 +43,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="..\example\proxy.def" />
+    <None Include="..\example\Universal-ImGui-Hook.ini" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="minhook.vcxproj">
