@@ -729,18 +729,28 @@ bool PressKey(HWND window, int key) {
 // INSERT brings it back. Otherwise F11 unloads the DLL, and --reload injects
 // it again.
 // Loads a library, opens its menu and renders until the window is closed:
-// a quick look at a menu without a game.
+// a quick look at a menu without a game. Like a game, the host resizes its
+// back buffers with the window, so nothing is stretched.
 int RunPreviewMode(HWND window, Host& host, const Options& options) {
     std::wstring path(options.preview.begin(), options.preview.end());
     if (!LoadLibraryW(path.c_str()))
         return Fail("LoadLibrary failed");
     BringToFront(window);
+    RECT size{0, 0, kWidth, kHeight};
     for (int frame = 0; IsWindow(window); ++frame) {
         if (frame == 60 && PressKey(window, options.menuKey ? options.menuKey : VK_INSERT))
             HoldKey(options.menuKey ? options.menuKey : VK_INSERT, false);
         PumpMessages();
-        if (IsWindow(window))
-            host.Frame();
+        if (!IsWindow(window))
+            break;
+        RECT client{};
+        GetClientRect(window, &client);
+        // A minimized window has no size: the back buffers keep theirs.
+        if (client.right > 0 && client.bottom > 0 && (client.right != size.right || client.bottom != size.bottom)) {
+            size = client;
+            host.Resize(client.right, client.bottom);
+        }
+        host.Frame();
     }
     return 0;
 }
