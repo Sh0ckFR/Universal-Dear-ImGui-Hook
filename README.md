@@ -238,6 +238,8 @@ config.unloadKey = 0xffc8;              // XK_F11
 uih::Start(config);
 ```
 
+`uih::CreateTexture(rgba, width, height)` turns RGBA pixels into an image for `ImGui::Image(texture->GetTexRef(), size)`, whatever the graphics API; the active backend uploads it on the next frame. `config.setup` runs when the ImGui context is created, the place to load fonts and set the style.
+
 ### Using the hook as a library
 
 The repository is a CMake package that can be consumed with `FetchContent`:

@@ -29,7 +29,7 @@ void UnbindWindow() {
     if (!ImGui::GetCurrentContext())
         return;
     input::Detach();
-    ImGui::DestroyContext();
+    DestroyContext();
     g_window = 0;
 }
 

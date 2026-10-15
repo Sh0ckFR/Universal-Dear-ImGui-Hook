@@ -390,6 +390,8 @@ struct OpenGLHost : Host {
 constexpr uint8_t kProbe[3] = {200, 100, 50};
 constexpr int kProbeX = 650;
 constexpr int kProbeY = 500;
+ImTextureData* g_texture = nullptr;
+bool g_setupCalled = false;
 
 void DrawTestMenu() {
     if (!uih::IsMenuOpen())
@@ -400,6 +402,7 @@ void DrawTestMenu() {
     ImGui::SetNextWindowSize(ImVec2(500, 400));
     ImGui::Begin("uih host", nullptr, ImGuiWindowFlags_NoResize);
     ImGui::Text("Backend: %s", uih::BackendName(uih::ActiveBackend()));
+    ImGui::Image(g_texture->GetTexRef(), ImVec2(64, 64));
     ImGui::Button("Button", ImVec2(400, 200));
     ImGui::End();
 }
@@ -492,6 +495,7 @@ void StartHook(const Options& options) {
     uih::Config config;
     config.scale = options.scale;
     config.render = DrawTestMenu;
+    config.setup = [] { g_setupCalled = true; };
     config.debugLog = true;
     uih::Start(config);
 }
@@ -762,6 +766,10 @@ int main(int argc, char** argv) {
                                   rect.right - rect.left, rect.bottom - rect.top, nullptr, nullptr, windowClass.hInstance, nullptr);
     PumpMessages();
 
+    // Created before the hook starts, registered with its context on the first frame.
+    std::vector<uint32_t> pixels(32 * 32, IM_COL32(200, 100, 50, 255));
+    g_texture = uih::CreateTexture(pixels.data(), 32, 32);
+
     if (options.injectAt == 0 && options.dll.empty())
         StartHook(options);
 
@@ -825,6 +833,14 @@ int main(int argc, char** argv) {
                 result = Fail("the interface scale was not applied");
                 break;
             }
+            if (!g_setupCalled) {
+                result = Fail("the setup callback was not called");
+                break;
+            }
+            if (g_texture->Status != ImTextureStatus_OK || g_texture->GetTexID() == ImTextureID_Invalid) {
+                result = Fail("the texture was not uploaded");
+                break;
+            }
             if (options.capture) {
                 Capture capture = CaptureWindow(window);
                 printf("%d overlay pixels captured\n", capture.overlayPixels);
@@ -842,12 +858,15 @@ int main(int argc, char** argv) {
             stopFrame = frame;
             if (ImGui::GetCurrentContext() || uih::ActiveBackend() != uih::Backend::None)
                 result = Fail("hook did not release its resources");
+            else if (g_texture->GetTexID() != ImTextureID_Invalid)
+                result = Fail("the texture was not released");
         } else if (stopFrame >= 0 && frame == stopFrame + 60) {
             break;
         }
     }
 
     uih::Stop();
+    uih::DestroyTexture(g_texture);
     host.reset();
     DestroyWindow(window);
     if (result == 0)

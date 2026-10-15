@@ -6,7 +6,11 @@
 #include <condition_variable>
 #include <cstdarg>
 #include <cstdio>
+#include <cstring>
 #include <thread>
+#include <vector>
+
+#include "imgui_internal.h"
 
 namespace uih {
 namespace detail {
@@ -27,6 +31,15 @@ std::condition_variable g_teardownSignal;
 bool g_teardownDone = false;
 
 float g_appliedScale = 1.0f;
+// Textures created with CreateTexture(). They are registered with each ImGui
+// context in turn, on the rendering thread.
+struct UserTexture {
+    ImTextureData* data;
+    bool registered;
+    bool destroy;
+};
+std::mutex g_texturesMutex;
+std::vector<UserTexture> g_textures;
 
 bool g_menuKeyDown = false;
 bool g_unloadKeyDown = false;
@@ -36,6 +49,28 @@ bool KeyPressed(int key, bool& wasDown, bool focused) {
     bool pressed = down && !wasDown && focused;
     wasDown = down;
     return pressed;
+}
+
+// Runs before ImGui::NewFrame(), which starts the uploads and releases.
+void UpdateTextures() {
+    std::lock_guard<std::mutex> lock(g_texturesMutex);
+    for (size_t i = 0; i < g_textures.size();) {
+        UserTexture& texture = g_textures[i];
+        if (texture.destroy) {
+            if (!texture.registered || texture.data->Status == ImTextureStatus_Destroyed) {
+                if (texture.registered)
+                    ImGui::UnregisterUserTexture(texture.data);
+                delete texture.data;
+                g_textures.erase(g_textures.begin() + static_cast<std::ptrdiff_t>(i));
+                continue;
+            }
+            texture.data->WantDestroyNextFrame = true;
+        } else if (!texture.registered) {
+            ImGui::RegisterUserTexture(texture.data);
+            texture.registered = true;
+        }
+        ++i;
+    }
 }
 
 void PollKeys() {
@@ -149,10 +184,32 @@ bool CreateContext() {
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     ImGui::StyleColorsDark();
     g_appliedScale = 1.0f;
+    if (g_config.setup)
+        g_config.setup();
     return true;
 }
 
+void DestroyContext() {
+    {
+        std::lock_guard<std::mutex> lock(g_texturesMutex);
+        for (size_t i = 0; i < g_textures.size();) {
+            UserTexture& texture = g_textures[i];
+            if (texture.registered)
+                ImGui::UnregisterUserTexture(texture.data);
+            texture.registered = false;
+            if (texture.destroy) {
+                delete texture.data;
+                g_textures.erase(g_textures.begin() + static_cast<std::ptrdiff_t>(i));
+                continue;
+            }
+            ++i;
+        }
+    }
+    ImGui::DestroyContext();
+}
+
 ImDrawData* Frame() {
+    UpdateTextures();
     platform::NewFrame();
     PollKeys();
     ApplyScale();
@@ -230,6 +287,34 @@ void SetMenuOpen(bool open) {
         return;
     Log("Menu %s", open ? "opened" : "closed");
     input::OnMenuToggled(open);
+}
+
+ImTextureData* CreateTexture(const void* rgba, int width, int height) {
+    if (!rgba || width <= 0 || height <= 0)
+        return nullptr;
+    auto* texture = new ImTextureData();
+    texture->Create(ImTextureFormat_RGBA32, width, height);
+    memcpy(texture->GetPixels(), rgba, static_cast<size_t>(width) * height * 4);
+    texture->UseColors = true;
+    std::lock_guard<std::mutex> lock(g_texturesMutex);
+    g_textures.push_back({texture, false, false});
+    return texture;
+}
+
+void DestroyTexture(ImTextureData* texture) {
+    std::lock_guard<std::mutex> lock(g_texturesMutex);
+    for (size_t i = 0; i < g_textures.size(); ++i) {
+        if (g_textures[i].data != texture)
+            continue;
+        // No backend knows about it: nothing to wait for.
+        if (!g_textures[i].registered) {
+            delete texture;
+            g_textures.erase(g_textures.begin() + static_cast<std::ptrdiff_t>(i));
+        } else {
+            g_textures[i].destroy = true;
+        }
+        return;
+    }
 }
 
 const char* BackendName(Backend backend) {

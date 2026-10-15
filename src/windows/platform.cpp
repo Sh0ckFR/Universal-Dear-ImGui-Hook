@@ -168,7 +168,7 @@ void UnbindWindow() {
         return;
     input::Detach();
     ImGui_ImplWin32_Shutdown();
-    ImGui::DestroyContext();
+    DestroyContext();
     g_window = nullptr;
 }
 

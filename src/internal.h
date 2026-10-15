@@ -71,6 +71,8 @@ ImDrawData* Frame();
 void LinearizeColors(ImDrawData* drawData);
 // Detaches the platform backend and destroys the ImGui context.
 void UnbindWindow();
+// Destroys the ImGui context, after the renderer backend released its textures.
+void DestroyContext();
 
 // Implemented once per platform -------------------------------------------
 

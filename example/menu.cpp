@@ -1,6 +1,23 @@
 #include "imgui.h"
 #include "uih.h"
 
+#include <cstdint>
+#include <vector>
+
+// Images are created once from RGBA pixels and drawn with ImGui::Image().
+static ImTextureData* Gradient() {
+    static ImTextureData* texture = nullptr;
+    if (!texture) {
+        constexpr int kSize = 64;
+        std::vector<uint32_t> pixels(kSize * kSize);
+        for (int y = 0; y < kSize; ++y)
+            for (int x = 0; x < kSize; ++x)
+                pixels[y * kSize + x] = IM_COL32(x * 4, y * 4, 255 - x * 2, 255);
+        texture = uih::CreateTexture(pixels.data(), kSize, kSize);
+    }
+    return texture;
+}
+
 void DrawMenu() {
     if (!uih::IsMenuOpen())
         return;
@@ -30,6 +47,7 @@ void DrawMenu() {
             ImGui::Button("Button Test");
             ImGui::Checkbox("Checkbox Test", &checkbox);
             ImGui::SliderFloat("Slider Test", &slider, 1.0f, 100.0f);
+            ImGui::Image(Gradient()->GetTexRef(), ImVec2(64, 64));
             ImGui::TreePop();
         }
     }
