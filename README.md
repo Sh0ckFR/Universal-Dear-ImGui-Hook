@@ -28,7 +28,7 @@ Windows games running under Wine or Proton use the Windows DLL.
 ## Features
 
 - **One library for every API**: the backend is picked from the first API that presents a frame. Inject before or after the game initializes its graphics.
-- **Menu input**: `INSERT`, or L3 + R3 on a controller, opens the menu; `F11` removes the overlay and unloads the DLL. While the menu is open the game sees no keyboard, mouse or controller input (Windows), and an XInput controller navigates the menu.
+- **Menu input**: `INSERT`, or L3 + R3 on a controller, opens the menu; `F11` removes the overlay and unloads the DLL. The keys are [settings](#settings) in `example/config.cpp`. While the menu is open the game sees no keyboard, mouse or controller input (Windows), and an XInput controller navigates the menu.
 - **Readable on any display**: the interface follows the DPI of the game window, or a fixed scale.
 - **Correct colors** on sRGB and floating-point back buffers.
 - **Images**: `uih::CreateTexture()` turns RGBA pixels into an image for `ImGui::Image()`, on every backend.
@@ -71,15 +71,36 @@ LD_PRELOAD=/path/to/Universal-ImGui-Hook.so ./game
 
 For a Steam game, set the launch options to `LD_PRELOAD=/path/to/Universal-ImGui-Hook.so %command%`. `UIH_DEBUG=1` prints the log on stderr. `F11` removes the overlay; the library itself stays loaded.
 
+### Settings
+
+The settings of the example library are compiled into it: edit `example/config.cpp`, next to `dllmain.cpp`, and rebuild.
+
+```cpp
+void ApplySettings(uih::Config& config) {
+    config.menuKey = VK_INSERT;                              // opens and closes the menu
+    config.unloadKey = VK_F11;                               // removes the overlay, unloads the DLL
+    config.menuButtons = uih::GamepadL3 | uih::GamepadR3;    // controller buttons held together, 0 to disable
+    config.backend = uih::Backend::None;                     // graphics API to hook, None detects it
+    config.scale = 0.0f;                                     // interface size, 0 follows the DPI
+}
+```
+
+| Setting | Values |
+| --- | --- |
+| `menuKey`, `unloadKey` | Windows: [virtual-key codes](https://learn.microsoft.com/windows/win32/inputdev/virtual-key-codes) such as `VK_F1` or `'M'`. Linux: X11 keysyms from `X11/keysymdef.h`, such as `0xffbe` for `XK_F1`; the file has its own `#else` branch for them. `0` disables the key. |
+| `menuButtons` | `uih::GamepadA`, `B`, `X`, `Y`, `L1`, `R1`, `L3`, `R3`, `Start`, `Back`, `DpadUp`, `DpadDown`, `DpadLeft`, `DpadRight`, combined with `\|`; first XInput controller, Windows only. |
+| `backend` | `uih::Backend::None` detects the API from the first one that presents a frame, which is right for nearly every game. `D3D9`, `D3D10`, `D3D11`, `D3D12`, `Vulkan` or `OpenGL` forces one, for a game that uses several. |
+| `scale` | `0` follows the DPI of the game window; `1.5` draws the interface at 150%. |
+
 ### Writing your menu
 
-The interface lives in `example/menu.cpp`. `DrawMenu()` is called every frame between `ImGui::NewFrame()` and `ImGui::Render()`, so any Dear ImGui code works there. The entry points, `example/dllmain.cpp` on Windows and `example/preload.cpp` on Linux, configure and start the hook:
+The interface lives in `example/menu.cpp`. `DrawMenu()` is called every frame between `ImGui::NewFrame()` and `ImGui::Render()`, so any Dear ImGui code works there. The entry points, `example/dllmain.cpp` on Windows and `example/preload.cpp` on Linux, apply the settings and start the hook:
 
 ```cpp
 uih::Config config;
+ApplySettings(config);         // example/config.cpp
 config.render = DrawMenu;      // every frame
 config.setup = LoadFonts;      // when the ImGui context is created: fonts, style
-config.scale = 0.0f;           // 0 follows the window's DPI, 1.5 = 150%
 config.module = module;        // Windows: DLL unloaded by unloadKey
 uih::Start(config);
 ```
@@ -225,6 +246,7 @@ Without a GPU, as on the CI runners, Direct3D uses WARP, and Mesa's software dri
 | `--input raw\|directinput` | What the game reads while the menu is open |
 | `--gamepad <fake xinput1_4.dll>` | Controller toggling the menu and hidden from the game while it is open |
 | `--dll <path>` | Loads the real DLL and drives it with `INSERT` and `F11` |
+| `--menu-key <vk>`, `--unload-key <vk>` | The keys a DLL built with other settings uses, such as `0x70` for F1 (X11 keysyms on Linux) |
 | `--proxy <path>` | Loads the DLL as `dinput8.dll` |
 
 On Linux, `uih_host` does not link the hook: each test preloads the `.so`, opens the menu, checks the pixels and removes the overlay, through GLX, EGL, `dlsym()` lookups and Vulkan. It needs `libx11-dev libxtst-dev libgl-dev libegl-dev`; without a display, run `xvfb-run -a ctest --test-dir build/linux`. `tests/ddnet.sh` runs the same scenario on the game [DDNet](https://ddnet.org/).
@@ -253,7 +275,7 @@ Pushing a `v*` tag publishes the libraries as a release.
 | `src/vulkan.cpp` | Vulkan renderer, shared by both platforms |
 | `src/windows/` | MinHook, Direct3D, WGL, Win32 input, DirectInput, XInput |
 | `src/linux/` | Symbol interposition, GLX, EGL, X11 input, `exports.map` |
-| `example/` | The built library: `menu.cpp`, `dllmain.cpp`, `proxy.cpp`, `preload.cpp` |
+| `example/` | The built library: `config.cpp` (settings), `menu.cpp`, `dllmain.cpp`, `proxy.cpp`, `preload.cpp` |
 | `tests/` | `uih_host`, the DDNet script, the `FetchContent` consumer |
 | `vs/`, `Universal-ImGui-Hook.sln` | Visual Studio projects |
 | `third_party/` | Dear ImGui, MinHook, Vulkan headers |

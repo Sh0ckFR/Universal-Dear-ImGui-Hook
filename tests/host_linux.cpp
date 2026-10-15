@@ -207,25 +207,27 @@ int CountOverlayPixels(Display* display, Window window) {
     return count;
 }
 
-// INSERT opens the menu, F11 removes the overlay.
-int Run(Display* display, Window window, Host& host, const std::string& name) {
+// INSERT opens the menu, F11 removes the overlay, unless the library was built with other keys.
+int Run(Display* display, Window window, Host& host, const std::string& name, const Options& options) {
+    const KeySym menuKey = options.menuKey ? options.menuKey : XK_Insert;
+    const KeySym unloadKey = options.unloadKey ? options.unloadKey : XK_F11;
     const int visible = kWidth * kHeight / 100;
     for (int frame = 0;; ++frame) {
         PumpEvents(display);
-        if (frame == 90 && !PressKey(display, window, XK_Insert))
+        if (frame == 90 && !PressKey(display, window, menuKey))
             return Skip("the host window does not have the focus");
         if (frame == 95)
-            HoldKey(display, XK_Insert, false);
+            HoldKey(display, menuKey, false);
         if (frame == 180) {
             int pixels = CountOverlayPixels(display, window);
             printf("%d overlay pixels captured\n", pixels);
             if (pixels < visible)
                 return Fail("overlay is not visible on screen");
-            if (!PressKey(display, window, XK_F11))
+            if (!PressKey(display, window, unloadKey))
                 return Skip("the host window lost the focus");
         }
         if (frame == 185)
-            HoldKey(display, XK_F11, false);
+            HoldKey(display, unloadKey, false);
         if (frame == 400) {
             int pixels = CountOverlayPixels(display, window);
             printf("%d overlay pixels left after the unload key\n", pixels);
@@ -249,9 +251,11 @@ int main(int argc, char** argv) {
         else if (arg == "--egl") options.egl = true;
         else if (arg == "--lookup") options.lookup = true;
         else if (arg == "--device-proc-addr") options.deviceProcAddr = true;
+        else if (arg == "--menu-key" && i + 1 < argc) options.menuKey = static_cast<int>(strtol(argv[++i], nullptr, 0));
+        else if (arg == "--unload-key" && i + 1 < argc) options.unloadKey = static_cast<int>(strtol(argv[++i], nullptr, 0));
     }
     if (options.api != "opengl" && options.api != "vulkan") {
-        printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr]\n");
+        printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--menu-key keysym] [--unload-key keysym]\n");
         return 2;
     }
     setvbuf(stdout, nullptr, _IOLBF, 0);
@@ -280,5 +284,5 @@ int main(int argc, char** argv) {
     Window window = visual ? CreateHostWindow(display, visual) : 0;
     if (!window || !host->Init({display, window}, options))
         return Skip((name + " is not available on this machine").c_str());
-    return Run(display, window, *host, name);
+    return Run(display, window, *host, name, options);
 }
