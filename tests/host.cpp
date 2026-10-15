@@ -410,7 +410,34 @@ void DrawTestMenu() {
 struct Capture {
     int overlayPixels = 0;
     uint8_t probe[3] = {};
+    int width = 0;
+    int height = 0;
+    // Top-down BGRA rows.
+    std::vector<uint8_t> pixels;
 };
+
+// Writes the capture next to the test, for the CI to keep when a check fails.
+void SaveCapture(const Capture& capture, const std::string& name) {
+    BITMAPINFOHEADER header{};
+    header.biSize = sizeof(header);
+    header.biWidth = capture.width;
+    header.biHeight = -capture.height;
+    header.biPlanes = 1;
+    header.biBitCount = 32;
+    header.biCompression = BI_RGB;
+    BITMAPFILEHEADER file{};
+    file.bfType = 0x4D42;
+    file.bfOffBits = sizeof(file) + sizeof(header);
+    file.bfSize = file.bfOffBits + static_cast<DWORD>(capture.pixels.size());
+    std::string path = "capture-" + name + ".bmp";
+    if (FILE* out = fopen(path.c_str(), "wb")) {
+        fwrite(&file, sizeof(file), 1, out);
+        fwrite(&header, sizeof(header), 1, out);
+        fwrite(capture.pixels.data(), 1, capture.pixels.size(), out);
+        fclose(out);
+        printf("capture saved to %s\n", path.c_str());
+    }
+}
 
 Capture CaptureWindow(HWND window) {
     RECT rect{};
@@ -447,6 +474,9 @@ Capture CaptureWindow(HWND window) {
         capture.probe[1] = p[1];
         capture.probe[2] = p[0];
     }
+    capture.width = width;
+    capture.height = height;
+    capture.pixels.assign(pixels, pixels + static_cast<size_t>(width) * height * 4);
     SelectObject(memory, previous);
     DeleteObject(bitmap);
     DeleteDC(memory);
@@ -483,7 +513,17 @@ std::unique_ptr<Host> CreateHost(const std::string& api) {
     return nullptr;
 }
 
+// Paces the host at about 60 frames per second, so that frame counts are durations.
+void Pace() {
+    static ULONGLONG next = 0;
+    ULONGLONG now = GetTickCount64();
+    if (next > now)
+        Sleep(static_cast<DWORD>(next - now));
+    next = (next > now ? next : now) + 16;
+}
+
 void PumpMessages() {
+    Pace();
     MSG msg{};
     while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
         TranslateMessage(&msg);
@@ -500,6 +540,14 @@ void StartHook(const Options& options) {
     uih::Start(config);
 }
 
+// The hooks are installed on a worker thread, which software drivers make
+// slow: detection is bounded in time rather than in frames.
+constexpr ULONGLONG kDetectionTimeoutMs = 30000;
+
+bool WaitingForBackend(ULONGLONG start) {
+    return uih::ActiveBackend() == uih::Backend::None && GetTickCount64() - start < kDetectionTimeoutMs;
+}
+
 int Fail(const char* message) {
     printf("FAIL: %s\n", message);
     return 1;
@@ -514,6 +562,17 @@ void HoldKey(int key, bool down) {
     keybd_event(static_cast<BYTE>(key), 0, down ? 0 : KEYEVENTF_KEYUP, 0);
 }
 
+// Windows only lets the foreground process hand the focus over; a key press
+// lifts that restriction when the plain request is refused.
+void BringToFront(HWND window) {
+    SetForegroundWindow(window);
+    if (GetForegroundWindow() == window)
+        return;
+    HoldKey(VK_MENU, true);
+    HoldKey(VK_MENU, false);
+    SetForegroundWindow(window);
+}
+
 // Real key presses: only sent while the host window has the focus.
 bool PressKey(HWND window, int key) {
     if (GetForegroundWindow() != window)
@@ -523,39 +582,49 @@ bool PressKey(HWND window, int key) {
 }
 
 // Loads the example DLL like an injector would and drives it with its hotkeys:
-// INSERT opens the menu, F11 unloads the DLL.
+// INSERT opens the menu, F11 unloads the DLL. The DLL installs its hooks on
+// a thread of its own, so INSERT is pressed until the overlay shows up.
 int RunDllMode(HWND window, Host& host, const Options& options) {
     std::wstring path(options.dll.begin(), options.dll.end());
     size_t separator = path.find_last_of(L"\\/");
     std::wstring name = separator == std::wstring::npos ? path : path.substr(separator + 1);
-    for (int frame = 0;; ++frame) {
-        PumpMessages();
-        if (frame == options.injectAt && !LoadLibraryW(path.c_str()))
-            return Fail("LoadLibrary failed");
-        if (frame == options.injectAt + 85)
-            SetForegroundWindow(window);
-        if (frame == options.injectAt + 90 && !PressKey(window, VK_INSERT))
+    auto run = [&](int frames) {
+        for (int frame = 0; frame < frames; ++frame) {
+            PumpMessages();
+            host.Frame();
+        }
+    };
+
+    run(options.injectAt);
+    if (!LoadLibraryW(path.c_str()))
+        return Fail("LoadLibrary failed");
+    BringToFront(window);
+
+    int pixels = 0;
+    for (ULONGLONG start = GetTickCount64(); GetTickCount64() - start < kDetectionTimeoutMs;) {
+        if (!PressKey(window, VK_INSERT))
             return Skip("the host window does not have the focus");
-        if (frame == options.injectAt + 95)
-            HoldKey(VK_INSERT, false);
-        if (frame == options.injectAt + 180) {
-            int pixels = CaptureWindow(window).overlayPixels;
-            printf("%d overlay pixels captured\n", pixels);
-            if (pixels < kWidth * kHeight / 100)
-                return Fail("overlay is not visible on screen");
-            if (!PressKey(window, VK_F11))
-                return Skip("the host window lost the focus");
-        }
-        if (frame == options.injectAt + 185)
-            HoldKey(VK_F11, false);
-        if (frame == options.injectAt + 400) {
-            if (GetModuleHandleW(name.c_str()))
-                return Fail("DLL did not unload");
-            printf("PASS: %s via %s\n", options.api.c_str(), options.dll.c_str());
-            return 0;
-        }
-        host.Frame();
+        run(5);
+        HoldKey(VK_INSERT, false);
+        run(55);
+        pixels = CaptureWindow(window).overlayPixels;
+        if (pixels >= kWidth * kHeight / 100)
+            break;
     }
+    printf("%d overlay pixels captured\n", pixels);
+    if (pixels < kWidth * kHeight / 100)
+        return Fail("overlay is not visible on screen");
+
+    if (!PressKey(window, VK_F11))
+        return Skip("the host window lost the focus");
+    run(5);
+    HoldKey(VK_F11, false);
+    for (ULONGLONG start = GetTickCount64(); GetModuleHandleW(name.c_str()) && GetTickCount64() - start < 10000;)
+        run(1);
+    if (GetModuleHandleW(name.c_str()))
+        return Fail("DLL did not unload");
+    printf("PASS: %s via %s\n", options.api.c_str(), options.dll.c_str());
+    return 0;
 }
 
 // Input the application reads while the menu is open ----------------------
@@ -569,6 +638,7 @@ RawInputSeen g_rawInput;
 
 // Reads WM_INPUT before dispatching it, like engines that poll their message queue.
 void PumpRawInput() {
+    Pace();
     MSG msg{};
     while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
         if (msg.message == WM_INPUT) {
@@ -656,11 +726,11 @@ int RunInputMode(HWND window, Host& host, bool useDirectInput) {
 
     StartHook(Options{});
     int result = 0;
-    for (int frame = 0; frame < 600 && uih::ActiveBackend() == uih::Backend::None; ++frame) {
+    for (ULONGLONG start = GetTickCount64(); WaitingForBackend(start);) {
         PumpRawInput();
         host.Frame();
     }
-    SetForegroundWindow(window);
+    BringToFront(window);
     for (int frame = 0; frame < 30; ++frame) {
         PumpRawInput();
         host.Frame();
@@ -734,6 +804,8 @@ int RunProxyMode(const Options& options) {
 } // namespace
 
 int main(int argc, char** argv) {
+    // Keeps the output of a test that crashes.
+    setvbuf(stdout, nullptr, _IONBF, 0);
     Options options;
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -762,7 +834,9 @@ int main(int argc, char** argv) {
     RegisterClassExW(&windowClass);
     RECT rect{0, 0, kWidth, kHeight};
     AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
-    HWND window = CreateWindowExW(0, L"uih_host", L"uih host", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 100, 100,
+    // Screen captures need the window above everything else.
+    DWORD exStyle = options.capture || !options.dll.empty() ? WS_EX_TOPMOST : 0;
+    HWND window = CreateWindowExW(exStyle, L"uih_host", L"uih host", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 100, 100,
                                   rect.right - rect.left, rect.bottom - rect.top, nullptr, nullptr, windowClass.hInstance, nullptr);
     PumpMessages();
 
@@ -793,14 +867,17 @@ int main(int argc, char** argv) {
     }
 
     int frame = 0;
+    ULONGLONG injectTime = GetTickCount64();
     int activeFrame = -1;
     int activeImGuiFrame = 0;
     int stopFrame = -1;
     int result = 0;
     while (result == 0) {
         PumpMessages();
-        if (frame == options.injectAt && frame > 0)
+        if (frame == options.injectAt && frame > 0) {
             StartHook(options);
+            injectTime = GetTickCount64();
+        }
         host->Frame();
         ++frame;
 
@@ -810,7 +887,7 @@ int main(int argc, char** argv) {
                 activeImGuiFrame = ImGui::GetCurrentContext() ? ImGui::GetFrameCount() : 0;
                 printf("%s backend active after %d frames\n", options.api.c_str(), frame - options.injectAt);
                 uih::SetMenuOpen(true);
-            } else if (frame > options.injectAt + 600) {
+            } else if (frame > options.injectAt && GetTickCount64() - injectTime > kDetectionTimeoutMs) {
                 result = Fail("backend was not detected");
             }
         } else if (stopFrame < 0 && frame == activeFrame + 60) {
@@ -850,6 +927,7 @@ int main(int argc, char** argv) {
                     break;
                 }
                 if (!ProbeMatches(capture)) {
+                    SaveCapture(capture, options.api + (options.format.empty() ? "" : "-" + options.format));
                     result = Fail("overlay colors are altered");
                     break;
                 }

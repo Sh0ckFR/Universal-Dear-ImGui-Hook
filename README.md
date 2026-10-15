@@ -209,7 +209,9 @@ cmake --preset msvc-x64 -DUIH_BUILD_TESTS=ON && cmake --build --preset msvc-x64
 ctest --test-dir build/msvc-x64 -C Release
 ```
 
-Some tests press real keys and move the mouse. They are skipped when the host window does not have the focus: leave the machine alone while they run.
+Some tests press real keys and move the mouse. They are skipped when the host window does not have the focus: leave the machine alone while they run. A test whose screen check fails saves the capture as `build/tests/capture-*.bmp`.
+
+Without a GPU, as on the CI runners, Direct3D uses WARP, and Mesa's software drivers from [mesa-dist-win](https://github.com/pal1000/mesa-dist-win) cover the rest: copy `opengl32.dll` and `libgallium_wgl.dll` next to `uih_host.exe` with `GALLIUM_DRIVER=llvmpipe`, and register `lvp_icd.*.json` under `HKLM\SOFTWARE\Khronos\Vulkan\Drivers` with a `vulkan-1.dll` from the Vulkan runtime.
 
 | `uih_host` option (Windows) | Scenario |
 | --- | --- |
@@ -230,6 +232,7 @@ The [CI](.github/workflows/build.yml) runs on every push and pull request:
 | Job | Checks |
 | --- | --- |
 | MSVC x64, Win32 | Build, D3D11 on WARP, `dinput8.dll` proxy |
+| Windows tests x64, Win32 | The whole CTest suite without GPU: WARP for Direct3D, Mesa's llvmpipe and lavapipe for OpenGL and Vulkan; no test may be skipped |
 | Visual Studio solution x64, x86 | The `.sln` built with MSBuild, same tests |
 | MinGW-w64 on Ubuntu and macOS | Cross-compiled DLLs, proxy export |
 | Linux GCC, Clang x86_64, GCC aarch64 | The six preload tests under Xvfb with llvmpipe and lavapipe |
