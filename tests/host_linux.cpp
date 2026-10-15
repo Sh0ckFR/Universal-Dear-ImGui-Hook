@@ -194,7 +194,11 @@ bool PressKey(Display* display, Window window, KeySym key) {
 }
 
 int CountOverlayPixels(Display* display, Window window) {
-    XImage* image = XGetImage(display, window, 0, 0, kWidth, kHeight, AllPlanes, ZPixmap);
+    XWindowAttributes attributes{};
+    XGetWindowAttributes(display, window, &attributes);
+    int width = attributes.width < kWidth ? attributes.width : kWidth;
+    int height = attributes.height < kHeight ? attributes.height : kHeight;
+    XImage* image = XGetImage(display, window, 0, 0, width, height, AllPlanes, ZPixmap);
     if (!image)
         return 0;
     int count = 0;
@@ -263,7 +267,7 @@ int Run(Display* display, Window window, Host& host, const std::string& name, co
         // The preloaded library stays: the menu key brings the overlay back.
         if (options.reload && frame == 420 && !PressKey(display, window, menuKey))
             return Skip("the host window lost the focus");
-        if (options.reload && frame == 425)
+        if (options.reload && frame == 435)
             HoldKey(display, menuKey, false);
         if (options.reload && frame == 520) {
             int pixels = CountOverlayPixels(display, window);
@@ -273,7 +277,7 @@ int Run(Display* display, Window window, Host& host, const std::string& name, co
             if (!PressKey(display, window, unloadKey))
                 return Skip("the host window lost the focus");
         }
-        if (options.reload && frame == 525)
+        if (options.reload && frame == 535)
             HoldKey(display, unloadKey, false);
         if (options.reload && frame == 700) {
             int pixels = CountOverlayPixels(display, window);

@@ -1187,10 +1187,13 @@ int main(int argc, char** argv) {
                         PumpMessages();
                         host->Frame();
                     }
+                    // A screen too small for the window makes the system shrink it.
+                    RECT client{};
+                    GetClientRect(window, &client);
                     ImVec2 display = ImGui::GetIO().DisplaySize;
-                    printf("resized to %dx%d: overlay %.0fx%.0f, %d vertices\n", size[0], size[1], display.x, display.y,
+                    printf("resized to %ldx%ld: overlay %.0fx%.0f, %d vertices\n", client.right, client.bottom, display.x, display.y,
                            ImGui::GetIO().MetricsRenderVertices);
-                    if (display.x != size[0] || display.y != size[1] || ImGui::GetIO().MetricsRenderVertices == 0) {
+                    if (display.x != client.right || display.y != client.bottom || ImGui::GetIO().MetricsRenderVertices == 0) {
                         result = Fail("the overlay did not follow the new size");
                         break;
                     }

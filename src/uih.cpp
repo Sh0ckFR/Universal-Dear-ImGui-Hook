@@ -252,7 +252,7 @@ void StopUntilMenuInput() {
     // Input already held when the wait starts needs a fresh press.
     bool wasDown = platform::MenuInputDown(config);
     while (g_waitingForMenuInput) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
         bool down = platform::MenuInputDown(config);
         if (down && !wasDown)
             break;

@@ -57,8 +57,9 @@ struct Options {
     bool remove = false;
 };
 
-// Sizes the resize scenario goes through: larger, then smaller than the start.
-constexpr int kResizes[][2] = {{1024, 768}, {720, 560}};
+// Sizes the resize scenario goes through: larger, then smaller than the
+// start, within the 1024x768 and 1280x720 screens of the CI runners.
+constexpr int kResizes[][2] = {{960, 640}, {720, 560}};
 
 struct Host {
     virtual ~Host() = default;
