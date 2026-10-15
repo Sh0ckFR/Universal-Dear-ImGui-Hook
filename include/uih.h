@@ -14,6 +14,24 @@ struct ImTextureData;
 
 namespace uih {
 
+// Controller buttons, with the values of XInput's XINPUT_GAMEPAD_* flags.
+enum GamepadButton : unsigned {
+    GamepadDpadUp = 0x0001,
+    GamepadDpadDown = 0x0002,
+    GamepadDpadLeft = 0x0004,
+    GamepadDpadRight = 0x0008,
+    GamepadStart = 0x0010,
+    GamepadBack = 0x0020,
+    GamepadL3 = 0x0040,
+    GamepadR3 = 0x0080,
+    GamepadL1 = 0x0100,
+    GamepadR1 = 0x0200,
+    GamepadA = 0x1000,
+    GamepadB = 0x2000,
+    GamepadX = 0x4000,
+    GamepadY = 0x8000,
+};
+
 enum class Backend {
     None,
     D3D9,
@@ -41,6 +59,9 @@ struct Config {
     int menuKey = 0xff63;
     int unloadKey = 0xffc8;
 #endif
+    // Controller buttons that toggle the menu when held together, 0 to disable.
+    // Read from the first XInput controller; Windows only.
+    unsigned menuButtons = GamepadL3 | GamepadR3;
     // Size of the interface, 1.5 for 150%. 0 follows the DPI of the target window.
     float scale = 0.0f;
     bool debugLog = false;

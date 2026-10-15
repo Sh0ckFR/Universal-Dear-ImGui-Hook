@@ -42,6 +42,8 @@ struct Options {
     std::string format;
     // "raw" or "directinput": checks the input the host reads while the menu is open.
     std::string input;
+    // Fake xinput1_4.dll driving the controller scenario.
+    std::string gamepad;
     bool egl = false;
     bool lookup = false;
 };

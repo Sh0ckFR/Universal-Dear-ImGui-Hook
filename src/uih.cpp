@@ -41,6 +41,7 @@ struct UserTexture {
 std::mutex g_texturesMutex;
 std::vector<UserTexture> g_textures;
 
+bool g_menuButtonsDown = false;
 bool g_menuKeyDown = false;
 bool g_unloadKeyDown = false;
 
@@ -73,9 +74,42 @@ void UpdateTextures() {
     }
 }
 
+// Reads the controller through the platform backend, which feeds the ImGui gamepad keys.
+bool MenuButtonsDown() {
+    static const struct {
+        unsigned button;
+        ImGuiKey key;
+    } kButtons[] = {
+        {GamepadDpadUp, ImGuiKey_GamepadDpadUp},
+        {GamepadDpadDown, ImGuiKey_GamepadDpadDown},
+        {GamepadDpadLeft, ImGuiKey_GamepadDpadLeft},
+        {GamepadDpadRight, ImGuiKey_GamepadDpadRight},
+        {GamepadStart, ImGuiKey_GamepadStart},
+        {GamepadBack, ImGuiKey_GamepadBack},
+        {GamepadL3, ImGuiKey_GamepadL3},
+        {GamepadR3, ImGuiKey_GamepadR3},
+        {GamepadL1, ImGuiKey_GamepadL1},
+        {GamepadR1, ImGuiKey_GamepadR1},
+        {GamepadA, ImGuiKey_GamepadFaceDown},
+        {GamepadB, ImGuiKey_GamepadFaceRight},
+        {GamepadX, ImGuiKey_GamepadFaceLeft},
+        {GamepadY, ImGuiKey_GamepadFaceUp},
+    };
+    unsigned wanted = g_config.menuButtons;
+    if (!wanted || !(ImGui::GetIO().BackendFlags & ImGuiBackendFlags_HasGamepad))
+        return false;
+    for (const auto& entry : kButtons)
+        if ((wanted & entry.button) && !ImGui::IsKeyDown(entry.key))
+            return false;
+    return true;
+}
+
 void PollKeys() {
     bool focused = platform::IsFocused();
-    if (KeyPressed(g_config.menuKey, g_menuKeyDown, focused))
+    bool buttonsDown = MenuButtonsDown();
+    bool buttonsPressed = buttonsDown && !g_menuButtonsDown && focused;
+    g_menuButtonsDown = buttonsDown;
+    if (KeyPressed(g_config.menuKey, g_menuKeyDown, focused) || buttonsPressed)
         SetMenuOpen(!g_menuOpen);
     if (KeyPressed(g_config.unloadKey, g_unloadKeyDown, focused))
         platform::Unload();
