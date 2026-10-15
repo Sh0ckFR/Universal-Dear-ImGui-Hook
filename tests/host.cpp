@@ -173,16 +173,28 @@ DXGI_SWAP_CHAIN_DESC SwapChainDesc(HWND window, const Options& options) {
     return desc;
 }
 
-// Exclusive fullscreen through DXGI, as D3D10, 11 and 12 games do.
+// Exclusive fullscreen through DXGI, as D3D10, 11 and 12 games do: the
+// output's mode closest to kFullscreen, set before and after the switch.
 bool DxgiFullscreen(IDXGISwapChain* swapChain, bool on) {
-    if (on) {
-        DXGI_MODE_DESC mode{};
-        mode.Width = kFullscreen[0];
-        mode.Height = kFullscreen[1];
-        if (FAILED(swapChain->ResizeTarget(&mode)))
-            return false;
-    }
-    return SUCCEEDED(swapChain->SetFullscreenState(on, nullptr));
+    if (!on)
+        return SUCCEEDED(swapChain->SetFullscreenState(FALSE, nullptr));
+    IDXGIOutput* output = nullptr;
+    if (FAILED(swapChain->GetContainingOutput(&output)))
+        return false;
+    DXGI_SWAP_CHAIN_DESC desc{};
+    swapChain->GetDesc(&desc);
+    DXGI_MODE_DESC wanted{};
+    wanted.Width = kFullscreen[0];
+    wanted.Height = kFullscreen[1];
+    wanted.Format = desc.BufferDesc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM;
+    DXGI_MODE_DESC mode{};
+    HRESULT hr = output->FindClosestMatchingMode(&wanted, &mode, nullptr);
+    output->Release();
+    if (FAILED(hr))
+        return false;
+    printf("DXGI mode %ux%u at %u/%u Hz\n", mode.Width, mode.Height, mode.RefreshRate.Numerator, mode.RefreshRate.Denominator);
+    return SUCCEEDED(swapChain->ResizeTarget(&mode)) && SUCCEEDED(swapChain->SetFullscreenState(TRUE, nullptr)) &&
+           SUCCEEDED(swapChain->ResizeTarget(&mode));
 }
 
 struct D3D10Host : Host {
