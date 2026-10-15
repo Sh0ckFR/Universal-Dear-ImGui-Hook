@@ -431,7 +431,8 @@ void SaveCapture(const Capture& capture, const std::string& name) {
     file.bfOffBits = sizeof(file) + sizeof(header);
     file.bfSize = file.bfOffBits + static_cast<DWORD>(capture.pixels.size());
     std::string path = "capture-" + name + ".bmp";
-    if (FILE* out = fopen(path.c_str(), "wb")) {
+    FILE* out = nullptr;
+    if (fopen_s(&out, path.c_str(), "wb") == 0 && out) {
         fwrite(&file, sizeof(file), 1, out);
         fwrite(&header, sizeof(header), 1, out);
         fwrite(capture.pixels.data(), 1, capture.pixels.size(), out);
