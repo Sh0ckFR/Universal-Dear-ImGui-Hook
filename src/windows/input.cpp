@@ -203,6 +203,17 @@ SHORT RealAsyncKeyState(int key) {
     return g_getAsyncKeyState ? g_getAsyncKeyState(key) : GetAsyncKeyState(key);
 }
 
+void UninstallHooks() {
+    g_setCursorPos = nullptr;
+    g_clipCursor = nullptr;
+    g_getCursorPos = nullptr;
+    g_getAsyncKeyState = nullptr;
+    g_getKeyState = nullptr;
+    g_getKeyboardState = nullptr;
+    g_getRawInputData = nullptr;
+    g_getRawInputBuffer = nullptr;
+}
+
 void InstallHooks() {
     HMODULE user32 = GetModuleHandleW(L"user32.dll");
     if (!user32)
@@ -246,8 +257,9 @@ void Detach() {
 
 void OnMenuToggled(bool open) {
     if (open) {
-        if (g_clipCursor)
-            g_clipCursor(nullptr);
+        // The real functions stand in while the hooks are being installed.
+        ClipCursorFn clipCursor = g_clipCursor ? g_clipCursor : ClipCursor;
+        clipCursor(nullptr);
         GetCursorPosFn getCursorPos = g_getCursorPos ? g_getCursorPos : GetCursorPos;
         g_cursorFrozen = getCursorPos(&g_frozenCursor) != FALSE;
     } else if (g_cursorFrozen.exchange(false)) {

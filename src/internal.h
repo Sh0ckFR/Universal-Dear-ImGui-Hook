@@ -71,6 +71,10 @@ ImDrawData* Frame();
 void LinearizeColors(ImDrawData* drawData);
 // Detaches the platform backend and destroys the ImGui context.
 void UnbindWindow();
+// For a library that cannot leave the process: stops the hook, then starts
+// it again with the menu open when the menu key or buttons are pressed in
+// the application. Runs on a thread of its own.
+void StopUntilMenuInput();
 // Destroys the ImGui context, after the renderer backend released its textures.
 void DestroyContext();
 
@@ -86,6 +90,9 @@ bool IsFocused();
 // DPI scale of the bound window, 1 when unknown.
 float WindowScale();
 void Unload();
+// While the hook is stopped: true when the menu key or buttons of `config`
+// are held and the application has the focus.
+bool MenuInputDown(const Config& config);
 } // namespace platform
 
 namespace input {

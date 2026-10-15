@@ -59,7 +59,9 @@ LD_PRELOAD=$PWD/build/linux/Universal-ImGui-Hook.so ./game
 
 Inject `Universal-ImGui-Hook.dll` with any injector or `LoadLibrary`.
 
-To load it without an injector, rename it to `dinput8.dll` and put it next to the game's executable: it exports `DirectInput8Create` and forwards it to the system library, so any game that imports DirectInput 8 loads it. Under Wine or Proton, add `WINEDLLOVERRIDES="dinput8=n,b" %command%` to the launch options. Loaded this way, `F11` removes the overlay but the DLL stays in memory, since the game references it.
+To load it without an injector, rename it to `dinput8.dll` and put it next to the game's executable: it exports `DirectInput8Create` and forwards it to the system library, so any game that imports DirectInput 8 loads it. Under Wine or Proton, add `WINEDLLOVERRIDES="dinput8=n,b" %command%` to the launch options. Loaded this way the DLL stays in the game, which references it: `F11` removes the overlay and `INSERT` brings it back.
+
+An injected DLL is unloaded by `F11`; inject it again to bring the overlay back.
 
 Logs (`config.debugLog`) go to `OutputDebugString`: read them with [DebugView](https://learn.microsoft.com/sysinternals/downloads/debugview).
 
@@ -69,7 +71,7 @@ Logs (`config.debugLog`) go to `OutputDebugString`: read them with [DebugView](h
 LD_PRELOAD=/path/to/Universal-ImGui-Hook.so ./game
 ```
 
-For a Steam game, set the launch options to `LD_PRELOAD=/path/to/Universal-ImGui-Hook.so %command%`. `UIH_DEBUG=1` prints the log on stderr. `F11` removes the overlay; the library itself stays loaded.
+For a Steam game, set the launch options to `LD_PRELOAD=/path/to/Universal-ImGui-Hook.so %command%`. `UIH_DEBUG=1` prints the log on stderr. A preloaded library cannot leave the process: `F11` removes the overlay and its hooks, and `INSERT` brings them back.
 
 ### Settings
 
@@ -132,7 +134,7 @@ Everything is in `include/uih.h`, namespace `uih`.
 | Function | Description |
 | --- | --- |
 | `Start(config)` | Installs the hooks on a worker thread and returns. Safe from `DllMain` or a library constructor. |
-| `Stop()` | Removes the overlay, releases the GPU resources on the rendering thread and removes the hooks. Blocks; not from `DllMain` or a hook. |
+| `Stop()` | Removes the overlay, releases the GPU resources on the rendering thread and removes the hooks. Blocks; not from `DllMain` or a hook. `Start()` can be called again afterwards. |
 | `ActiveBackend()`, `BackendName(backend)` | API the overlay is drawn with, `Backend::None` until the first frame. |
 | `IsMenuOpen()`, `SetMenuOpen(open)` | Menu state, also toggled by `menuKey`. |
 | `CreateTexture(rgba, width, height)` | Image from RGBA pixels, uploaded by the active backend on the next frame and again after a backend switch. Any thread. |
@@ -146,7 +148,7 @@ Everything is in `include/uih.h`, namespace `uih`.
 | `menuKey`, `unloadKey` | `INSERT`, `F11` | Virtual-key codes on Windows, X11 keysyms on Linux |
 | `menuButtons` | `GamepadL3 \| GamepadR3` | Controller buttons held together to toggle the menu, `0` to disable; first XInput controller, Windows only |
 | `scale` | `0` | Interface size; `0` follows the DPI of the game window |
-| `module` | `nullptr` | Windows: module freed by `unloadKey`; `nullptr` disables unloading |
+| `module` | `nullptr` | Windows: module freed by `unloadKey`. With `nullptr`, `unloadKey` removes the overlay and the menu key or buttons bring it back, as on Linux |
 | `debugLog` | `false` | `OutputDebugString` on Windows, stderr on Linux |
 
 ## How it works
@@ -169,7 +171,9 @@ Everything is in `include/uih.h`, namespace `uih`.
 
 **Input on Linux.** The pointer and the keyboard are polled from the X server on a separate XCB connection.
 
-**Teardown.** `Stop()` asks the rendering thread to release the backend at its next present, or does it itself after one second, then removes the hooks once none of them is running.
+**Teardown.** `Stop()` asks the rendering thread to release the backend at its next present, or does it itself after one second, then removes the hooks once none of them is running. When the library cannot leave the process (Linux, `dinput8.dll` proxy, no `module`), the unload key runs `Stop()` on a thread that then polls the menu key and buttons, and starts the hook again with the menu open.
+
+**Resolution changes** are followed on every API: D3D9 `Reset`/`ResetEx`, DXGI `ResizeBuffers`, a new Vulkan swap chain, or a new size of the OpenGL window; the overlay takes the new size on the next frame.
 
 ## Building
 
@@ -243,13 +247,16 @@ Without a GPU, as on the CI runners, Direct3D uses WARP, and Mesa's software dri
 | `--format srgb\|float` | Back buffer storing linear values |
 | `--decoy-queue` | A second D3D12 device executes work every frame |
 | `--scale <s>`, `--warp` | Fixed interface scale; software rasterizer |
+| `--resize` | Window and back buffers resized to 1024x768, then 720x560, with the menu open |
+| `--reload` | The overlay is started a second time: `Start()` after `Stop()`, or with `--dll` the DLL injected again, or, for a DLL named `dinput8.dll`, brought back by `INSERT` after `F11` |
+| `--remove` | `F11` removes the overlay and `INSERT` brings it back, twice, without a module to free |
 | `--input raw\|directinput` | What the game reads while the menu is open |
 | `--gamepad <fake xinput1_4.dll>` | Controller toggling the menu and hidden from the game while it is open |
 | `--dll <path>` | Loads the real DLL and drives it with `INSERT` and `F11` |
 | `--menu-key <vk>`, `--unload-key <vk>` | The keys a DLL built with other settings uses, such as `0x70` for F1 (X11 keysyms on Linux) |
 | `--proxy <path>` | Loads the DLL as `dinput8.dll` |
 
-On Linux, `uih_host` does not link the hook: each test preloads the `.so`, opens the menu, checks the pixels and removes the overlay, through GLX, EGL, `dlsym()` lookups and Vulkan. It needs `libx11-dev libxtst-dev libgl-dev libegl-dev`; without a display, run `xvfb-run -a ctest --test-dir build/linux`. `tests/ddnet.sh` runs the same scenario on the game [DDNet](https://ddnet.org/).
+On Linux, `uih_host` does not link the hook: each test preloads the `.so`, opens the menu, checks the pixels and removes the overlay, through GLX, EGL, `dlsym()` lookups and Vulkan, with `--resize` and `--reload` variants. It needs `libx11-dev libxtst-dev libgl-dev libegl-dev`; without a display, run `xvfb-run -a ctest --test-dir build/linux`. `tests/ddnet.sh` runs the same scenario on the game [DDNet](https://ddnet.org/).
 
 The [CI](.github/workflows/build.yml) runs on every push and pull request:
 
@@ -259,7 +266,7 @@ The [CI](.github/workflows/build.yml) runs on every push and pull request:
 | Windows tests x64, Win32 | The whole CTest suite without GPU: WARP for Direct3D, Mesa's llvmpipe and lavapipe for OpenGL and Vulkan; no test may be skipped |
 | Visual Studio solution x64, x86 | The `.sln` built with MSBuild, same tests |
 | MinGW-w64 on Ubuntu and macOS | Cross-compiled DLLs, proxy export |
-| Linux GCC, Clang x86_64, GCC aarch64 | The six preload tests under Xvfb with llvmpipe and lavapipe |
+| Linux GCC, Clang x86_64, GCC aarch64 | The preload tests under Xvfb with llvmpipe and lavapipe, including resizes and the overlay brought back after `F11` |
 | Linux portable x86_64, aarch64 | The released libraries, built and tested against glibc 2.28 |
 | DDNet OpenGL, Vulkan | The released library in a real game |
 | FetchContent consumer | The repository as a CMake dependency |

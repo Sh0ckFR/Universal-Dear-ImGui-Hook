@@ -65,6 +65,8 @@ VkSurfaceKHR CreateSurface(PFN_vkGetInstanceProcAddr getInstanceProcAddr, VkInst
     X(vkGetDeviceQueue)             \
     X(vkCreateSwapchainKHR)         \
     X(vkGetSwapchainImagesKHR)      \
+    X(vkDestroySwapchainKHR)        \
+    X(vkDestroySemaphore)           \
     X(vkCreateCommandPool)          \
     X(vkAllocateCommandBuffers)     \
     X(vkCreateSemaphore)            \
@@ -93,6 +95,8 @@ struct VulkanHost : Host {
     VkDevice device = VK_NULL_HANDLE;
     VkQueue queue = VK_NULL_HANDLE;
     VkSwapchainKHR swapchain = VK_NULL_HANDLE;
+    VkSwapchainCreateInfoKHR swapchainInfo{};
+    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
     std::vector<VkImage> images;
     std::vector<VkSemaphore> renderDone;
     VkCommandBuffer commandBuffers[kFrames] = {};
@@ -130,7 +134,6 @@ struct VulkanHost : Host {
         vkEnumeratePhysicalDevices(instance, &count, nullptr);
         std::vector<VkPhysicalDevice> physicalDevices(count);
         vkEnumeratePhysicalDevices(instance, &count, physicalDevices.data());
-        VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
         uint32_t family = 0;
         for (VkPhysicalDevice candidate : physicalDevices) {
             uint32_t familyCount = 0;
@@ -191,7 +194,6 @@ struct VulkanHost : Host {
         if (format.format == VK_FORMAT_UNDEFINED)
             return false;
 
-        VkSwapchainCreateInfoKHR swapchainInfo{};
         swapchainInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
         swapchainInfo.surface = surface;
         swapchainInfo.minImageCount = std::max<uint32_t>(2, capabilities.minImageCount);
@@ -235,6 +237,33 @@ struct VulkanHost : Host {
             vkCreateSemaphore(device, &semaphoreInfo, nullptr, &acquired[i]);
             vkCreateFence(device, &fenceInfo, nullptr, &fences[i]);
         }
+        renderDone.resize(imageCount);
+        for (VkSemaphore& semaphore : renderDone)
+            vkCreateSemaphore(device, &semaphoreInfo, nullptr, &semaphore);
+        return true;
+    }
+
+    bool Resize(int, int) override {
+        vkDeviceWaitIdle(device);
+        VkSurfaceCapabilitiesKHR capabilities{};
+        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, swapchainInfo.surface, &capabilities);
+        swapchainInfo.imageExtent = capabilities.currentExtent;
+        swapchainInfo.oldSwapchain = swapchain;
+        VkSwapchainKHR replacement = VK_NULL_HANDLE;
+        VkResult result = vkCreateSwapchainKHR(device, &swapchainInfo, nullptr, &replacement);
+        vkDestroySwapchainKHR(device, swapchain, nullptr);
+        swapchainInfo.oldSwapchain = VK_NULL_HANDLE;
+        swapchain = replacement;
+        if (result != VK_SUCCESS)
+            return false;
+        uint32_t imageCount = 0;
+        vkGetSwapchainImagesKHR(device, swapchain, &imageCount, nullptr);
+        images.resize(imageCount);
+        vkGetSwapchainImagesKHR(device, swapchain, &imageCount, images.data());
+        VkSemaphoreCreateInfo semaphoreInfo{};
+        semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        for (VkSemaphore semaphore : renderDone)
+            vkDestroySemaphore(device, semaphore, nullptr);
         renderDone.resize(imageCount);
         for (VkSemaphore& semaphore : renderDone)
             vkCreateSemaphore(device, &semaphoreInfo, nullptr, &semaphore);

@@ -57,12 +57,16 @@ bool IsFocused() { return input::IsFocused(); }
 
 float WindowScale() { return input::Scale(); }
 
+// A preloaded library cannot be unloaded: the overlay is removed and comes
+// back with the menu key.
 void Unload() {
     if (g_unloadRequested.exchange(true))
         return;
-    Log("Unload requested");
-    std::thread(uih::Stop).detach();
+    Log("Removal requested");
+    std::thread(StopUntilMenuInput).detach();
 }
+
+bool MenuInputDown(const Config& config) { return config.menuKey && input::KeyDownInApplication(config.menuKey); }
 
 } // namespace platform
 

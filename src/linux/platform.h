@@ -15,6 +15,9 @@ bool IsKeyDown(int keysym);
 bool IsFocused();
 // Xft.dpi of the X server relative to 96 DPI.
 float Scale();
+// Polled while the hook is stopped: true when `keysym` is down and a window
+// of this process has the focus, or the focus follows the pointer.
+bool KeyDownInApplication(int keysym);
 } // namespace input
 
 namespace interpose {

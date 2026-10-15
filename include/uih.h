@@ -44,7 +44,8 @@ enum class Backend {
 
 struct Config {
 #ifdef _WIN32
-    // Module to unload when `unloadKey` is pressed. Leave null to disable unloading.
+    // Module freed by `unloadKey`. When null, `unloadKey` removes the overlay
+    // and the menu key or buttons bring it back.
     HMODULE module = nullptr;
 #endif
     // Backend to hook. `None` hooks every graphics API loaded in the process and

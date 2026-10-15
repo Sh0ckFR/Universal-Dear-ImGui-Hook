@@ -49,12 +49,25 @@ struct Options {
     std::string gamepad;
     bool egl = false;
     bool lookup = false;
+    // Changes the size of the window and of the back buffers while the menu is open.
+    bool resize = false;
+    // Starts the overlay a second time after it was removed.
+    bool reload = false;
+    // Removes the overlay with the unload key and brings it back with the menu key.
+    bool remove = false;
 };
+
+// Sizes the resize scenario goes through: larger, then smaller than the
+// start, within the 1024x768 and 1280x720 screens of the CI runners.
+constexpr int kResizes[][2] = {{960, 640}, {720, 560}};
 
 struct Host {
     virtual ~Host() = default;
     virtual bool Init(HostWindow window, const Options& options) = 0;
     virtual void Frame() = 0;
+    // Resizes the back buffers to the new size of the window, as a game does
+    // when the resolution changes. False when the host cannot.
+    virtual bool Resize(int, int) { return false; }
 };
 
 inline void Settle(const Options& options) {

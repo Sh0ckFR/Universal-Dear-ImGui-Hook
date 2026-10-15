@@ -129,6 +129,33 @@ DWORD WINAPI UnloadThread(void* module) {
     FreeLibraryAndExitThread(static_cast<HMODULE>(module), 0);
 }
 
+DWORD WINAPI RemoveThread(void*) {
+    StopUntilMenuInput();
+    return 0;
+}
+
+bool ApplicationFocused() {
+    DWORD process = 0;
+    HWND foreground = GetForegroundWindow();
+    return foreground && GetWindowThreadProcessId(foreground, &process) && process == GetCurrentProcessId();
+}
+
+// The first XInput controller, read directly: the hooks are removed.
+WORD ControllerButtons() {
+    using XInputGetStateFn = DWORD(WINAPI*)(DWORD, void*);
+    static const auto getState = [] {
+        HMODULE xinput = LoadLibraryW(L"xinput1_4.dll");
+        return xinput ? GetProc<XInputGetStateFn>(xinput, "XInputGetState") : nullptr;
+    }();
+    // XINPUT_STATE: packet number, then the buttons.
+    struct {
+        DWORD packet;
+        WORD buttons;
+        BYTE rest[10];
+    } state{};
+    return getState && getState(0, &state) == ERROR_SUCCESS ? state.buttons : 0;
+}
+
 } // namespace
 
 bool CreateHook(const char* name, void* target, void* detour, void** original) {
@@ -212,6 +239,7 @@ void Stop() {
     Sleep(100);
     MH_RemoveHook(MH_ALL_HOOKS);
     MH_Uninitialize();
+    input::UninstallHooks();
 
     for (RendererSlot& slot : g_renderers)
         if (slot.attempted)
@@ -241,14 +269,24 @@ bool IsFocused() {
     return foreground && (foreground == g_window || IsChild(g_window, foreground));
 }
 
+// Without a module to free, as when the DLL stands in for dinput8.dll, the
+// overlay is removed and comes back with the menu input.
 void Unload() {
-    HMODULE module = GetConfig().module;
-    if (!module || g_unloadRequested.exchange(true))
+    if (g_unloadRequested.exchange(true))
         return;
-    Log("Unload requested");
-    HANDLE thread = CreateThread(nullptr, 0, UnloadThread, module, 0, nullptr);
+    HMODULE module = GetConfig().module;
+    Log("%s requested", module ? "Unload" : "Removal");
+    HANDLE thread = CreateThread(nullptr, 0, module ? UnloadThread : RemoveThread, module, 0, nullptr);
     if (thread)
         CloseHandle(thread);
+}
+
+bool MenuInputDown(const Config& config) {
+    if (!ApplicationFocused())
+        return false;
+    if (config.menuKey && (GetAsyncKeyState(config.menuKey) & 0x8000))
+        return true;
+    return config.menuButtons && (ControllerButtons() & config.menuButtons) == config.menuButtons;
 }
 
 } // namespace platform
