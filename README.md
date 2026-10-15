@@ -11,7 +11,7 @@ A [Dear ImGui](https://github.com/ocornut/imgui) overlay that draws your interfa
 
 Windows games running under Wine or Proton use the Windows DLL.
 
-![screenshot](https://raw.githubusercontent.com/Sh0ckFR/Universal-Dear-ImGui-Hook/master/imgui.png)
+![The example menu next to the Dear ImGui demo window, drawn by the hook in a Direct3D 11 application](imgui.png)
 
 ## Contents
 
