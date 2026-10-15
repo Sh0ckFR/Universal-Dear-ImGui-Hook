@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <type_traits>
 
 #include "imgui.h"
 
@@ -51,6 +52,15 @@ bool WantBackend(Backend backend);
 // True when hooks are running and `backend` is either active or no backend
 // has claimed the process yet.
 bool ShouldRender(Backend backend);
+// Several windows or swap chains of the application can present, from one
+// thread or more. The overlay is drawn on one of them, its target, by one
+// thread at a time. It moves to another one when the target stops
+// presenting, when the other one's window has the focus and the target's
+// does not, or when the application replaces the target's swap chain on the
+// same window. True when `swapchain` is the target: the caller draws the
+// overlay, then calls EndOverlayFrame().
+bool BeginOverlayFrame(uint64_t swapchain, NativeWindow window);
+void EndOverlayFrame();
 // Marks `backend` as the active one. Fails when another backend already owns the process.
 bool ClaimBackend(Backend backend);
 // Runs `teardown` when Stop() asked the active backend to release its resources
@@ -77,6 +87,8 @@ void UnbindWindow();
 void StopUntilMenuInput();
 // Destroys the ImGui context, after the renderer backend released its textures.
 void DestroyContext();
+// Called on the thread where work run by Guarded() raised an exception.
+void OnFault(unsigned long code);
 
 // Implemented once per platform -------------------------------------------
 
@@ -93,6 +105,10 @@ void Unload();
 // While the hook is stopped: true when the menu key or buttons of `config`
 // are held and the application has the focus.
 bool MenuInputDown(const Config& config);
+// True when `window` or the window it belongs to has the focus.
+bool HasFocus(NativeWindow window);
+// Runs `work`; false when it raised an exception, which OnFault() handled.
+bool RunGuarded(void (*work)(void*), void* context);
 } // namespace platform
 
 namespace input {
@@ -101,9 +117,30 @@ void Detach();
 // Called when the menu opens or closes: releases the cursor and hides or
 // restores the input the application sees.
 void OnMenuToggled(bool open);
-// Best-effort lookup of the main window of this process.
-NativeWindow FindProcessWindow();
+// Best-effort lookup of the main window of this process, or on Windows of
+// its window whose client area is `width` x `height` when there is one.
+NativeWindow FindProcessWindow(uint32_t width = 0, uint32_t height = 0);
 } // namespace input
+
+// Runs work of the overlay on a thread of the application. On Windows with
+// MSVC, an exception in it, from a renderer backend or the render callback,
+// removes the overlay instead of crashing the application, and the menu key
+// or buttons bring it back. False when it faulted.
+template <typename Work>
+bool Guarded(Work&& work) {
+    return platform::RunGuarded([](void* context) { (*static_cast<std::remove_reference_t<Work>*>(context))(); }, &work);
+}
+
+// Draws the overlay with `render` when `swapchain` is its target.
+template <typename Render>
+void DrawOverlay(uint64_t swapchain, NativeWindow window, Render&& render) {
+    if (!BeginOverlayFrame(swapchain, window))
+        return;
+    Guarded(render);
+    EndOverlayFrame();
+}
+
+inline uint64_t SwapchainKey(const void* swapchain) { return reinterpret_cast<uintptr_t>(swapchain); }
 
 } // namespace uih::detail
 

@@ -30,7 +30,7 @@ constexpr size_t kCreateSwapChainForCompositionIndex = 24;
 constexpr size_t kMaxSwapChains = 16;
 constexpr size_t kMaxDirectQueues = 16;
 constexpr UINT kSrvHeapSize = 64;
-// Presents to wait before following an application that moved to another direct queue.
+// Presents of a swap chain to wait before following an application that moved to another direct queue.
 constexpr int kQueueSwitchFrames = 60;
 
 HMODULE g_module = nullptr;
@@ -340,7 +340,7 @@ void Render(IDXGISwapChain* swapChain) {
     ID3D12CommandQueue* queue = QueueFor(swapChain, known);
     if (!queue)
         return;
-    if (!known && g_queue && queue != g_queue && ++g_queueMisses < kQueueSwitchFrames) {
+    if (!known && swapChain == g_swapChain && queue != g_queue && ++g_queueMisses < kQueueSwitchFrames) {
         queue->Release();
         queue = g_queue;
         queue->AddRef();
@@ -361,6 +361,12 @@ void Render(IDXGISwapChain* swapChain) {
     swapChain3->Release();
     if (index >= g_frames.size())
         return;
+
+    // Before any reference to the back buffer, which an exception in the frame would leak.
+    ImGui_ImplDX12_NewFrame();
+    ImDrawData* drawData = Frame();
+    if (StoresLinear(g_format))
+        LinearizeColors(drawData);
 
     ID3D12Resource* buffer = nullptr;
     if (FAILED(swapChain->GetBuffer(index, IID_PPV_ARGS(&buffer))))
@@ -387,11 +393,6 @@ void Render(IDXGISwapChain* swapChain) {
     g_commandList->ResourceBarrier(1, &barrier);
     g_commandList->OMSetRenderTargets(1, &frame.target, FALSE, nullptr);
     g_commandList->SetDescriptorHeaps(1, &g_srvHeap);
-
-    ImGui_ImplDX12_NewFrame();
-    ImDrawData* drawData = Frame();
-    if (StoresLinear(g_format))
-        LinearizeColors(drawData);
     ImGui_ImplDX12_RenderDrawData(drawData, g_commandList);
 
     barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;

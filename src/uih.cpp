@@ -48,6 +48,44 @@ bool g_menuButtonsDown = false;
 bool g_menuKeyDown = false;
 // Cleared by Start() and Stop() to end a wait for the menu input.
 std::atomic<bool> g_waitingForMenuInput{false};
+// Set when the overlay raised an exception, until the next Start().
+std::atomic<bool> g_faulted{false};
+
+// The swap chain the overlay is drawn on, guarded by g_frameMutex, which is
+// held while the overlay draws or releases its resources.
+struct OverlayTarget {
+    uint64_t swapchain = 0;
+    NativeWindow window{};
+    std::chrono::steady_clock::time_point lastPresent{};
+};
+std::mutex g_frameMutex;
+OverlayTarget g_target;
+std::chrono::steady_clock::time_point g_lastFocusCheck{};
+// Thread that drew the last overlay frame, the one to release its resources.
+std::atomic<std::thread::id> g_renderThread{};
+constexpr auto kStalledTarget = std::chrono::milliseconds(500);
+constexpr auto kFocusCheckInterval = std::chrono::milliseconds(250);
+
+bool IsOverlayTarget(uint64_t swapchain, NativeWindow window) {
+    auto now = std::chrono::steady_clock::now();
+    OverlayTarget& target = g_target;
+    if (swapchain == target.swapchain) {
+        target.lastPresent = now;
+        return true;
+    }
+    bool move = target.swapchain == 0 || (window && window == target.window) || now - target.lastPresent > kStalledTarget;
+    // Focus queries may reach the X server: they are spaced out.
+    if (!move && window && now - g_lastFocusCheck >= kFocusCheckInterval) {
+        g_lastFocusCheck = now;
+        move = platform::HasFocus(window) && !platform::HasFocus(target.window);
+    }
+    if (!move)
+        return false;
+    if (target.swapchain)
+        Log("Overlay moves to swap chain 0x%llx", static_cast<unsigned long long>(swapchain));
+    target = {swapchain, window, now};
+    return true;
+}
 bool g_unloadKeyDown = false;
 
 bool KeyPressed(int key, bool& wasDown, bool focused) {
@@ -176,7 +214,7 @@ bool WantBackend(Backend backend) {
 }
 
 bool ShouldRender(Backend backend) {
-    if (g_state != State::Running || !WantBackend(backend))
+    if (g_state != State::Running || g_faulted || !WantBackend(backend))
         return false;
     Backend active = g_activeBackend;
     return active == Backend::None || active == backend;
@@ -191,10 +229,30 @@ bool ClaimBackend(Backend backend) {
     return false;
 }
 
+bool BeginOverlayFrame(uint64_t swapchain, NativeWindow window) {
+    // Another thread draws the overlay: this one does not wait for it.
+    if (!g_frameMutex.try_lock())
+        return false;
+    if (!IsOverlayTarget(swapchain, window)) {
+        g_frameMutex.unlock();
+        return false;
+    }
+    g_renderThread = std::this_thread::get_id();
+    return true;
+}
+
+void EndOverlayFrame() { g_frameMutex.unlock(); }
+
 void ServiceTeardown(Backend backend, void (*teardown)()) {
+    std::thread::id renderThread = g_renderThread;
+    if (renderThread != std::thread::id() && renderThread != std::this_thread::get_id())
+        return;
     if (g_activeBackend != backend || !g_teardownPending.exchange(false))
         return;
-    teardown();
+    {
+        std::lock_guard<std::mutex> lock(g_frameMutex);
+        Guarded([&] { teardown(); });
+    }
     {
         std::lock_guard<std::mutex> lock(g_teardownMutex);
         g_teardownDone = true;
@@ -270,6 +328,15 @@ void StopUntilMenuInput() {
     SetMenuOpen(true);
 }
 
+void OnFault(unsigned long code) {
+    t_inRenderCallback = false;
+    Log("Exception 0x%08lX in the overlay", code);
+    if (g_faulted.exchange(true) || g_state != State::Running)
+        return;
+    // Stop() waits for the hooks to return.
+    std::thread(StopUntilMenuInput).detach();
+}
+
 ImDrawData* Frame() {
     UpdateTextures();
     platform::NewFrame();
@@ -324,6 +391,9 @@ void Start(const Config& config) {
     g_activeBackend = Backend::None;
     g_menuOpen = false;
     g_teardownPending = false;
+    g_faulted = false;
+    g_target = {};
+    g_renderThread = std::thread::id();
     g_state = State::Running;
     if (!platform::Start())
         g_state = State::Stopped;

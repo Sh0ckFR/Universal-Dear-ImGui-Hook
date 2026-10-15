@@ -2,6 +2,8 @@
 
 #include <winternl.h>
 
+#include <malloc.h>
+
 #include <cwchar>
 
 #include "imgui_impl_win32.h"
@@ -230,7 +232,7 @@ void Stop() {
         Log("Rendering thread did not respond, releasing resources from Stop()");
         for (RendererSlot& slot : g_renderers)
             if (slot.installed)
-                slot.renderer->Teardown();
+                Guarded([&] { slot.renderer->Teardown(); });
     }
 
     MH_DisableHook(MH_ALL_HOOKS);
@@ -279,6 +281,30 @@ void Unload() {
     HANDLE thread = CreateThread(nullptr, 0, module ? UnloadThread : RemoveThread, module, 0, nullptr);
     if (thread)
         CloseHandle(thread);
+}
+
+bool HasFocus(HWND window) {
+    HWND foreground = GetForegroundWindow();
+    return window && foreground && (foreground == window || foreground == GetAncestor(window, GA_ROOT));
+}
+
+bool RunGuarded(void (*work)(void*), void* context) {
+#ifdef _MSC_VER
+    DWORD code = 0;
+    __try {
+        work(context);
+        return true;
+    } __except (code = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
+    }
+    if (code == EXCEPTION_STACK_OVERFLOW)
+        _resetstkoflw();
+    OnFault(code);
+    return false;
+#else
+    // MinGW-w64 has no structured exception handling.
+    work(context);
+    return true;
+#endif
 }
 
 bool MenuInputDown(const Config& config) {

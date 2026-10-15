@@ -105,7 +105,7 @@ UIH_EXPORT void glXSwapBuffers(void* display, GlxDrawable drawable) {
         uint32_t width = 0;
         uint32_t height = 0;
         if (input::WindowSize(window, width, height))
-            Render(getCurrentContext(), window, width, height);
+            DrawOverlay(drawable, window, [&] { Render(getCurrentContext(), window, width, height); });
     }
     ServiceTeardown(Backend::OpenGL, Teardown);
     swapBuffers(display, drawable);
@@ -158,7 +158,7 @@ UIH_EXPORT unsigned int eglSwapBuffers(void* display, void* surface) {
         querySurface(display, surface, kEglWidth, &width);
         querySurface(display, surface, kEglHeight, &height);
         if (width > 0 && height > 0)
-            Render(getCurrentContext(), 0, static_cast<uint32_t>(width), static_cast<uint32_t>(height));
+            DrawOverlay(SwapchainKey(surface), 0, [&] { Render(getCurrentContext(), 0, static_cast<uint32_t>(width), static_cast<uint32_t>(height)); });
     }
     ServiceTeardown(Backend::OpenGL, Teardown);
     return swapBuffers(display, surface);

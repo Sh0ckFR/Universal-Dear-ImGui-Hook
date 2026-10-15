@@ -15,27 +15,34 @@
 #define UIH_MUSTTAIL
 #endif
 
+// The sanitizer runtimes look functions up with dlsym() while they start,
+// before their shadow memory exists. That path is not instrumented and calls
+// nothing that is: GCC does not inline instrumented functions into it.
+#define UIH_NO_SANITIZE __attribute__((no_sanitize("address", "undefined")))
+
 namespace uih::detail::interpose {
 namespace {
 
 using DlsymFn = void* (*)(void*, const char*) noexcept;
 
-std::atomic<DlsymFn> g_dlsym{nullptr};
+DlsymFn g_dlsym = nullptr;
+
+const char* const kDlsymVersions[] = {"GLIBC_2.34", "GLIBC_2.2.5", "GLIBC_2.17", "GLIBC_2.4", "GLIBC_2.0"};
 
 // This library exports dlsym, so the one of the C library is found by version.
-DlsymFn FindDlsym() {
-    for (const char* version : {"GLIBC_2.34", "GLIBC_2.2.5", "GLIBC_2.17", "GLIBC_2.4", "GLIBC_2.0"})
-        if (void* function = dlvsym(RTLD_NEXT, "dlsym", version))
+UIH_NO_SANITIZE DlsymFn FindDlsym() {
+    for (size_t i = 0; i < sizeof(kDlsymVersions) / sizeof(kDlsymVersions[0]); ++i)
+        if (void* function = dlvsym(RTLD_NEXT, "dlsym", kDlsymVersions[i]))
             return reinterpret_cast<DlsymFn>(function);
     fputs("[uih] dlsym() of the C library was not found\n", stderr);
     abort();
 }
 
-DlsymFn RealDlsym() {
-    DlsymFn function = g_dlsym.load(std::memory_order_relaxed);
+UIH_NO_SANITIZE DlsymFn RealDlsym() {
+    DlsymFn function = __atomic_load_n(&g_dlsym, __ATOMIC_RELAXED);
     if (!function) {
         function = FindDlsym();
-        g_dlsym.store(function, std::memory_order_relaxed);
+        __atomic_store_n(&g_dlsym, function, __ATOMIC_RELAXED);
     }
     return function;
 }
@@ -85,7 +92,7 @@ void* Library::Substitute(void* function, const char* name, const void* caller) 
 
 } // namespace uih::detail::interpose
 
-UIH_EXPORT void* dlsym(void* handle, const char* name) noexcept {
+UIH_EXPORT UIH_NO_SANITIZE void* dlsym(void* handle, const char* name) noexcept {
     using namespace uih::detail::interpose;
     // These lookups depend on the caller: a tail call keeps it.
     if (handle == RTLD_DEFAULT || handle == RTLD_NEXT)

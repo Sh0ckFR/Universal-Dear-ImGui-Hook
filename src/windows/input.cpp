@@ -136,10 +136,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     WNDPROC original = g_originalProc;
     bool unicode = g_unicode;
     if (ImGui::GetCurrentContext() && hwnd == g_window) {
-        {
+        Guarded([&] {
             OwnCalls own;
             ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam);
-        }
+        });
         if (IsMenuOpen() && IsInputMessage(msg)) {
             // The system frees raw input data in DefWindowProc.
             if (msg == WM_INPUT)
@@ -166,8 +166,11 @@ WNDPROC CurrentProc(HWND hwnd) {
 
 struct WindowSearch {
     DWORD process;
+    long width;
+    long height;
     HWND best;
     long bestArea;
+    HWND sized;
 };
 
 BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM param) {
@@ -178,6 +181,8 @@ BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM param) {
         return TRUE;
     RECT rect{};
     GetClientRect(hwnd, &rect);
+    if (search->width && rect.right == search->width && rect.bottom == search->height && !search->sized)
+        search->sized = hwnd;
     long area = (rect.right - rect.left) * (rect.bottom - rect.top);
     if (area > search->bestArea) {
         search->best = hwnd;
@@ -269,14 +274,18 @@ void OnMenuToggled(bool open) {
     }
 }
 
-HWND FindProcessWindow() {
-    WindowSearch search{GetCurrentProcessId(), nullptr, -1};
+HWND FindProcessWindow(uint32_t width, uint32_t height) {
+    WindowSearch search{GetCurrentProcessId(), static_cast<long>(width), static_cast<long>(height), nullptr, -1, nullptr};
     HWND foreground = GetForegroundWindow();
     DWORD process = 0;
-    if (foreground && GetWindowThreadProcessId(foreground, &process) && process == search.process)
+    bool ownForeground = foreground && GetWindowThreadProcessId(foreground, &process) && process == search.process;
+    RECT client{};
+    if (ownForeground && (!width || (GetClientRect(foreground, &client) && client.right == search.width && client.bottom == search.height)))
         return foreground;
     EnumWindows(EnumWindowsProc, reinterpret_cast<LPARAM>(&search));
-    return search.best;
+    if (search.sized)
+        return search.sized;
+    return ownForeground ? foreground : search.best;
 }
 
 } // namespace uih::detail::input

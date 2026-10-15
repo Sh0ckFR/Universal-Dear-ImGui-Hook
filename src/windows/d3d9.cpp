@@ -61,6 +61,7 @@ void Teardown() {
 }
 
 bool Init(IDirect3DDevice9* device) {
+    Teardown();
     HWND window = DeviceWindow(device);
     if (!window || !ClaimBackend(Backend::D3D9) || !BindWindow(window))
         return false;
@@ -73,10 +74,12 @@ bool Init(IDirect3DDevice9* device) {
 // Draws on the back buffer of the implicit swap chain, outside of the
 // application's scenes, whatever render target is bound.
 void Render(IDirect3DDevice9* device) {
-    if (!g_device && !Init(device))
+    if (device != g_device && !Init(device))
         return;
-    if (device != g_device)
-        return;
+
+    // Before any reference to the back buffer, which an exception in the frame would leak.
+    ImGui_ImplDX9_NewFrame();
+    ImDrawData* drawData = Frame();
 
     IDirect3DSurface9* backBuffer = nullptr;
     if (FAILED(device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &backBuffer)))
@@ -85,9 +88,6 @@ void Render(IDirect3DDevice9* device) {
     device->GetRenderTarget(0, &previous);
     D3DVIEWPORT9 viewport{};
     device->GetViewport(&viewport);
-
-    ImGui_ImplDX9_NewFrame();
-    ImDrawData* drawData = Frame();
     device->SetRenderTarget(0, backBuffer);
     // sRGB writes would encode the overlay's colors, already sRGB, a second time.
     DWORD srgbWrite = FALSE;
@@ -106,7 +106,7 @@ void Render(IDirect3DDevice9* device) {
 
 void OnPresent(IDirect3DDevice9* device) {
     if (g_presentDepth++ == 0 && ShouldRender(Backend::D3D9))
-        Render(device);
+        DrawOverlay(SwapchainKey(device), DeviceWindow(device), [&] { Render(device); });
 }
 
 void AfterPresent() {

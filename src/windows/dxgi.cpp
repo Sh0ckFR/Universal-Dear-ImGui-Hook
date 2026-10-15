@@ -47,13 +47,16 @@ void OnPresent(IDXGISwapChain* swapChain, UINT flags) {
         if (!g_presenter)
             return;
     }
-    if (ShouldRender(g_presenter->backend))
-        g_presenter->Render(swapChain);
+    if (ShouldRender(g_presenter->backend)) {
+        DXGI_SWAP_CHAIN_DESC desc{};
+        swapChain->GetDesc(&desc);
+        DrawOverlay(SwapchainKey(swapChain), desc.OutputWindow, [&] { g_presenter->Render(swapChain); });
+    }
 }
 
 HRESULT STDMETHODCALLTYPE HookPresent(IDXGISwapChain* swapChain, UINT syncInterval, UINT flags) {
     ScopedCall call;
-    OnPresent(swapChain, flags);
+    Guarded([&] { OnPresent(swapChain, flags); });
     if (g_presenter)
         ServiceTeardown(g_presenter->backend, Teardown);
     return g_present(swapChain, syncInterval, flags);
@@ -61,7 +64,7 @@ HRESULT STDMETHODCALLTYPE HookPresent(IDXGISwapChain* swapChain, UINT syncInterv
 
 HRESULT STDMETHODCALLTYPE HookPresent1(IDXGISwapChain1* swapChain, UINT syncInterval, UINT flags, const DXGI_PRESENT_PARAMETERS* params) {
     ScopedCall call;
-    OnPresent(swapChain, flags);
+    Guarded([&] { OnPresent(swapChain, flags); });
     if (g_presenter)
         ServiceTeardown(g_presenter->backend, Teardown);
     return g_present1(swapChain, syncInterval, flags, params);

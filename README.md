@@ -24,13 +24,16 @@ Windows games running under Wine or Proton use the Windows DLL.
 - [Tests](#tests)
 - [Contributing](#contributing)
 - [Limitations](#limitations)
+- [Support](#support)
 
 ## Features
 
 - **One library for every API**: the backend is picked from the first API that presents a frame. Inject before or after the game initializes its graphics.
 - **Menu input**: `INSERT`, or L3 + R3 on a controller, opens the menu; `F11` removes the overlay and unloads the DLL. The keys are [settings](#settings) in `example/config.cpp`. While the menu is open the game sees no keyboard, mouse or controller input (Windows), and an XInput controller navigates the menu.
+- **Several windows**: when the game presents to more than one window or swap chain, the overlay stays on one of them and follows the focus.
 - **Readable on any display**: the interface follows the DPI of the game window, or a fixed scale.
 - **Correct colors** on sRGB and floating-point back buffers.
+- **No crash from the overlay** (Windows, MSVC builds): an exception in the overlay, from a renderer backend or the menu code, removes it instead of taking the game down; the menu key brings it back.
 - **Images**: `uih::CreateTexture()` turns RGBA pixels into an image for `ImGui::Image()`, on every backend.
 - **No injector needed**: the DLL can be loaded as `dinput8.dll`, and the Linux library with `LD_PRELOAD`.
 - **No dependencies**: Dear ImGui, MinHook and the Vulkan headers are vendored; the C and C++ runtimes are linked statically.
@@ -52,6 +55,16 @@ sudo apt install cmake ninja-build g++ pkg-config libxcb1-dev
 cmake --preset linux && cmake --build --preset linux
 LD_PRELOAD=$PWD/build/linux/Universal-ImGui-Hook.so ./game
 ```
+
+To make the overlay your own, you only edit the example:
+
+| To change | Edit |
+| --- | --- |
+| The menu | `example/menu.cpp`, plain Dear ImGui code run every frame |
+| Hotkeys, controller buttons, graphics API, interface scale | `example/config.cpp` |
+| Fonts and style | a `config.setup` callback, run when the ImGui context is created, set next to `config.render` in `example/dllmain.cpp` (Windows) or `example/preload.cpp` (Linux) |
+
+The hook itself, in `src/`, needs no change.
 
 ## Usage
 
@@ -175,6 +188,10 @@ Everything is in `include/uih.h`, namespace `uih`.
 
 **Teardown.** `Stop()` asks the rendering thread to release the backend at its next present, or does it itself after one second, then removes the hooks once none of them is running. When the library cannot leave the process (Linux, `dinput8.dll` proxy, no `module`), the unload key runs `Stop()` on a thread that then polls the menu key and buttons, and starts the hook again with the menu open.
 
+**Several windows or swap chains.** The overlay is drawn on one swap chain, its target, by one thread at a time; the others present untouched. The target changes when it stops presenting for half a second, when the window of another swap chain has the focus and the target's does not, or when the game replaces its swap chain on the same window. A Vulkan surface created before the hook is matched to the window of the swap chain's size. EGL does not tell the window of a surface: there the overlay only moves when its target stops presenting.
+
+**Faults.** On Windows, what the overlay runs in the game's threads (frames, teardown, window messages) is protected by structured exception handling. An exception there, such as an access violation in the `render` callback, removes the overlay from another thread, as the unload key does without a `module`: the game keeps running, and the menu key or buttons bring the overlay back. The frame runs before the backends take a reference to the back buffer, so a fault leaks none.
+
 **Resolution changes** are followed on every API: D3D9 `Reset`/`ResetEx`, DXGI `ResizeBuffers`, a new Vulkan swap chain, or a new size of the OpenGL window; the overlay takes the new size on the next frame.
 
 ## Building
@@ -225,6 +242,7 @@ It only needs `libxcb` and glibc at run time, but a glibc at least as recent as 
 | `UIH_BUILD_EXAMPLE` | `ON` at top level | The example DLL or shared object |
 | `UIH_BUILD_TESTS` | `OFF` | `uih_host` and the CTest suite |
 | `UIH_STATIC_RUNTIME` | `ON` at top level | Static C and C++ runtimes |
+| `UIH_SANITIZE` | `OFF` | Linux with GCC: AddressSanitizer and UndefinedBehaviorSanitizer in every target, for the tests |
 
 **Minimum versions**: CMake 3.21, Visual Studio 2022, mingw-w64 11 with GCC 13, GCC 13 or Clang 18 on Linux; Windows 10 at run time. The mingw-w64 headers of Ubuntu 22.04 are too old for D3D12.
 
@@ -255,6 +273,8 @@ Without a GPU, as on the CI runners, Direct3D uses WARP, and Mesa's software dri
 | `--fullscreen` | 800x600 exclusive fullscreen (D3D9, DXGI) or display mode change with a borderless window (Vulkan, OpenGL), then back; the window must cover the display and the overlay follow it. Skipped unless `UIH_TEST_FULLSCREEN=1`, set by the CI |
 | `--reload` | The overlay is started a second time: `Start()` after `Stop()`, or with `--dll` the DLL injected again, or, for a DLL named `dinput8.dll`, brought back by `INSERT` after `F11` |
 | `--remove` | `F11` removes the overlay and `INSERT` brings it back, twice, without a module to free |
+| `--second-window` | A second window with its own device presents too: the overlay must stay on one window, follow the focus, and come back when the second window stops presenting |
+| `--fault access\|exception` | The render callback writes to a null pointer or throws: the overlay must be removed while the host keeps rendering, then start again (MSVC) |
 | `--input raw\|directinput` | What the game reads while the menu is open |
 | `--gamepad <fake xinput1_4.dll>` | Controller toggling the menu and hidden from the game while it is open |
 | `--dll <path>` | Loads the real DLL and drives it with `INSERT` and `F11` |
@@ -262,7 +282,7 @@ Without a GPU, as on the CI runners, Direct3D uses WARP, and Mesa's software dri
 | `--proxy <path>` | Loads the DLL as `dinput8.dll` |
 | `--preview <path>` | Not a test: loads the DLL, opens its menu and renders until the window is closed, to look at a menu without a game |
 
-On Linux, `uih_host` does not link the hook: each test preloads the `.so`, opens the menu, checks the pixels and removes the overlay, through GLX, EGL, `dlsym()` lookups and Vulkan, with `--resize` and `--reload` variants. It needs `libx11-dev libxtst-dev libgl-dev libegl-dev`; without a display, run `xvfb-run -a ctest --test-dir build/linux`. `tests/ddnet.sh` runs the same scenario on the game [DDNet](https://ddnet.org/).
+On Linux, `uih_host` does not link the hook: each test preloads the `.so`, opens the menu, checks the pixels and removes the overlay, through GLX, EGL, `dlsym()` lookups and Vulkan, with `--resize`, `--reload` and `--second-window` variants. It needs `libx11-dev libxtst-dev libgl-dev libegl-dev`; without a display, run `xvfb-run -a ctest --test-dir build/linux`. `tests/ddnet.sh` runs the same scenario on the game [DDNet](https://ddnet.org/). With `-DUIH_SANITIZE=ON`, the preload tests load the sanitizer runtime before the library, and any memory error or undefined behavior in the hook fails them.
 
 The [CI](.github/workflows/build.yml) runs on every push and pull request:
 
@@ -273,6 +293,7 @@ The [CI](.github/workflows/build.yml) runs on every push and pull request:
 | Visual Studio solution x64, x86 | The `.sln` built with MSBuild, same tests |
 | MinGW-w64 on Ubuntu and macOS | Cross-compiled DLLs, proxy export |
 | Linux GCC, Clang x86_64, GCC aarch64 | The preload tests under Xvfb with llvmpipe and lavapipe, including resizes and the overlay brought back after `F11`, then the Vulkan ones under the validation layer |
+| Linux sanitizers | The preload tests with the library built with AddressSanitizer and UndefinedBehaviorSanitizer |
 | Linux portable x86_64, aarch64 | The released libraries, built and tested against glibc 2.28 |
 | DDNet OpenGL, Vulkan | The released library in a real game |
 | FetchContent consumer | The repository as a CMake dependency |
@@ -304,6 +325,7 @@ Pushing a `v*` tag publishes the libraries as a release.
 - HDR10 swap chains (PQ color space) show the overlay with wrong colors.
 - A Vulkan swap chain created before the hook has no overlay until the game recreates it: its presents report `VK_SUBOPTIMAL_KHR`, which games answer by recreating it.
 - Native ARM64 Windows games are not supported: MinHook only handles x86 and x64.
+- Only Windows builds made with MSVC survive an exception in the overlay: MinGW-w64 has no structured exception handling, and Linux builds are not protected either.
 
 ## Built With
 
@@ -323,7 +345,7 @@ Pushing a `v*` tag publishes the libraries as a release.
 
 ## Support
 
-This project is free and MIT-licensed. Building it from scratch represents roughly 33 days of senior C++ work, about €22,000 at French freelance rates. If it saved you time, consider [sponsoring](https://github.com/sponsors/Sh0ckFR) or starring the repository.
+This project is free and MIT-licensed. Building it from scratch represents roughly 57 days of senior C++ work, about €37,000 at French freelance rates: six graphics backends on two operating systems, input blocking, crash protection, and about 80 test scenarios run on every commit. If it saved you time, consider [sponsoring](https://github.com/sponsors/Sh0ckFR) or starring the repository.
 
 ## License
 
