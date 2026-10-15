@@ -136,10 +136,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     WNDPROC original = g_originalProc;
     bool unicode = g_unicode;
     if (ImGui::GetCurrentContext() && hwnd == g_window) {
-        {
+        Guarded([&] {
             OwnCalls own;
             ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam);
-        }
+        });
         if (IsMenuOpen() && IsInputMessage(msg)) {
             // The system frees raw input data in DefWindowProc.
             if (msg == WM_INPUT)

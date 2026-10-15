@@ -78,6 +78,10 @@ void Render(IDirect3DDevice9* device) {
     if (device != g_device)
         return;
 
+    // Before any reference to the back buffer, which an exception in the frame would leak.
+    ImGui_ImplDX9_NewFrame();
+    ImDrawData* drawData = Frame();
+
     IDirect3DSurface9* backBuffer = nullptr;
     if (FAILED(device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &backBuffer)))
         return;
@@ -85,9 +89,6 @@ void Render(IDirect3DDevice9* device) {
     device->GetRenderTarget(0, &previous);
     D3DVIEWPORT9 viewport{};
     device->GetViewport(&viewport);
-
-    ImGui_ImplDX9_NewFrame();
-    ImDrawData* drawData = Frame();
     device->SetRenderTarget(0, backBuffer);
     // sRGB writes would encode the overlay's colors, already sRGB, a second time.
     DWORD srgbWrite = FALSE;
@@ -106,7 +107,7 @@ void Render(IDirect3DDevice9* device) {
 
 void OnPresent(IDirect3DDevice9* device) {
     if (g_presentDepth++ == 0 && ShouldRender(Backend::D3D9))
-        Render(device);
+        Guarded([&] { Render(device); });
 }
 
 void AfterPresent() {

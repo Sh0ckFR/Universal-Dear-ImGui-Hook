@@ -730,7 +730,7 @@ VkResult PresentFrame(size_t icd, VkQueue queue, const VkPresentInfoKHR* info) {
         }
 #endif
         if (device != VK_NULL_HANDLE && FormatKnown(swapchain)) {
-            forward = Render(queue, device, info, patched);
+            Guarded([&] { forward = Render(queue, device, info, patched); });
         } else if (device != VK_NULL_HANDLE) {
             static VkSwapchainKHR reported = VK_NULL_HANDLE;
             if (reported != swapchain)

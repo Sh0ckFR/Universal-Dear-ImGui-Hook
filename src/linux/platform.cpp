@@ -68,6 +68,11 @@ void Unload() {
 
 bool MenuInputDown(const Config& config) { return config.menuKey && input::KeyDownInApplication(config.menuKey); }
 
+bool RunGuarded(void (*work)(void*), void* context) {
+    work(context);
+    return true;
+}
+
 } // namespace platform
 
 } // namespace uih::detail

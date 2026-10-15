@@ -70,13 +70,13 @@ ID3D10RenderTargetView* CreateTarget(bool& linear) {
 void Render(IDXGISwapChain* swapChain) {
     if (swapChain != g_swapChain && !Init(swapChain))
         return;
+    // Before any reference to the back buffer, which an exception in the frame would leak.
+    ImGui_ImplDX10_NewFrame();
+    ImDrawData* drawData = Frame();
     bool linear = false;
     ID3D10RenderTargetView* target = CreateTarget(linear);
     if (!target)
         return;
-
-    ImGui_ImplDX10_NewFrame();
-    ImDrawData* drawData = Frame();
     if (linear)
         LinearizeColors(drawData);
 

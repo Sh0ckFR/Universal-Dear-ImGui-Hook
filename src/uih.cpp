@@ -48,6 +48,8 @@ bool g_menuButtonsDown = false;
 bool g_menuKeyDown = false;
 // Cleared by Start() and Stop() to end a wait for the menu input.
 std::atomic<bool> g_waitingForMenuInput{false};
+// Set when the overlay raised an exception, until the next Start().
+std::atomic<bool> g_faulted{false};
 bool g_unloadKeyDown = false;
 
 bool KeyPressed(int key, bool& wasDown, bool focused) {
@@ -176,7 +178,7 @@ bool WantBackend(Backend backend) {
 }
 
 bool ShouldRender(Backend backend) {
-    if (g_state != State::Running || !WantBackend(backend))
+    if (g_state != State::Running || g_faulted || !WantBackend(backend))
         return false;
     Backend active = g_activeBackend;
     return active == Backend::None || active == backend;
@@ -194,7 +196,7 @@ bool ClaimBackend(Backend backend) {
 void ServiceTeardown(Backend backend, void (*teardown)()) {
     if (g_activeBackend != backend || !g_teardownPending.exchange(false))
         return;
-    teardown();
+    Guarded([&] { teardown(); });
     {
         std::lock_guard<std::mutex> lock(g_teardownMutex);
         g_teardownDone = true;
@@ -270,6 +272,15 @@ void StopUntilMenuInput() {
     SetMenuOpen(true);
 }
 
+void OnFault(unsigned long code) {
+    t_inRenderCallback = false;
+    Log("Exception 0x%08lX in the overlay", code);
+    if (g_faulted.exchange(true) || g_state != State::Running)
+        return;
+    // Stop() waits for the hooks to return.
+    std::thread(StopUntilMenuInput).detach();
+}
+
 ImDrawData* Frame() {
     UpdateTextures();
     platform::NewFrame();
@@ -324,6 +335,7 @@ void Start(const Config& config) {
     g_activeBackend = Backend::None;
     g_menuOpen = false;
     g_teardownPending = false;
+    g_faulted = false;
     g_state = State::Running;
     if (!platform::Start())
         g_state = State::Stopped;

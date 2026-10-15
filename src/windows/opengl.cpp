@@ -67,7 +67,7 @@ BOOL WINAPI HookSwapBuffers(HDC hdc) {
     ScopedCall call;
     ForeignPresentScope presentScope;
     if (ShouldRender(Backend::OpenGL))
-        Render(hdc);
+        Guarded([&] { Render(hdc); });
     ServiceTeardown(Backend::OpenGL, Teardown);
     return g_swapBuffers(hdc);
 }

@@ -59,6 +59,8 @@ struct Options {
     bool fullscreen = false;
     // Removes the overlay with the unload key and brings it back with the menu key.
     bool remove = false;
+    // "access" or "exception": the render callback faults, as a bug in a menu would.
+    std::string fault;
 };
 
 // Display mode of the fullscreen scenario.

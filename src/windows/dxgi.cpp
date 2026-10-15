@@ -53,7 +53,7 @@ void OnPresent(IDXGISwapChain* swapChain, UINT flags) {
 
 HRESULT STDMETHODCALLTYPE HookPresent(IDXGISwapChain* swapChain, UINT syncInterval, UINT flags) {
     ScopedCall call;
-    OnPresent(swapChain, flags);
+    Guarded([&] { OnPresent(swapChain, flags); });
     if (g_presenter)
         ServiceTeardown(g_presenter->backend, Teardown);
     return g_present(swapChain, syncInterval, flags);
@@ -61,7 +61,7 @@ HRESULT STDMETHODCALLTYPE HookPresent(IDXGISwapChain* swapChain, UINT syncInterv
 
 HRESULT STDMETHODCALLTYPE HookPresent1(IDXGISwapChain1* swapChain, UINT syncInterval, UINT flags, const DXGI_PRESENT_PARAMETERS* params) {
     ScopedCall call;
-    OnPresent(swapChain, flags);
+    Guarded([&] { OnPresent(swapChain, flags); });
     if (g_presenter)
         ServiceTeardown(g_presenter->backend, Teardown);
     return g_present1(swapChain, syncInterval, flags, params);

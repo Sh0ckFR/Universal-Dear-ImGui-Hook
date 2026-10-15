@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <type_traits>
 
 #include "imgui.h"
 
@@ -77,6 +78,8 @@ void UnbindWindow();
 void StopUntilMenuInput();
 // Destroys the ImGui context, after the renderer backend released its textures.
 void DestroyContext();
+// Called on the thread where work run by Guarded() raised an exception.
+void OnFault(unsigned long code);
 
 // Implemented once per platform -------------------------------------------
 
@@ -93,6 +96,8 @@ void Unload();
 // While the hook is stopped: true when the menu key or buttons of `config`
 // are held and the application has the focus.
 bool MenuInputDown(const Config& config);
+// Runs `work`; false when it raised an exception, which OnFault() handled.
+bool RunGuarded(void (*work)(void*), void* context);
 } // namespace platform
 
 namespace input {
@@ -104,6 +109,15 @@ void OnMenuToggled(bool open);
 // Best-effort lookup of the main window of this process.
 NativeWindow FindProcessWindow();
 } // namespace input
+
+// Runs work of the overlay on a thread of the application. On Windows with
+// MSVC, an exception in it, from a renderer backend or the render callback,
+// removes the overlay instead of crashing the application, and the menu key
+// or buttons bring it back. False when it faulted.
+template <typename Work>
+bool Guarded(Work&& work) {
+    return platform::RunGuarded([](void* context) { (*static_cast<std::remove_reference_t<Work>*>(context))(); }, &work);
+}
 
 } // namespace uih::detail
 
