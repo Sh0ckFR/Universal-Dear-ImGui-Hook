@@ -70,6 +70,35 @@ struct D3D9Host : Host {
         return SUCCEEDED(hr) && CreateTargets();
     }
 
+    UINT FullscreenRefreshRate() {
+        IDirect3D9* api = ex ? d3dEx : d3d;
+        UINT best = 0;
+        D3DDISPLAYMODE mode{};
+        for (UINT i = 0; i < api->GetAdapterModeCount(D3DADAPTER_DEFAULT, D3DFMT_X8R8G8B8); ++i)
+            if (SUCCEEDED(api->EnumAdapterModes(D3DADAPTER_DEFAULT, D3DFMT_X8R8G8B8, i, &mode)) &&
+                mode.Width == static_cast<UINT>(kFullscreen[0]) && mode.Height == static_cast<UINT>(kFullscreen[1]))
+                best = std::max(best, mode.RefreshRate);
+        return best;
+    }
+
+    bool Fullscreen(bool on) override {
+        UINT refreshRate = on ? FullscreenRefreshRate() : 0;
+        if (on && !refreshRate)
+            return false;
+        Release(offscreen);
+        Release(texture);
+        Release(backBuffer);
+        present.Windowed = !on;
+        present.BackBufferWidth = on ? kFullscreen[0] : kWidth;
+        present.BackBufferHeight = on ? kFullscreen[1] : kHeight;
+        present.BackBufferFormat = on ? D3DFMT_X8R8G8B8 : D3DFMT_UNKNOWN;
+        present.FullScreen_RefreshRateInHz = refreshRate;
+        D3DDISPLAYMODEEX mode{sizeof(mode), present.BackBufferWidth, present.BackBufferHeight, refreshRate, D3DFMT_X8R8G8B8,
+                              D3DSCANLINEORDERING_PROGRESSIVE};
+        HRESULT hr = ex ? deviceEx->ResetEx(&present, on ? &mode : nullptr) : device->Reset(&present);
+        return SUCCEEDED(hr) && CreateTargets();
+    }
+
     bool Init(HWND window, const Options& options) override {
         if (options.format == "float")
             return false;
@@ -144,6 +173,18 @@ DXGI_SWAP_CHAIN_DESC SwapChainDesc(HWND window, const Options& options) {
     return desc;
 }
 
+// Exclusive fullscreen through DXGI, as D3D10, 11 and 12 games do.
+bool DxgiFullscreen(IDXGISwapChain* swapChain, bool on) {
+    if (on) {
+        DXGI_MODE_DESC mode{};
+        mode.Width = kFullscreen[0];
+        mode.Height = kFullscreen[1];
+        if (FAILED(swapChain->ResizeTarget(&mode)))
+            return false;
+    }
+    return SUCCEEDED(swapChain->SetFullscreenState(on, nullptr));
+}
+
 struct D3D10Host : Host {
     ID3D10Device* device = nullptr;
     IDXGISwapChain* swapChain = nullptr;
@@ -162,6 +203,8 @@ struct D3D10Host : Host {
         Release(target);
         return SUCCEEDED(swapChain->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0)) && CreateTarget();
     }
+
+    bool Fullscreen(bool on) override { return DxgiFullscreen(swapChain, on) && Resize(0, 0); }
 
     bool Init(HWND window, const Options& options) override {
         DXGI_SWAP_CHAIN_DESC desc = SwapChainDesc(window, options);
@@ -204,6 +247,8 @@ struct D3D11Host : Host {
         Release(target);
         return SUCCEEDED(swapChain->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0)) && CreateTarget();
     }
+
+    bool Fullscreen(bool on) override { return DxgiFullscreen(swapChain, on) && Resize(0, 0); }
 
     bool Init(HWND window, const Options& options) override {
         DXGI_SWAP_CHAIN_DESC desc = SwapChainDesc(window, options);
@@ -336,6 +381,8 @@ struct D3D12Host : Host {
         CreateTargets();
         return true;
     }
+
+    bool Fullscreen(bool on) override { return DxgiFullscreen(swapChain, on) && Resize(0, 0); }
 
     void Frame() override {
         UINT index = swapChain->GetCurrentBackBufferIndex();
@@ -601,6 +648,27 @@ constexpr ULONGLONG kDetectionTimeoutMs = 30000;
 
 bool WaitingForBackend(ULONGLONG start) {
     return uih::ActiveBackend() == uih::Backend::None && GetTickCount64() - start < kDetectionTimeoutMs;
+}
+
+// Without an exclusive mode, games change the display mode and cover the
+// screen with a borderless window.
+bool CoverDisplay(HWND window, bool on) {
+    if (!on) {
+        ChangeDisplaySettingsW(nullptr, 0);
+        SetWindowLongPtrW(window, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
+        SetWindowPos(window, nullptr, 100, 100, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+        return true;
+    }
+    DEVMODEW mode{};
+    mode.dmSize = sizeof(mode);
+    mode.dmPelsWidth = kFullscreen[0];
+    mode.dmPelsHeight = kFullscreen[1];
+    mode.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT;
+    if (ChangeDisplaySettingsW(&mode, CDS_FULLSCREEN) != DISP_CHANGE_SUCCESSFUL)
+        return false;
+    SetWindowLongPtrW(window, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+    SetWindowPos(window, HWND_TOP, 0, 0, kFullscreen[0], kFullscreen[1], SWP_FRAMECHANGED);
+    return true;
 }
 
 void ResizeWindow(HWND window, int width, int height) {
@@ -1057,6 +1125,7 @@ int main(int argc, char** argv) {
         else if (arg == "--unload-key" && i + 1 < argc) options.unloadKey = static_cast<int>(strtol(argv[++i], nullptr, 0));
         else if (arg == "--resize") options.resize = true;
         else if (arg == "--reload") options.reload = true;
+        else if (arg == "--fullscreen") options.fullscreen = true;
         else if (arg == "--remove") options.remove = true;
         else if (arg == "--warp") options.warp = true;
         else if (arg == "--capture") options.capture = true;
@@ -1071,7 +1140,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--fullscreen] [--reload] [--remove] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -1091,6 +1160,9 @@ int main(int argc, char** argv) {
 
     if (options.injectAt == 0 && options.dll.empty())
         StartHook(options);
+
+    if (options.fullscreen && !getenv("UIH_TEST_FULLSCREEN"))
+        return Skip("changes the display mode: set UIH_TEST_FULLSCREEN=1 to run it");
 
     std::unique_ptr<Host> host = CreateHost(options.api);
     if (!host->Init(window, options)) {
@@ -1195,6 +1267,39 @@ int main(int argc, char** argv) {
                            ImGui::GetIO().MetricsRenderVertices);
                     if (display.x != client.right || display.y != client.bottom || ImGui::GetIO().MetricsRenderVertices == 0) {
                         result = Fail("the overlay did not follow the new size");
+                        break;
+                    }
+                }
+                if (result)
+                    break;
+            }
+            if (options.fullscreen) {
+                const bool exclusive = options.api != "vulkan" && options.api != "opengl";
+                for (bool on : {true, false}) {
+                    bool switched = exclusive ? host->Fullscreen(on) : CoverDisplay(window, on) && host->Resize(kFullscreen[0], kFullscreen[1]);
+                    if (!on) {
+                        ResizeWindow(window, kWidth, kHeight);
+                        switched = host->Resize(kWidth, kHeight) && switched;
+                    }
+                    if (!switched) {
+                        result = Fail(on ? "the host could not switch to fullscreen" : "the host could not leave fullscreen");
+                        break;
+                    }
+                    for (int i = 0; i < 60; ++i) {
+                        PumpMessages();
+                        host->Frame();
+                    }
+                    RECT client{};
+                    GetClientRect(window, &client);
+                    ImVec2 display = ImGui::GetIO().DisplaySize;
+                    printf("%s: window %ldx%ld, overlay %.0fx%.0f, %d vertices\n", on ? "fullscreen" : "windowed", client.right, client.bottom,
+                           display.x, display.y, ImGui::GetIO().MetricsRenderVertices);
+                    if (on && (client.right != kFullscreen[0] || client.bottom != kFullscreen[1])) {
+                        result = Fail("the display did not switch to the fullscreen mode");
+                        break;
+                    }
+                    if (display.x != client.right || display.y != client.bottom || ImGui::GetIO().MetricsRenderVertices == 0) {
+                        result = Fail("the overlay did not follow the display mode");
                         break;
                     }
                 }

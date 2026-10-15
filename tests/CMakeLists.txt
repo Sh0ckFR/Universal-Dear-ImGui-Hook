@@ -32,6 +32,8 @@ if(WIN32)
     foreach(api d3d9 d3d9ex d3d10 d3d11 d3d12 vulkan opengl)
         uih_add_host_test(${api}_resize --api ${api} --resize --capture)
         uih_add_host_test(${api}_reload --api ${api} --reload --capture)
+        # Skipped unless UIH_TEST_FULLSCREEN is set: it changes the display mode.
+        uih_add_host_test(${api}_fullscreen --api ${api} --fullscreen)
     endforeach()
     uih_add_host_test(remove --api d3d11 --remove)
     uih_add_host_test(input_raw --api d3d11 --input raw)

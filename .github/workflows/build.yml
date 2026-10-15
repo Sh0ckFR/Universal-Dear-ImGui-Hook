@@ -49,6 +49,8 @@ jobs:
       VULKAN_RUNTIME: 1.4.363.0
       # Mesa's llvmpipe for the suite; its D3D12-based driver is tested on its own below.
       GALLIUM_DRIVER: llvmpipe
+      # The runner's display can change modes: the fullscreen scenarios run.
+      UIH_TEST_FULLSCREEN: 1
     steps:
       - uses: actions/checkout@v4
       - name: Configure
