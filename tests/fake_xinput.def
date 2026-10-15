@@ -1,0 +1,5 @@
+LIBRARY xinput1_4
+EXPORTS
+    XInputGetState=FakeXInputGetState
+    XInputGetCapabilities=FakeXInputGetCapabilities
+    FakeXInputSetButtons

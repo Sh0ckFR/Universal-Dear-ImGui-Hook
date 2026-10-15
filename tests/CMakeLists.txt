@@ -8,6 +8,15 @@ if(WIN32)
     target_link_libraries(uih_host PRIVATE uih d3d9 d3d10 d3d11 d3d12 dxgi opengl32 dinput8 dxguid)
     target_compile_definitions(uih_host PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 
+    # A controller the tests drive, in its own directory so that only the
+    # gamepad scenario loads it in place of the system xinput1_4.dll.
+    add_library(uih_fake_xinput SHARED fake_xinput.cpp fake_xinput.def)
+    set_target_properties(uih_fake_xinput PROPERTIES OUTPUT_NAME xinput1_4 PREFIX ""
+                          RUNTIME_OUTPUT_DIRECTORY $<1:${CMAKE_CURRENT_BINARY_DIR}/fake_xinput>)
+    if(MINGW)
+        target_link_options(uih_fake_xinput PRIVATE -Wl,--enable-stdcall-fixup)
+    endif()
+
     uih_add_host_test(d3d9 --api d3d9)
     uih_add_host_test(d3d9ex --api d3d9ex)
     uih_add_host_test(d3d10 --api d3d10)
@@ -22,6 +31,7 @@ if(WIN32)
     uih_add_host_test(opengl --api opengl)
     uih_add_host_test(input_raw --api d3d11 --input raw)
     uih_add_host_test(input_directinput --api d3d11 --input directinput)
+    uih_add_host_test(gamepad --api d3d11 --gamepad $<TARGET_FILE:uih_fake_xinput>)
 
     # Back buffers storing linear values: the overlay colors must come out unchanged.
     uih_add_host_test(d3d9_srgb --api d3d9 --format srgb --capture)

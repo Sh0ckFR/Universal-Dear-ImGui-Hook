@@ -13,6 +13,7 @@
 #include <GL/gl.h>
 #define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h>
+#include <xinput.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -706,6 +707,88 @@ int RunInputMode(HWND window, Host& host, bool useDirectInput) {
     return result;
 }
 
+// Controller ---------------------------------------------------------------
+
+using XInputGetStateFn = DWORD(WINAPI*)(DWORD, XINPUT_STATE*);
+using FakeXInputSetButtonsFn = void(WINAPI*)(WORD);
+
+// Drives a fake xinput1_4.dll, loaded before the hook so the game and the
+// Win32 backend both use it: the menu buttons toggle the menu, and the game
+// reads an idle controller while the menu is open.
+int RunGamepadMode(HWND window, Host& host, const std::string& fake) {
+    std::wstring path(fake.begin(), fake.end());
+    HMODULE xinput = LoadLibraryW(path.c_str());
+    auto setButtons = reinterpret_cast<FakeXInputSetButtonsFn>(reinterpret_cast<void*>(GetProcAddress(xinput, "FakeXInputSetButtons")));
+    auto getState = reinterpret_cast<XInputGetStateFn>(reinterpret_cast<void*>(GetProcAddress(xinput, "XInputGetState")));
+    if (!xinput || !setButtons || !getState)
+        return Fail("the fake XInput library did not load");
+
+    auto run = [&](int frames) {
+        for (int frame = 0; frame < frames; ++frame) {
+            PumpMessages();
+            host.Frame();
+        }
+    };
+    auto gameButtons = [&] {
+        XINPUT_STATE state{};
+        getState(0, &state);
+        return state.Gamepad.wButtons;
+    };
+    auto press = [&](WORD buttons) {
+        setButtons(buttons);
+        run(5);
+        setButtons(0);
+        run(5);
+    };
+
+    StartHook(Options{});
+    for (int frame = 0; frame < 600 && uih::ActiveBackend() == uih::Backend::None; ++frame)
+        run(1);
+    SetForegroundWindow(window);
+    run(30);
+
+    int result = 0;
+    const WORD menuButtons = XINPUT_GAMEPAD_LEFT_THUMB | XINPUT_GAMEPAD_RIGHT_THUMB;
+    if (uih::ActiveBackend() == uih::Backend::None) {
+        result = Fail("backend was not detected");
+    } else if (GetForegroundWindow() != window) {
+        result = Skip("the host window does not have the focus");
+    } else {
+        setButtons(XINPUT_GAMEPAD_A);
+        run(5);
+        bool readClosed = gameButtons() == XINPUT_GAMEPAD_A;
+        setButtons(0);
+        run(5);
+        press(menuButtons);
+        bool opened = uih::IsMenuOpen();
+        setButtons(XINPUT_GAMEPAD_A);
+        run(5);
+        bool readOpen = gameButtons() != 0;
+        bool navigated = ImGui::IsKeyDown(ImGuiKey_GamepadFaceDown);
+        setButtons(0);
+        run(5);
+        press(menuButtons);
+        printf("game reads A with the menu closed: %d, menu opened: %d, game reads A with the menu open: %d, menu reads A: %d, menu closed: %d\n",
+               readClosed, opened, readOpen, navigated, !uih::IsMenuOpen());
+        if (!readClosed)
+            result = Fail("the game does not read the controller while the menu is closed");
+        else if (!opened)
+            result = Fail("the menu buttons did not open the menu");
+        else if (readOpen)
+            result = Fail("the game reads the controller while the menu is open");
+        else if (!navigated)
+            result = Fail("the menu does not read the controller");
+        else if (uih::IsMenuOpen())
+            result = Fail("the menu buttons did not close the menu");
+    }
+
+    uih::Stop();
+    FreeLibrary(xinput);
+    if (result == 0)
+        printf("PASS: gamepad\n");
+    return result;
+}
+
 // Calls the export a target imports when the DLL is renamed to dinput8.dll.
 int RunProxyMode(const Options& options) {
     using DirectInput8CreateFn = HRESULT(WINAPI*)(HINSTANCE, DWORD, REFIID, void**, void*);
@@ -749,12 +832,13 @@ int main(int argc, char** argv) {
         else if (arg == "--format" && i + 1 < argc) options.format = argv[++i];
         else if (arg == "--settle" && i + 1 < argc) options.settleMs = atoi(argv[++i]);
         else if (arg == "--input" && i + 1 < argc) options.input = argv[++i];
+        else if (arg == "--gamepad" && i + 1 < argc) options.gamepad = argv[++i];
     }
     if (!options.proxy.empty())
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--dll path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -778,6 +862,12 @@ int main(int argc, char** argv) {
         printf("SKIP: %s is not available on this machine\n", options.api.c_str());
         uih::Stop();
         return kSkip;
+    }
+    if (!options.gamepad.empty()) {
+        int result = RunGamepadMode(window, *host, options.gamepad);
+        host.reset();
+        DestroyWindow(window);
+        return result;
     }
     if (!options.input.empty()) {
         int result = RunInputMode(window, *host, options.input == "directinput");

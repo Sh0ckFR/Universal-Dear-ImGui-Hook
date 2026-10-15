@@ -28,7 +28,7 @@ Windows games running under Wine or Proton use the Windows DLL.
 ## Features
 
 - **One library for every API**: the backend is picked from the first API that presents a frame. Inject before or after the game initializes its graphics.
-- **Menu input**: `INSERT` opens the menu, `F11` removes the overlay and unloads the DLL. While the menu is open the game sees no keyboard, mouse or controller input (Windows), and an XInput controller navigates the menu.
+- **Menu input**: `INSERT`, or L3 + R3 on a controller, opens the menu; `F11` removes the overlay and unloads the DLL. While the menu is open the game sees no keyboard, mouse or controller input (Windows), and an XInput controller navigates the menu.
 - **Readable on any display**: the interface follows the DPI of the game window, or a fixed scale.
 - **Correct colors** on sRGB and floating-point back buffers.
 - **Images**: `uih::CreateTexture()` turns RGBA pixels into an image for `ImGui::Image()`, on every backend.
@@ -123,6 +123,7 @@ Everything is in `include/uih.h`, namespace `uih`.
 | `setup` | `nullptr` | Called when the ImGui context is created, again if the game switches devices or windows |
 | `backend` | `None` | Restricts the hook to one API; `None` takes the first that presents |
 | `menuKey`, `unloadKey` | `INSERT`, `F11` | Virtual-key codes on Windows, X11 keysyms on Linux |
+| `menuButtons` | `GamepadL3 \| GamepadR3` | Controller buttons held together to toggle the menu, `0` to disable; first XInput controller, Windows only |
 | `scale` | `0` | Interface size; `0` follows the DPI of the game window |
 | `module` | `nullptr` | Windows: module freed by `unloadKey`; `nullptr` disables unloading |
 | `debugLog` | `false` | `OutputDebugString` on Windows, stderr on Linux |
@@ -220,6 +221,7 @@ Some tests press real keys and move the mouse. They are skipped when the host wi
 | `--decoy-queue` | A second D3D12 device executes work every frame |
 | `--scale <s>`, `--warp` | Fixed interface scale; software rasterizer |
 | `--input raw\|directinput` | What the game reads while the menu is open |
+| `--gamepad <fake xinput1_4.dll>` | Controller toggling the menu and hidden from the game while it is open |
 | `--dll <path>` | Loads the real DLL and drives it with `INSERT` and `F11` |
 | `--proxy <path>` | Loads the DLL as `dinput8.dll` |
 
