@@ -50,14 +50,30 @@ struct D3D9Host : Host {
     IDirect3DSurface9* backBuffer = nullptr;
     IDirect3DTexture9* texture = nullptr;
     IDirect3DSurface9* offscreen = nullptr;
+    D3DPRESENT_PARAMETERS present{};
 
     explicit D3D9Host(bool useEx) : ex(useEx) {}
+
+    bool CreateTargets() {
+        return SUCCEEDED(device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &backBuffer)) &&
+               SUCCEEDED(device->CreateTexture(256, 256, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &texture, nullptr)) &&
+               SUCCEEDED(texture->GetSurfaceLevel(0, &offscreen));
+    }
+
+    bool Resize(int width, int height) override {
+        Release(offscreen);
+        Release(texture);
+        Release(backBuffer);
+        present.BackBufferWidth = width;
+        present.BackBufferHeight = height;
+        HRESULT hr = ex ? deviceEx->ResetEx(&present, nullptr) : device->Reset(&present);
+        return SUCCEEDED(hr) && CreateTargets();
+    }
 
     bool Init(HWND window, const Options& options) override {
         if (options.format == "float")
             return false;
         srgb = options.format == "srgb";
-        D3DPRESENT_PARAMETERS present{};
         present.Windowed = TRUE;
         present.SwapEffect = D3DSWAPEFFECT_DISCARD;
         present.hDeviceWindow = window;
@@ -72,9 +88,7 @@ struct D3D9Host : Host {
             if (!d3d || FAILED(d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, window, D3DCREATE_HARDWARE_VERTEXPROCESSING, &present, &device)))
                 return false;
         }
-        return SUCCEEDED(device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &backBuffer)) &&
-               SUCCEEDED(device->CreateTexture(256, 256, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &texture, nullptr)) &&
-               SUCCEEDED(texture->GetSurfaceLevel(0, &offscreen));
+        return CreateTargets();
     }
 
     void Frame() override {
@@ -135,16 +149,26 @@ struct D3D10Host : Host {
     IDXGISwapChain* swapChain = nullptr;
     ID3D10RenderTargetView* target = nullptr;
 
+    bool CreateTarget() {
+        ID3D10Texture2D* buffer = nullptr;
+        if (FAILED(swapChain->GetBuffer(0, IID_PPV_ARGS(&buffer))))
+            return false;
+        HRESULT hr = device->CreateRenderTargetView(buffer, nullptr, &target);
+        buffer->Release();
+        return SUCCEEDED(hr);
+    }
+
+    bool Resize(int width, int height) override {
+        Release(target);
+        return SUCCEEDED(swapChain->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0)) && CreateTarget();
+    }
+
     bool Init(HWND window, const Options& options) override {
         DXGI_SWAP_CHAIN_DESC desc = SwapChainDesc(window, options);
         D3D10_DRIVER_TYPE driver = options.warp ? D3D10_DRIVER_TYPE_WARP : D3D10_DRIVER_TYPE_HARDWARE;
         if (FAILED(D3D10CreateDeviceAndSwapChain(nullptr, driver, nullptr, 0, D3D10_SDK_VERSION, &desc, &swapChain, &device)))
             return false;
-        ID3D10Texture2D* buffer = nullptr;
-        swapChain->GetBuffer(0, IID_PPV_ARGS(&buffer));
-        HRESULT hr = device->CreateRenderTargetView(buffer, nullptr, &target);
-        buffer->Release();
-        return SUCCEEDED(hr);
+        return CreateTarget();
     }
 
     void Frame() override {
@@ -167,16 +191,26 @@ struct D3D11Host : Host {
     IDXGISwapChain* swapChain = nullptr;
     ID3D11RenderTargetView* target = nullptr;
 
+    bool CreateTarget() {
+        ID3D11Texture2D* buffer = nullptr;
+        if (FAILED(swapChain->GetBuffer(0, IID_PPV_ARGS(&buffer))))
+            return false;
+        HRESULT hr = device->CreateRenderTargetView(buffer, nullptr, &target);
+        buffer->Release();
+        return SUCCEEDED(hr);
+    }
+
+    bool Resize(int width, int height) override {
+        Release(target);
+        return SUCCEEDED(swapChain->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0)) && CreateTarget();
+    }
+
     bool Init(HWND window, const Options& options) override {
         DXGI_SWAP_CHAIN_DESC desc = SwapChainDesc(window, options);
         D3D_DRIVER_TYPE driver = options.warp ? D3D_DRIVER_TYPE_WARP : D3D_DRIVER_TYPE_HARDWARE;
         if (FAILED(D3D11CreateDeviceAndSwapChain(nullptr, driver, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &desc, &swapChain, &device, nullptr, &context)))
             return false;
-        ID3D11Texture2D* buffer = nullptr;
-        swapChain->GetBuffer(0, IID_PPV_ARGS(&buffer));
-        HRESULT hr = device->CreateRenderTargetView(buffer, nullptr, &target);
-        buffer->Release();
-        return SUCCEEDED(hr);
+        return CreateTarget();
     }
 
     void Frame() override {
@@ -273,6 +307,16 @@ struct D3D12Host : Host {
         heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
         heapDesc.NumDescriptors = kBuffers;
         device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&heap));
+        CreateTargets();
+        device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator));
+        device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, nullptr, IID_PPV_ARGS(&commandList));
+        commandList->Close();
+        device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence));
+        fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        return true;
+    }
+
+    void CreateTargets() {
         D3D12_CPU_DESCRIPTOR_HANDLE handle = heap->GetCPUDescriptorHandleForHeapStart();
         UINT increment = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
         for (UINT i = 0; i < kBuffers; ++i) {
@@ -281,11 +325,15 @@ struct D3D12Host : Host {
             targets[i] = handle;
             handle.ptr += increment;
         }
-        device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator));
-        device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, nullptr, IID_PPV_ARGS(&commandList));
-        commandList->Close();
-        device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence));
-        fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    }
+
+    bool Resize(int width, int height) override {
+        // Frame() waits for the GPU, so no buffer is in use here.
+        for (ID3D12Resource*& buffer : buffers)
+            Release(buffer);
+        if (FAILED(swapChain->ResizeBuffers(kBuffers, width, height, DXGI_FORMAT_UNKNOWN, 0)))
+            return false;
+        CreateTargets();
         return true;
     }
 
@@ -367,6 +415,11 @@ struct OpenGLHost : Host {
         if (options.format == "srgb")
             glEnable(kFramebufferSrgb);
         return version && version[0] >= '3';
+    }
+
+    bool Resize(int width, int height) override {
+        glViewport(0, 0, width, height);
+        return true;
     }
 
     void Frame() override {
@@ -550,6 +603,12 @@ bool WaitingForBackend(ULONGLONG start) {
     return uih::ActiveBackend() == uih::Backend::None && GetTickCount64() - start < kDetectionTimeoutMs;
 }
 
+void ResizeWindow(HWND window, int width, int height) {
+    RECT rect{0, 0, width, height};
+    AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
+    SetWindowPos(window, nullptr, 0, 0, rect.right - rect.left, rect.bottom - rect.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
 int Fail(const char* message) {
     printf("FAIL: %s\n", message);
     return 1;
@@ -584,51 +643,145 @@ bool PressKey(HWND window, int key) {
 }
 
 // Loads the example DLL like an injector would and drives it with its hotkeys:
-// INSERT opens the menu, F11 unloads the DLL. The DLL installs its hooks on
-// a thread of its own, so INSERT is pressed until the overlay shows up.
+// INSERT opens the menu, F11 removes the overlay. A DLL named dinput8.dll is
+// loaded the way a game loads a proxy: F11 only removes the overlay, and
+// INSERT brings it back. Otherwise F11 unloads the DLL, and --reload injects
+// it again.
 int RunDllMode(HWND window, Host& host, const Options& options) {
     const int menuKey = options.menuKey ? options.menuKey : VK_INSERT;
     const int unloadKey = options.unloadKey ? options.unloadKey : VK_F11;
+    const int visible = kWidth * kHeight / 100;
     std::wstring path(options.dll.begin(), options.dll.end());
     size_t separator = path.find_last_of(L"\\/");
     std::wstring name = separator == std::wstring::npos ? path : path.substr(separator + 1);
+    const bool proxy = _wcsicmp(name.c_str(), L"dinput8.dll") == 0;
     auto run = [&](int frames) {
         for (int frame = 0; frame < frames; ++frame) {
             PumpMessages();
             host.Frame();
         }
     };
+    auto overlayPixels = [&] { return CaptureWindow(window).overlayPixels; };
 
     run(options.injectAt);
-    if (!LoadLibraryW(path.c_str()))
-        return Fail("LoadLibrary failed");
-    BringToFront(window);
+    HMODULE module = nullptr;
+    for (int cycle = 0; cycle < (options.reload ? 2 : 1); ++cycle) {
+        if (cycle == 0 || !proxy) {
+            module = LoadLibraryW(path.c_str());
+            if (!module)
+                return Fail("LoadLibrary failed");
+        }
+        if (proxy && cycle == 0) {
+            // The game's first call makes the DLL pin itself.
+            using DirectInput8CreateFn = HRESULT(WINAPI*)(HINSTANCE, DWORD, REFIID, void**, void*);
+            auto create = reinterpret_cast<DirectInput8CreateFn>(reinterpret_cast<void*>(GetProcAddress(module, "DirectInput8Create")));
+            IUnknown* directInput = nullptr;
+            if (!create || FAILED(create(GetModuleHandleW(nullptr), DIRECTINPUT_VERSION, IID_IDirectInput8W, reinterpret_cast<void**>(&directInput), nullptr)))
+                return Fail("DirectInput8Create was not forwarded");
+            directInput->Release();
+        }
+        BringToFront(window);
 
-    int pixels = 0;
-    for (ULONGLONG start = GetTickCount64(); GetTickCount64() - start < kDetectionTimeoutMs;) {
-        if (!PressKey(window, menuKey))
-            return Skip("the host window does not have the focus");
+        // The hooks are installed on a thread of the DLL: INSERT is pressed
+        // again only when the overlay did not show up within a few seconds.
+        int pixels = 0;
+        for (ULONGLONG start = GetTickCount64(); pixels < visible && GetTickCount64() - start < kDetectionTimeoutMs;) {
+            if (!PressKey(window, menuKey))
+                return Skip("the host window does not have the focus");
+            run(5);
+            HoldKey(menuKey, false);
+            for (int wait = 0; wait < 12 && pixels < visible; ++wait) {
+                run(15);
+                pixels = overlayPixels();
+            }
+        }
+        printf("cycle %d: %d overlay pixels captured\n", cycle + 1, pixels);
+        if (pixels < visible)
+            return Fail("overlay is not visible on screen");
+
+        if (!PressKey(window, unloadKey))
+            return Skip("the host window lost the focus");
         run(5);
-        HoldKey(menuKey, false);
-        run(55);
-        pixels = CaptureWindow(window).overlayPixels;
-        if (pixels >= kWidth * kHeight / 100)
-            break;
+        HoldKey(unloadKey, false);
+        if (proxy) {
+            for (ULONGLONG start = GetTickCount64(); pixels >= visible && GetTickCount64() - start < 10000;) {
+                run(15);
+                pixels = overlayPixels();
+            }
+            printf("cycle %d: %d overlay pixels after the unload key\n", cycle + 1, pixels);
+            if (pixels >= visible)
+                return Fail("overlay is still visible after the unload key");
+            run(30);
+        } else {
+            for (ULONGLONG start = GetTickCount64(); GetModuleHandleW(name.c_str()) && GetTickCount64() - start < 10000;)
+                run(1);
+            if (GetModuleHandleW(name.c_str()))
+                return Fail("DLL did not unload");
+        }
     }
-    printf("%d overlay pixels captured\n", pixels);
-    if (pixels < kWidth * kHeight / 100)
-        return Fail("overlay is not visible on screen");
-
-    if (!PressKey(window, unloadKey))
-        return Skip("the host window lost the focus");
-    run(5);
-    HoldKey(unloadKey, false);
-    for (ULONGLONG start = GetTickCount64(); GetModuleHandleW(name.c_str()) && GetTickCount64() - start < 10000;)
-        run(1);
-    if (GetModuleHandleW(name.c_str()))
-        return Fail("DLL did not unload");
     printf("PASS: %s via %s\n", options.api.c_str(), options.dll.c_str());
     return 0;
+}
+
+// Uses the library in-process without a module to free: F11 removes the
+// overlay and INSERT brings it back, twice.
+int RunRemoveMode(HWND window, Host& host) {
+    const int visible = kWidth * kHeight / 100;
+    auto run = [&](int frames) {
+        for (int frame = 0; frame < frames; ++frame) {
+            PumpMessages();
+            host.Frame();
+        }
+    };
+    auto waitFor = [&](auto condition) {
+        for (ULONGLONG start = GetTickCount64(); !condition() && GetTickCount64() - start < kDetectionTimeoutMs;)
+            run(1);
+        return condition();
+    };
+    auto tap = [&](int key) {
+        if (!PressKey(window, key))
+            return false;
+        run(5);
+        HoldKey(key, false);
+        return true;
+    };
+
+    StartHook(Options{});
+    int result = 0;
+    if (!waitFor([] { return uih::ActiveBackend() != uih::Backend::None; }))
+        result = Fail("backend was not detected");
+    BringToFront(window);
+    run(30);
+    for (int cycle = 0; cycle < 2 && result == 0; ++cycle) {
+        if (!tap(VK_INSERT)) {
+            result = Skip("the host window does not have the focus");
+            break;
+        }
+        if (!waitFor([] { return uih::IsMenuOpen() && uih::ActiveBackend() != uih::Backend::None; })) {
+            result = Fail(cycle ? "the menu key did not bring the overlay back" : "the menu did not open");
+            break;
+        }
+        run(30);
+        int pixels = CaptureWindow(window).overlayPixels;
+        printf("cycle %d: %d overlay pixels with the menu open\n", cycle + 1, pixels);
+        if (pixels < visible) {
+            result = Fail("overlay is not visible on screen");
+            break;
+        }
+        if (!tap(VK_F11)) {
+            result = Skip("the host window lost the focus");
+            break;
+        }
+        if (!waitFor([] { return uih::ActiveBackend() == uih::Backend::None && !ImGui::GetCurrentContext(); })) {
+            result = Fail("the unload key did not remove the overlay");
+            break;
+        }
+        run(30);
+    }
+    uih::Stop();
+    if (result == 0)
+        printf("PASS: removal and return\n");
+    return result;
 }
 
 // Input the application reads while the menu is open ----------------------
@@ -902,6 +1055,9 @@ int main(int argc, char** argv) {
         else if (arg == "--scale" && i + 1 < argc) options.scale = static_cast<float>(atof(argv[++i]));
         else if (arg == "--menu-key" && i + 1 < argc) options.menuKey = static_cast<int>(strtol(argv[++i], nullptr, 0));
         else if (arg == "--unload-key" && i + 1 < argc) options.unloadKey = static_cast<int>(strtol(argv[++i], nullptr, 0));
+        else if (arg == "--resize") options.resize = true;
+        else if (arg == "--reload") options.reload = true;
+        else if (arg == "--remove") options.remove = true;
         else if (arg == "--warp") options.warp = true;
         else if (arg == "--capture") options.capture = true;
         else if (arg == "--device-proc-addr") options.deviceProcAddr = true;
@@ -915,7 +1071,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -942,6 +1098,12 @@ int main(int argc, char** argv) {
         uih::Stop();
         return kSkip;
     }
+    if (options.remove) {
+        int result = RunRemoveMode(window, *host);
+        host.reset();
+        DestroyWindow(window);
+        return result;
+    }
     if (!options.gamepad.empty()) {
         int result = RunGamepadMode(window, *host, options.gamepad);
         host.reset();
@@ -966,6 +1128,7 @@ int main(int argc, char** argv) {
     int activeFrame = -1;
     int activeImGuiFrame = 0;
     int stopFrame = -1;
+    int cycle = 1;
     int result = 0;
     while (result == 0) {
         PumpMessages();
@@ -1013,6 +1176,28 @@ int main(int argc, char** argv) {
                 result = Fail("the texture was not uploaded");
                 break;
             }
+            if (options.resize) {
+                for (const auto& size : kResizes) {
+                    ResizeWindow(window, size[0], size[1]);
+                    if (!host->Resize(size[0], size[1])) {
+                        result = Fail("the host could not resize its back buffers");
+                        break;
+                    }
+                    for (int i = 0; i < 30; ++i) {
+                        PumpMessages();
+                        host->Frame();
+                    }
+                    ImVec2 display = ImGui::GetIO().DisplaySize;
+                    printf("resized to %dx%d: overlay %.0fx%.0f, %d vertices\n", size[0], size[1], display.x, display.y,
+                           ImGui::GetIO().MetricsRenderVertices);
+                    if (display.x != size[0] || display.y != size[1] || ImGui::GetIO().MetricsRenderVertices == 0) {
+                        result = Fail("the overlay did not follow the new size");
+                        break;
+                    }
+                }
+                if (result)
+                    break;
+            }
             if (options.capture) {
                 Capture capture = CaptureWindow(window);
                 printf("%d overlay pixels captured\n", capture.overlayPixels);
@@ -1034,7 +1219,14 @@ int main(int argc, char** argv) {
             else if (g_texture->GetTexID() != ImTextureID_Invalid)
                 result = Fail("the texture was not released");
         } else if (stopFrame >= 0 && frame == stopFrame + 60) {
-            break;
+            if (!options.reload || cycle == 2)
+                break;
+            printf("starting the hook again\n");
+            ++cycle;
+            StartHook(options);
+            injectTime = GetTickCount64();
+            activeFrame = -1;
+            stopFrame = -1;
         }
     }
 

@@ -365,6 +365,23 @@ bool IsKeyDown(int keysym) {
 
 bool IsFocused() { return g_focused; }
 
+bool KeyDownInApplication(int keysym) {
+    if (!Connect())
+        return false;
+    DrainEvents();
+    Reply<xcb_query_keymap_reply_t> keymap(xcb_query_keymap_reply(g_connection, xcb_query_keymap(g_connection), nullptr));
+    if (!keymap) {
+        if (xcb_connection_has_error(g_connection))
+            Disconnect();
+        return false;
+    }
+    memcpy(g_keys, keymap->keys, sizeof(g_keys));
+    if (!IsKeyDown(keysym))
+        return false;
+    xcb_window_t focus = FocusOwner();
+    return focus == XCB_INPUT_FOCUS_POINTER_ROOT || (IsWindowId(focus) && OwnedByProcess(focus));
+}
+
 float Scale() { return g_scale; }
 
 } // namespace uih::detail::input

@@ -29,6 +29,11 @@ struct OpenGLHost : Host {
         glClearColor(kClear[0], kClear[1], kClear[2], kClear[3]);
         glClear(GL_COLOR_BUFFER_BIT);
     }
+
+    bool Resize(int width, int height) override {
+        glViewport(0, 0, width, height);
+        return true;
+    }
 };
 
 // GLX --------------------------------------------------------------------
@@ -223,6 +228,23 @@ int Run(Display* display, Window window, Host& host, const std::string& name, co
             printf("%d overlay pixels captured\n", pixels);
             if (pixels < visible)
                 return Fail("overlay is not visible on screen");
+            for (const auto& size : kResizes) {
+                if (!options.resize)
+                    break;
+                XResizeWindow(display, window, size[0], size[1]);
+                XSync(display, False);
+                if (!host.Resize(size[0], size[1]))
+                    return Fail("the host could not resize its back buffers");
+                for (int i = 0; i < 30; ++i) {
+                    PumpEvents(display);
+                    host.Frame();
+                    usleep(5000);
+                }
+                pixels = CountOverlayPixels(display, window);
+                printf("resized to %dx%d: %d overlay pixels\n", size[0], size[1], pixels);
+                if (pixels < visible)
+                    return Fail("overlay is not visible after the resize");
+            }
             if (!PressKey(display, window, unloadKey))
                 return Skip("the host window lost the focus");
         }
@@ -233,7 +255,32 @@ int Run(Display* display, Window window, Host& host, const std::string& name, co
             printf("%d overlay pixels left after the unload key\n", pixels);
             if (pixels >= visible)
                 return Fail("overlay is still visible after the unload key");
-            printf("PASS: %s\n", name.c_str());
+            if (!options.reload) {
+                printf("PASS: %s\n", name.c_str());
+                return 0;
+            }
+        }
+        // The preloaded library stays: the menu key brings the overlay back.
+        if (options.reload && frame == 420 && !PressKey(display, window, menuKey))
+            return Skip("the host window lost the focus");
+        if (options.reload && frame == 425)
+            HoldKey(display, menuKey, false);
+        if (options.reload && frame == 520) {
+            int pixels = CountOverlayPixels(display, window);
+            printf("%d overlay pixels after the menu key\n", pixels);
+            if (pixels < visible)
+                return Fail("the menu key did not bring the overlay back");
+            if (!PressKey(display, window, unloadKey))
+                return Skip("the host window lost the focus");
+        }
+        if (options.reload && frame == 525)
+            HoldKey(display, unloadKey, false);
+        if (options.reload && frame == 700) {
+            int pixels = CountOverlayPixels(display, window);
+            printf("%d overlay pixels after the second unload\n", pixels);
+            if (pixels >= visible)
+                return Fail("overlay is still visible after the second unload");
+            printf("PASS: %s, removed and brought back\n", name.c_str());
             return 0;
         }
         host.Frame();
@@ -253,9 +300,11 @@ int main(int argc, char** argv) {
         else if (arg == "--device-proc-addr") options.deviceProcAddr = true;
         else if (arg == "--menu-key" && i + 1 < argc) options.menuKey = static_cast<int>(strtol(argv[++i], nullptr, 0));
         else if (arg == "--unload-key" && i + 1 < argc) options.unloadKey = static_cast<int>(strtol(argv[++i], nullptr, 0));
+        else if (arg == "--resize") options.resize = true;
+        else if (arg == "--reload") options.reload = true;
     }
     if (options.api != "opengl" && options.api != "vulkan") {
-        printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--menu-key keysym] [--unload-key keysym]\n");
+        printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--menu-key keysym] [--unload-key keysym] [--resize] [--reload]\n");
         return 2;
     }
     setvbuf(stdout, nullptr, _IOLBF, 0);

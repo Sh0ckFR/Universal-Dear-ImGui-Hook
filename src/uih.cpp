@@ -43,6 +43,8 @@ std::vector<UserTexture> g_textures;
 
 bool g_menuButtonsDown = false;
 bool g_menuKeyDown = false;
+// Cleared by Start() and Stop() to end a wait for the menu input.
+std::atomic<bool> g_waitingForMenuInput{false};
 bool g_unloadKeyDown = false;
 
 bool KeyPressed(int key, bool& wasDown, bool focused) {
@@ -242,6 +244,29 @@ void DestroyContext() {
     ImGui::DestroyContext();
 }
 
+void StopUntilMenuInput() {
+    Config config = GetConfig();
+    uih::Stop();
+    g_waitingForMenuInput = true;
+    Log("Overlay removed until the menu input is pressed");
+    // Input already held when the wait starts needs a fresh press.
+    bool wasDown = platform::MenuInputDown(config);
+    while (g_waitingForMenuInput) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        bool down = platform::MenuInputDown(config);
+        if (down && !wasDown)
+            break;
+        wasDown = down;
+    }
+    if (!g_waitingForMenuInput.exchange(false))
+        return;
+    // The press that brought the hook back opens the menu, and must not close it again.
+    g_menuKeyDown = true;
+    g_menuButtonsDown = true;
+    uih::Start(config);
+    SetMenuOpen(true);
+}
+
 ImDrawData* Frame() {
     UpdateTextures();
     platform::NewFrame();
@@ -286,6 +311,7 @@ using namespace detail;
 
 void Start(const Config& config) {
     std::lock_guard<std::mutex> lock(g_lifecycle);
+    g_waitingForMenuInput = false;
     if (g_state != State::Stopped)
         return;
 
@@ -300,6 +326,7 @@ void Start(const Config& config) {
 
 void Stop() {
     std::lock_guard<std::mutex> lock(g_lifecycle);
+    g_waitingForMenuInput = false;
     if (g_state != State::Running)
         return;
     g_state = State::Stopping;

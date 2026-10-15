@@ -73,6 +73,8 @@ HWND CreateHiddenWindow();
 
 namespace input {
 void InstallHooks();
+// Forgets the trampolines, freed with the hooks.
+void UninstallHooks();
 
 // Marks the calls made by the hook itself: they see the real input state.
 class OwnCalls {
