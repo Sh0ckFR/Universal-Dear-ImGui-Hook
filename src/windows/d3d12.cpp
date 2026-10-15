@@ -59,7 +59,15 @@ struct DirectQueue {
 std::mutex g_queueMutex;
 std::vector<SwapChainQueue> g_swapChainQueues;
 std::vector<DirectQueue> g_directQueues;
+// The per-thread cache outlives Stop(): it is only trusted for the session
+// of the hook that filled it.
+std::atomic<unsigned> g_session{0};
 thread_local ID3D12CommandQueue* t_lastQueue = nullptr;
+thread_local unsigned t_lastSession = 0;
+
+ID3D12CommandQueue* LastQueueOfThread() {
+    return t_lastSession == g_session.load(std::memory_order_relaxed) ? t_lastQueue : nullptr;
+}
 
 struct FrameContext {
     ID3D12CommandAllocator* allocator = nullptr;
@@ -112,9 +120,10 @@ void RecordSwapChain(IUnknown* device, IUnknown* swapChain) {
 }
 
 void RecordDirectQueue(ID3D12CommandQueue* queue) {
-    if (queue == t_lastQueue)
+    if (queue == LastQueueOfThread())
         return;
     t_lastQueue = queue;
+    t_lastSession = g_session.load(std::memory_order_relaxed);
     std::lock_guard<std::mutex> lock(g_queueMutex);
     for (size_t i = 0; i < g_directQueues.size(); ++i) {
         if (g_directQueues[i].queue == queue) {
@@ -157,7 +166,7 @@ ID3D12CommandQueue* QueueFor(IDXGISwapChain* swapChain, bool& known) {
         if (known || entry.device != device)
             continue;
         queue = entry.queue;
-        if (queue == t_lastQueue)
+        if (queue == LastQueueOfThread())
             break;
     }
     if (queue)
@@ -518,6 +527,7 @@ void UninstallQueueHook() {
             entry.queue->Release();
         g_swapChainQueues.clear();
         g_directQueues.clear();
+        ++g_session;
     }
     g_executeCommandLists = nullptr;
     g_createSwapChain = nullptr;
