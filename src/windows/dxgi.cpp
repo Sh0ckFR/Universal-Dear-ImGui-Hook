@@ -47,8 +47,11 @@ void OnPresent(IDXGISwapChain* swapChain, UINT flags) {
         if (!g_presenter)
             return;
     }
-    if (ShouldRender(g_presenter->backend))
-        g_presenter->Render(swapChain);
+    if (ShouldRender(g_presenter->backend)) {
+        DXGI_SWAP_CHAIN_DESC desc{};
+        swapChain->GetDesc(&desc);
+        DrawOverlay(SwapchainKey(swapChain), desc.OutputWindow, [&] { g_presenter->Render(swapChain); });
+    }
 }
 
 HRESULT STDMETHODCALLTYPE HookPresent(IDXGISwapChain* swapChain, UINT syncInterval, UINT flags) {

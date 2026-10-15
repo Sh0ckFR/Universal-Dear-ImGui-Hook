@@ -61,6 +61,8 @@ struct Options {
     bool remove = false;
     // "access" or "exception": the render callback faults, as a bug in a menu would.
     std::string fault;
+    // A second window with its own swap chain presents too.
+    bool secondWindow = false;
 };
 
 // Display mode of the fullscreen scenario.

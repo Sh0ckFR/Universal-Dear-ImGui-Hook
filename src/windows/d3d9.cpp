@@ -61,6 +61,7 @@ void Teardown() {
 }
 
 bool Init(IDirect3DDevice9* device) {
+    Teardown();
     HWND window = DeviceWindow(device);
     if (!window || !ClaimBackend(Backend::D3D9) || !BindWindow(window))
         return false;
@@ -73,9 +74,7 @@ bool Init(IDirect3DDevice9* device) {
 // Draws on the back buffer of the implicit swap chain, outside of the
 // application's scenes, whatever render target is bound.
 void Render(IDirect3DDevice9* device) {
-    if (!g_device && !Init(device))
-        return;
-    if (device != g_device)
+    if (device != g_device && !Init(device))
         return;
 
     // Before any reference to the back buffer, which an exception in the frame would leak.
@@ -107,7 +106,7 @@ void Render(IDirect3DDevice9* device) {
 
 void OnPresent(IDirect3DDevice9* device) {
     if (g_presentDepth++ == 0 && ShouldRender(Backend::D3D9))
-        Guarded([&] { Render(device); });
+        DrawOverlay(SwapchainKey(device), DeviceWindow(device), [&] { Render(device); });
 }
 
 void AfterPresent() {

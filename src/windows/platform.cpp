@@ -283,6 +283,11 @@ void Unload() {
         CloseHandle(thread);
 }
 
+bool HasFocus(HWND window) {
+    HWND foreground = GetForegroundWindow();
+    return window && foreground && (foreground == window || foreground == GetAncestor(window, GA_ROOT));
+}
+
 bool RunGuarded(void (*work)(void*), void* context) {
 #ifdef _MSC_VER
     DWORD code = 0;

@@ -956,6 +956,88 @@ int RunRemoveMode(HWND window, Host& host) {
     return result;
 }
 
+// A second window, with its own device and swap chain, presents after the
+// first one every frame. The overlay stays on one window instead of moving at
+// every present, follows the focus, and goes back to the first window when
+// the second one stops presenting.
+int RunSecondWindowMode(HWND window, Host& host, const Options& options) {
+    constexpr int kSecondSize[2] = {400, 300};
+    RECT rect{0, 0, kSecondSize[0], kSecondSize[1]};
+    AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
+    HWND second = CreateWindowExW(WS_EX_TOPMOST, L"uih_host", L"uih host 2", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 0, 0, rect.right - rect.left,
+                                  rect.bottom - rect.top, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    std::unique_ptr<Host> secondHost = CreateHost(options.api);
+    if (!second || !secondHost->Init(second, options)) {
+        DestroyWindow(second);
+        return Fail("the second window could not render");
+    }
+    bool presentSecond = true;
+    auto run = [&](int frames) {
+        for (int frame = 0; frame < frames; ++frame) {
+            PumpMessages();
+            host.Frame();
+            if (presentSecond)
+                secondHost->Frame();
+        }
+    };
+    auto waitFor = [&](auto condition) {
+        for (ULONGLONG start = GetTickCount64(); !condition() && GetTickCount64() - start < kDetectionTimeoutMs;)
+            run(1);
+        return condition();
+    };
+    // The size of the overlay is the client area of the window it is on.
+    auto onWindow = [](HWND target) {
+        RECT client{};
+        GetClientRect(target, &client);
+        if (!ImGui::GetCurrentContext())
+            return false;
+        ImVec2 display = ImGui::GetIO().DisplaySize;
+        return display.x == client.right && display.y == client.bottom;
+    };
+    auto stays = [&](HWND target) {
+        int frameCount = ImGui::GetFrameCount();
+        run(60);
+        int frames = ImGui::GetFrameCount() - frameCount;
+        printf("%d overlay frames for 60 frames of each window\n", frames);
+        return onWindow(target) && frames >= 55 && frames <= 61;
+    };
+
+    int result = 0;
+    StartHook(options);
+    if (!waitFor([] { return uih::ActiveBackend() != uih::Backend::None; }))
+        result = Fail("backend was not detected");
+    uih::SetMenuOpen(true);
+    if (result == 0) {
+        BringToFront(window);
+        if (GetForegroundWindow() != window)
+            result = Skip("the host window does not have the focus");
+    }
+    if (result == 0 && !waitFor([&] { return onWindow(window); }))
+        result = Fail("the overlay is not on the focused window");
+    if (result == 0 && !stays(window))
+        result = Fail("the overlay does not stay on the focused window");
+    if (result == 0) {
+        BringToFront(second);
+        if (GetForegroundWindow() != second)
+            result = Skip("the second window does not get the focus");
+    }
+    if (result == 0 && !waitFor([&] { return onWindow(second); }))
+        result = Fail("the overlay did not follow the focus to the second window");
+    if (result == 0 && !stays(second))
+        result = Fail("the overlay does not stay on the second window");
+    if (result == 0) {
+        presentSecond = false;
+        if (!waitFor([&] { return onWindow(window); }))
+            result = Fail("the overlay did not go back when the second window stopped presenting");
+    }
+    uih::Stop();
+    secondHost.reset();
+    DestroyWindow(second);
+    if (result == 0)
+        printf("PASS: %s with a second window\n", options.api.c_str());
+    return result;
+}
+
 // The render callback faults with the menu open: the overlay is removed, the
 // host keeps rendering, and the overlay comes back when the hook starts again.
 int RunFaultMode(HWND window, Host& host, const Options& options) {
@@ -1285,6 +1367,7 @@ int main(int argc, char** argv) {
         else if (arg == "--fullscreen") options.fullscreen = true;
         else if (arg == "--remove") options.remove = true;
         else if (arg == "--fault" && i + 1 < argc) options.fault = argv[++i];
+        else if (arg == "--second-window") options.secondWindow = true;
         else if (arg == "--warp") options.warp = true;
         else if (arg == "--capture") options.capture = true;
         else if (arg == "--device-proc-addr") options.deviceProcAddr = true;
@@ -1298,7 +1381,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception] [--second-window] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -1327,6 +1410,12 @@ int main(int argc, char** argv) {
         printf("SKIP: %s is not available on this machine\n", options.api.c_str());
         uih::Stop();
         return kSkip;
+    }
+    if (options.secondWindow) {
+        int result = RunSecondWindowMode(window, *host, options);
+        host.reset();
+        DestroyWindow(window);
+        return result;
     }
     if (!options.fault.empty()) {
         int result = RunFaultMode(window, *host, options);

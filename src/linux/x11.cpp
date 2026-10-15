@@ -272,7 +272,7 @@ void Detach() {
 // A grab held by the application cannot be released from another connection.
 void OnMenuToggled(bool) {}
 
-NativeWindow FindProcessWindow() {
+NativeWindow FindProcessWindow(uint32_t, uint32_t) {
     if (!Connect())
         return XCB_NONE;
     xcb_window_t focus = FocusOwner();
@@ -364,6 +364,13 @@ bool IsKeyDown(int keysym) {
 }
 
 bool IsFocused() { return g_focused; }
+
+bool HasFocus(NativeWindow window) {
+    if (!g_connection || window == XCB_NONE)
+        return false;
+    xcb_window_t focus = FocusOwner();
+    return IsWindowId(focus) && (Encloses(window, focus) || Encloses(focus, window));
+}
 
 bool KeyDownInApplication(int keysym) {
     if (!Connect())

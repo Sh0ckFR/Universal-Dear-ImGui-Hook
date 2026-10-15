@@ -13,6 +13,7 @@ bool WindowSize(NativeWindow window, uint32_t& width, uint32_t& height);
 void NewFrame();
 bool IsKeyDown(int keysym);
 bool IsFocused();
+bool HasFocus(NativeWindow window);
 // Xft.dpi of the X server relative to 96 DPI.
 float Scale();
 // Polled while the hook is stopped: true when `keysym` is down and a window

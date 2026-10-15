@@ -17,6 +17,9 @@
 
 namespace {
 
+// Position and size of the second window, beside the first one on the 1280x720 screen of the CI.
+constexpr int kSecondWindow[4] = {820, 0, 400, 300};
+
 struct OpenGLHost : Host {
     virtual VisualID ChooseVisual(Display* display) = 0;
 
@@ -78,6 +81,8 @@ struct GlxHost : OpenGLHost {
     }
 
     void Frame() override {
+        // Another host may have made its context current.
+        glXMakeCurrent(display, drawable, context);
         Clear();
         swapBuffers(display, drawable);
     }
@@ -89,6 +94,7 @@ struct EglHost : OpenGLHost {
     EGLDisplay display = EGL_NO_DISPLAY;
     EGLConfig config = nullptr;
     EGLSurface surface = EGL_NO_SURFACE;
+    EGLContext context = EGL_NO_CONTEXT;
     EGLBoolean (*swapBuffers)(EGLDisplay, EGLSurface) = eglSwapBuffers;
 
     VisualID ChooseVisual(Display* dpy) override {
@@ -113,12 +119,13 @@ struct EglHost : OpenGLHost {
         }
         const EGLint attributes[] = {EGL_CONTEXT_MAJOR_VERSION, 3, EGL_CONTEXT_MINOR_VERSION, 3, EGL_NONE};
         surface = eglCreateWindowSurface(display, config, window.window, nullptr);
-        EGLContext context = eglCreateContext(display, config, EGL_NO_CONTEXT, attributes);
+        context = eglCreateContext(display, config, EGL_NO_CONTEXT, attributes);
         return swapBuffers && surface != EGL_NO_SURFACE && context != EGL_NO_CONTEXT &&
                eglMakeCurrent(display, surface, surface, context) && IsVersion3();
     }
 
     void Frame() override {
+        eglMakeCurrent(display, surface, surface, context);
         Clear();
         swapBuffers(display, surface);
     }
@@ -143,7 +150,7 @@ bool CallerSeenThroughHook() {
     return next && dladdr(next, &info) && info.dli_fname && !strstr(info.dli_fname, "libGL");
 }
 
-Window CreateHostWindow(Display* display, VisualID visualId) {
+Window CreateHostWindow(Display* display, VisualID visualId, int x = 0, int y = 0, int width = kWidth, int height = kHeight) {
     XVisualInfo wanted{};
     wanted.visualid = visualId;
     int count = 0;
@@ -154,7 +161,7 @@ Window CreateHostWindow(Display* display, VisualID visualId) {
     XSetWindowAttributes attributes{};
     attributes.colormap = XCreateColormap(display, root, visual->visual, AllocNone);
     attributes.event_mask = StructureNotifyMask;
-    Window window = XCreateWindow(display, root, 0, 0, kWidth, kHeight, 0, visual->depth, InputOutput, visual->visual,
+    Window window = XCreateWindow(display, root, x, y, width, height, 0, visual->depth, InputOutput, visual->visual,
                                   CWColormap | CWBorderPixel | CWEventMask, &attributes);
     XFree(visual);
 
@@ -296,6 +303,60 @@ int Run(Display* display, Window window, Host& host, const std::string& name, co
     }
 }
 
+// A second window, with its own context or device, presents after the first
+// one every frame. The overlay stays on one window, follows the focus, and
+// goes back to the first window when the second one stops presenting.
+int RunSecondWindow(Display* display, Window window, Host& host, Window second, Host& secondHost, const std::string& name) {
+    const int visible = kWidth * kHeight / 100;
+    const int secondVisible = kSecondWindow[2] * kSecondWindow[3] / 100;
+    bool presentSecond = true;
+    auto run = [&](int frames) {
+        for (int frame = 0; frame < frames; ++frame) {
+            PumpEvents(display);
+            host.Frame();
+            if (presentSecond)
+                secondHost.Frame();
+            usleep(5000);
+        }
+    };
+    auto onFirst = [&] { return CountOverlayPixels(display, window) >= visible && CountOverlayPixels(display, second) < secondVisible; };
+    auto onSecond = [&] { return CountOverlayPixels(display, second) >= secondVisible && CountOverlayPixels(display, window) < visible; };
+    auto waitFor = [&](auto condition) {
+        for (int attempt = 0; attempt < 50 && !condition(); ++attempt)
+            run(20);
+        return condition();
+    };
+    auto focus = [&](Window target) {
+        XSetInputFocus(display, target, RevertToParent, CurrentTime);
+        XSync(display, False);
+    };
+
+    focus(window);
+    run(90);
+    if (!PressKey(display, window, XK_Insert))
+        return Skip("the host window does not have the focus");
+    run(5);
+    HoldKey(display, XK_Insert, false);
+    if (!waitFor(onFirst))
+        return Fail("the overlay is not on the focused window only");
+    run(60);
+    if (!onFirst())
+        return Fail("the overlay does not stay on the focused window");
+    focus(second);
+    if (!waitFor(onSecond))
+        return Fail("the overlay did not follow the focus to the second window");
+    run(60);
+    if (!onSecond())
+        return Fail("the overlay does not stay on the second window");
+    presentSecond = false;
+    if (!waitFor([&] { return CountOverlayPixels(display, window) >= visible; }))
+        return Fail("the overlay did not go back when the second window stopped presenting");
+    if (host.ValidationErrors() > 0 || secondHost.ValidationErrors() > 0)
+        return Fail("the validation layer reported errors");
+    printf("PASS: %s with a second window\n", name.c_str());
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -310,9 +371,10 @@ int main(int argc, char** argv) {
         else if (arg == "--unload-key" && i + 1 < argc) options.unloadKey = static_cast<int>(strtol(argv[++i], nullptr, 0));
         else if (arg == "--resize") options.resize = true;
         else if (arg == "--reload") options.reload = true;
+        else if (arg == "--second-window") options.secondWindow = true;
     }
     if (options.api != "opengl" && options.api != "vulkan") {
-        printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--menu-key keysym] [--unload-key keysym] [--resize] [--reload]\n");
+        printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--menu-key keysym] [--unload-key keysym] [--resize] [--reload] [--second-window]\n");
         return 2;
     }
     setvbuf(stdout, nullptr, _IOLBF, 0);
@@ -323,23 +385,30 @@ int main(int argc, char** argv) {
     if (!CallerSeenThroughHook())
         return Fail("the hook is not preloaded, or its dlsym() hides the caller from the C library");
 
-    std::unique_ptr<Host> host;
     VisualID visual = XVisualIDFromVisual(DefaultVisual(display, DefaultScreen(display)));
-    if (options.api == "vulkan") {
-        host = CreateVulkanHost();
-    } else {
+    auto createHost = [&]() -> std::unique_ptr<Host> {
+        if (options.api == "vulkan")
+            return CreateVulkanHost();
         std::unique_ptr<OpenGLHost> openGL;
         if (options.egl)
             openGL = std::make_unique<EglHost>();
         else
             openGL = std::make_unique<GlxHost>();
         visual = openGL->ChooseVisual(display);
-        host = std::move(openGL);
-    }
+        return openGL;
+    };
+    std::unique_ptr<Host> host = createHost();
     std::string name = options.api + (options.egl ? " egl" : "") + (options.lookup ? " lookup" : "") + (options.deviceProcAddr ? " device-proc-addr" : "");
 
     Window window = visual ? CreateHostWindow(display, visual) : 0;
     if (!window || !host->Init({display, window}, options))
         return Skip((name + " is not available on this machine").c_str());
+    if (options.secondWindow) {
+        std::unique_ptr<Host> secondHost = createHost();
+        Window second = CreateHostWindow(display, visual, kSecondWindow[0], kSecondWindow[1], kSecondWindow[2], kSecondWindow[3]);
+        if (!second || !secondHost->Init({display, second}, options))
+            return Fail("the second window could not render");
+        return RunSecondWindow(display, window, *host, second, *secondHost, name);
+    }
     return Run(display, window, *host, name, options);
 }

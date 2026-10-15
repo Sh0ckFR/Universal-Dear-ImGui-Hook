@@ -66,8 +66,10 @@ void Render(HDC hdc) {
 BOOL WINAPI HookSwapBuffers(HDC hdc) {
     ScopedCall call;
     ForeignPresentScope presentScope;
-    if (ShouldRender(Backend::OpenGL))
-        Guarded([&] { Render(hdc); });
+    if (ShouldRender(Backend::OpenGL)) {
+        HWND window = WindowFromDC(hdc);
+        DrawOverlay(SwapchainKey(window), window, [&] { Render(hdc); });
+    }
     ServiceTeardown(Backend::OpenGL, Teardown);
     return g_swapBuffers(hdc);
 }

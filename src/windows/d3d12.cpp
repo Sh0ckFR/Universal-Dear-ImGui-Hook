@@ -30,7 +30,7 @@ constexpr size_t kCreateSwapChainForCompositionIndex = 24;
 constexpr size_t kMaxSwapChains = 16;
 constexpr size_t kMaxDirectQueues = 16;
 constexpr UINT kSrvHeapSize = 64;
-// Presents to wait before following an application that moved to another direct queue.
+// Presents of a swap chain to wait before following an application that moved to another direct queue.
 constexpr int kQueueSwitchFrames = 60;
 
 HMODULE g_module = nullptr;
@@ -340,7 +340,7 @@ void Render(IDXGISwapChain* swapChain) {
     ID3D12CommandQueue* queue = QueueFor(swapChain, known);
     if (!queue)
         return;
-    if (!known && g_queue && queue != g_queue && ++g_queueMisses < kQueueSwitchFrames) {
+    if (!known && swapChain == g_swapChain && queue != g_queue && ++g_queueMisses < kQueueSwitchFrames) {
         queue->Release();
         queue = g_queue;
         queue->AddRef();

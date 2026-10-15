@@ -244,6 +244,19 @@ VkDevice DeviceForQueue(VkQueue queue, VkSwapchainKHR swapchain) {
     return swapchainIt->second.device;
 }
 
+NativeWindow SwapchainWindow(VkSwapchainKHR swapchain) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    auto it = g_swapchains.find(swapchain);
+    return it != g_swapchains.end() ? it->second.window : NativeWindow{};
+}
+
+// Handles of non-dispatchable objects are 64-bit integers on 32-bit systems.
+uint64_t VulkanKey(VkSwapchainKHR swapchain) {
+    uint64_t key = 0;
+    memcpy(&key, &swapchain, sizeof(swapchain));
+    return key;
+}
+
 // Renderer ---------------------------------------------------------------
 
 void WaitForFrames() {
@@ -676,9 +689,20 @@ void RecordQueue(VkDevice device, uint32_t family, VkQueue queue) {
 }
 
 void OnSwapchainCreated(VkDevice device, const VkSwapchainCreateInfoKHR& info, VkSwapchainKHR swapchain) {
+    NativeWindow window{};
+    bool known = false;
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        auto surface = g_surfaces.find(info.surface);
+        known = surface != g_surfaces.end();
+        if (known)
+            window = surface->second;
+    }
+    // The surface was created before the hook: its window is the one of the swap chain's size.
+    if (!known)
+        window = input::FindProcessWindow(info.imageExtent.width, info.imageExtent.height);
     std::lock_guard<std::mutex> lock(g_mutex);
-    auto surface = g_surfaces.find(info.surface);
-    g_swapchains[swapchain] = {device, info.imageFormat, info.imageExtent, surface != g_surfaces.end() ? surface->second : NativeWindow{}};
+    g_swapchains[swapchain] = {device, info.imageFormat, info.imageExtent, window};
     g_setupFailures = 0;
 }
 
@@ -730,7 +754,7 @@ VkResult PresentFrame(size_t icd, VkQueue queue, const VkPresentInfoKHR* info) {
         }
 #endif
         if (device != VK_NULL_HANDLE && FormatKnown(swapchain)) {
-            Guarded([&] { forward = Render(queue, device, info, patched); });
+            DrawOverlay(VulkanKey(swapchain), SwapchainWindow(swapchain), [&] { forward = Render(queue, device, info, patched); });
         } else if (device != VK_NULL_HANDLE) {
             static VkSwapchainKHR reported = VK_NULL_HANDLE;
             if (reported != swapchain)
