@@ -53,9 +53,14 @@ struct Options {
     bool resize = false;
     // Starts the overlay a second time after it was removed.
     bool reload = false;
+    // Switches the display to kFullscreen and back while the menu is open.
+    bool fullscreen = false;
     // Removes the overlay with the unload key and brings it back with the menu key.
     bool remove = false;
 };
+
+// Display mode of the fullscreen scenario.
+constexpr int kFullscreen[2] = {800, 600};
 
 // Sizes the resize scenario goes through: larger, then smaller than the
 // start, within the 1024x768 and 1280x720 screens of the CI runners.
@@ -68,6 +73,9 @@ struct Host {
     // Resizes the back buffers to the new size of the window, as a game does
     // when the resolution changes. False when the host cannot.
     virtual bool Resize(int, int) { return false; }
+    // Exclusive fullscreen at kFullscreen, or back to the window, through the
+    // API. False when the API has no exclusive mode.
+    virtual bool Fullscreen(bool) { return false; }
 };
 
 inline void Settle(const Options& options) {
