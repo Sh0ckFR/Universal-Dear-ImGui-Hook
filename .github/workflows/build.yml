@@ -47,7 +47,7 @@ jobs:
     env:
       MESA: 26.2.4
       VULKAN_RUNTIME: 1.4.363.0
-      # Mesa's default D3D12-based driver crashes in SwapBuffers; llvmpipe is the reference.
+      # Mesa's llvmpipe for the suite; its D3D12-based driver is tested on its own below.
       GALLIUM_DRIVER: llvmpipe
     steps:
       - uses: actions/checkout@v4
@@ -63,7 +63,8 @@ jobs:
           curl.exe -fsSL --retry 3 -o vulkan.zip "https://sdk.lunarg.com/sdk/download/$env:VULKAN_RUNTIME/windows/vulkan-runtime-components.zip"
           Expand-Archive vulkan.zip vulkan
           $tests = "build/tests/Release"
-          Copy-Item mesa/${{ matrix.dir }}/opengl32.dll, mesa/${{ matrix.dir }}/libgallium_wgl.dll $tests
+          # dxil.dll signs the shaders of Mesa's D3D12-based driver.
+          Copy-Item mesa/${{ matrix.dir }}/opengl32.dll, mesa/${{ matrix.dir }}/libgallium_wgl.dll, mesa/${{ matrix.dir }}/dxil.dll $tests
           Copy-Item (Get-ChildItem vulkan -Recurse -Filter vulkan-1.dll | Where-Object { $_.Directory.Name -eq "${{ matrix.dir }}" }).FullName $tests
           # The runner is elevated, so the Vulkan loader ignores VK_DRIVER_FILES: lavapipe is registered instead.
           $icd = (Get-ChildItem mesa/${{ matrix.dir }} -Filter "lvp_icd.*.json").FullName
@@ -75,6 +76,14 @@ jobs:
           ctest --test-dir build -C Release --output-on-failure --timeout 120 | tee ctest.log
           # DirectInput does not see simulated key presses on the runner.
           if grep Skipped ctest.log | grep -v input_directinput; then exit 1; fi
+      # OpenGL on Direct3D 12 (GLOn12), the driver of Microsoft's OpenGL compatibility pack.
+      - name: Test OpenGL on Mesa's D3D12 driver
+        shell: bash
+        env:
+          GALLIUM_DRIVER: d3d12
+        run: |
+          ctest --test-dir build -C Release --output-on-failure --timeout 120 -R opengl | tee ctest-d3d12.log
+          if grep Skipped ctest-d3d12.log; then exit 1; fi
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
