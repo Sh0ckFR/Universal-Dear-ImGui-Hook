@@ -248,7 +248,7 @@ Without a GPU, as on the CI runners, Direct3D uses WARP, and Mesa's software dri
 | `--decoy-queue` | A second D3D12 device executes work every frame |
 | `--scale <s>`, `--warp` | Fixed interface scale; software rasterizer |
 | `--resize` | Window and back buffers resized to 960x640, then 720x560, with the menu open |
-| `--fullscreen` | 800x600 exclusive fullscreen (D3D9, DXGI) or display mode change with a borderless window (Vulkan, OpenGL), then back. Skipped unless `UIH_TEST_FULLSCREEN=1`, set by the CI |
+| `--fullscreen` | 800x600 exclusive fullscreen (D3D9, DXGI) or display mode change with a borderless window (Vulkan, OpenGL), then back; the window must cover the display and the overlay follow it. Skipped unless `UIH_TEST_FULLSCREEN=1`, set by the CI |
 | `--reload` | The overlay is started a second time: `Start()` after `Stop()`, or with `--dll` the DLL injected again, or, for a DLL named `dinput8.dll`, brought back by `INSERT` after `F11` |
 | `--remove` | `F11` removes the overlay and `INSERT` brings it back, twice, without a module to free |
 | `--input raw\|directinput` | What the game reads while the menu is open |

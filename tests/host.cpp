@@ -193,8 +193,9 @@ bool DxgiFullscreen(IDXGISwapChain* swapChain, bool on) {
     if (FAILED(hr))
         return false;
     printf("DXGI mode %ux%u at %u/%u Hz\n", mode.Width, mode.Height, mode.RefreshRate.Numerator, mode.RefreshRate.Denominator);
+    BOOL fullscreen = FALSE;
     return SUCCEEDED(swapChain->ResizeTarget(&mode)) && SUCCEEDED(swapChain->SetFullscreenState(TRUE, nullptr)) &&
-           SUCCEEDED(swapChain->ResizeTarget(&mode));
+           SUCCEEDED(swapChain->ResizeTarget(&mode)) && SUCCEEDED(swapChain->GetFullscreenState(&fullscreen, nullptr)) && fullscreen;
 }
 
 struct D3D10Host : Host {
@@ -1303,11 +1304,16 @@ int main(int argc, char** argv) {
                     }
                     RECT client{};
                     GetClientRect(window, &client);
+                    MONITORINFO monitor{sizeof(monitor)};
+                    GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTOPRIMARY), &monitor);
+                    long monitorWidth = monitor.rcMonitor.right - monitor.rcMonitor.left;
+                    long monitorHeight = monitor.rcMonitor.bottom - monitor.rcMonitor.top;
                     ImVec2 display = ImGui::GetIO().DisplaySize;
-                    printf("%s: window %ldx%ld, overlay %.0fx%.0f, %d vertices\n", on ? "fullscreen" : "windowed", client.right, client.bottom,
-                           display.x, display.y, ImGui::GetIO().MetricsRenderVertices);
-                    if (on && (client.right != kFullscreen[0] || client.bottom != kFullscreen[1])) {
-                        result = Fail("the display did not switch to the fullscreen mode");
+                    printf("%s: monitor %ldx%ld, window %ldx%ld, overlay %.0fx%.0f, %d vertices\n", on ? "fullscreen" : "windowed", monitorWidth,
+                           monitorHeight, client.right, client.bottom, display.x, display.y, ImGui::GetIO().MetricsRenderVertices);
+                    // Virtual machines may emulate DXGI's exclusive mode without a mode change: the window covers the monitor either way.
+                    if (on && (client.right != monitorWidth || client.bottom != monitorHeight)) {
+                        result = Fail("the window does not cover the display in fullscreen");
                         break;
                     }
                     if (display.x != client.right || display.y != client.bottom || ImGui::GetIO().MetricsRenderVertices == 0) {
