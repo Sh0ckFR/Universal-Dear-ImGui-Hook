@@ -4,8 +4,8 @@ A [Dear ImGui](https://github.com/ocornut/imgui) overlay that draws your interfa
 
 | API | Windows (x86, x64) | Linux (x86-64, ARM64) |
 | --- | --- | --- |
-| Direct3D 9, 9Ex | :white_check_mark: | |
-| Direct3D 10, 11, 12 | :white_check_mark: | |
+| Direct3D 9, 9Ex | :white_check_mark: | NOT REQUIRED |
+| Direct3D 10, 11, 12 | :white_check_mark: | NOT REQUIRED |
 | Vulkan | :white_check_mark: | :white_check_mark: |
 | OpenGL 3.0+ | :white_check_mark: (WGL) | :white_check_mark: (GLX, EGL) |
 
