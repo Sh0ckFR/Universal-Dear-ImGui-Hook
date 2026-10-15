@@ -260,6 +260,8 @@ int Run(Display* display, Window window, Host& host, const std::string& name, co
             if (pixels >= visible)
                 return Fail("overlay is still visible after the unload key");
             if (!options.reload) {
+                if (host.ValidationErrors() > 0)
+                    return Fail("the validation layer reported errors");
                 printf("PASS: %s\n", name.c_str());
                 return 0;
             }
@@ -284,6 +286,8 @@ int Run(Display* display, Window window, Host& host, const std::string& name, co
             printf("%d overlay pixels after the second unload\n", pixels);
             if (pixels >= visible)
                 return Fail("overlay is still visible after the second unload");
+            if (host.ValidationErrors() > 0)
+                return Fail("the validation layer reported errors");
             printf("PASS: %s, removed and brought back\n", name.c_str());
             return 0;
         }
