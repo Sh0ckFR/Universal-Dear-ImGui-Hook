@@ -75,9 +75,22 @@ else()
     target_link_libraries(uih_host PRIVATE PkgConfig::UIH_HOST ${CMAKE_DL_LIBS})
 
     if(TARGET uih_example)
+        set(UIH_PRELOAD $<TARGET_FILE:uih_example>)
+        set(UIH_SANITIZER_OPTIONS)
+        if(UIH_SANITIZE)
+            # The sanitizer runtime must be loaded before the library it checks.
+            execute_process(COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libasan.so
+                            OUTPUT_VARIABLE UIH_ASAN_RUNTIME OUTPUT_STRIP_TRAILING_WHITESPACE)
+            set(UIH_PRELOAD ${UIH_ASAN_RUNTIME}:${UIH_PRELOAD})
+            # No leak check: the host leaves its X11 and GPU objects to the end of the process.
+            set(UIH_SANITIZER_OPTIONS
+                "ASAN_OPTIONS=detect_leaks=0"
+                "UBSAN_OPTIONS=print_stacktrace=1")
+        endif()
+
         function(uih_add_preload_test name)
             uih_add_host_test(${name} ${ARGN})
-            set_tests_properties(${name} PROPERTIES ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:uih_example>;UIH_DEBUG=1")
+            set_tests_properties(${name} PROPERTIES ENVIRONMENT "LD_PRELOAD=${UIH_PRELOAD};UIH_DEBUG=1;${UIH_SANITIZER_OPTIONS}")
         endfunction()
 
         uih_add_preload_test(preload_glx --api opengl)
