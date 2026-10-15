@@ -812,9 +812,9 @@ int RunGamepadMode(HWND window, Host& host, const std::string& fake) {
     };
 
     StartHook(Options{});
-    for (int frame = 0; frame < 600 && uih::ActiveBackend() == uih::Backend::None; ++frame)
+    for (ULONGLONG start = GetTickCount64(); WaitingForBackend(start);)
         run(1);
-    SetForegroundWindow(window);
+    BringToFront(window);
     run(30);
 
     int result = 0;
