@@ -444,13 +444,18 @@ struct D3D12Host : Host {
 
     bool Fullscreen(bool on) override { return DxgiFullscreen(swapChain, on) && Resize(0, 0); }
 
+    // The mingw-w64 headers of Ubuntu do not declare ID3D12Device5.
     bool RemoveDevice() override {
+#ifdef __ID3D12Device5_INTERFACE_DEFINED__
         ID3D12Device5* device5 = nullptr;
         if (FAILED(device->QueryInterface(IID_PPV_ARGS(&device5))))
             return false;
         device5->RemoveDevice();
         device5->Release();
         return true;
+#else
+        return false;
+#endif
     }
 
     void Frame() override {
@@ -1557,7 +1562,7 @@ int main(int argc, char** argv) {
                 break;
             if (options.removeDevice) {
                 if (!host->RemoveDevice()) {
-                    result = Fail("the host could not remove its device");
+                    result = Skip("the host cannot remove its device");
                     break;
                 }
                 ULONGLONG start = GetTickCount64();
