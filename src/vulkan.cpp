@@ -792,7 +792,14 @@ struct IcdHooks {
 
     static VkResult VKAPI_CALL CreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR* info, const VkAllocationCallbacks* allocator, VkSwapchainKHR* swapchain) {
         ScopedCall call;
-        VkResult result = Original<PFN_vkCreateSwapchainKHR>(N, kCreateSwapchainKHR)(device, info, allocator, swapchain);
+        // The overlay renders into the images, which a game may only copy or
+        // compute into. Every surface supports color attachment images.
+        VkSwapchainCreateInfoKHR drawable{};
+        if (info) {
+            drawable = *info;
+            drawable.imageUsage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        }
+        VkResult result = Original<PFN_vkCreateSwapchainKHR>(N, kCreateSwapchainKHR)(device, info ? &drawable : nullptr, allocator, swapchain);
         if (result == VK_SUCCESS && info && swapchain)
             OnSwapchainCreated(device, *info, *swapchain);
         return result;
