@@ -70,6 +70,8 @@ bool ClaimBackend(Backend backend);
 // Runs `teardown` when Stop() asked the active backend to release its resources
 // on the rendering thread.
 void ServiceTeardown(Backend backend, void (*teardown)());
+// Runs `release` once no thread draws the overlay.
+void ReleaseOverlay(void (*release)());
 // False when the rendering thread did not answer and the caller has to release the resources.
 bool TeardownOnRenderThread(unsigned timeoutMs);
 

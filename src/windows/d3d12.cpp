@@ -136,7 +136,10 @@ void RecordDirectQueue(ID3D12CommandQueue* queue) {
     ID3D12Device* device = nullptr;
     if (FAILED(queue->GetDevice(IID_PPV_ARGS(&device))))
         return;
+    HRESULT removed = device->GetDeviceRemovedReason();
     device->Release();
+    if (FAILED(removed))
+        return;
     if (g_directQueues.size() == kMaxDirectQueues) {
         g_directQueues.front().queue->Release();
         g_directQueues.erase(g_directQueues.begin());
@@ -145,13 +148,41 @@ void RecordDirectQueue(ID3D12CommandQueue* queue) {
     g_directQueues.push_back({device, queue});
 }
 
-// Queue `swapChain` presents on, with a reference. `known` is false for a guess.
+bool OnRemovedDevice(ID3D12CommandQueue* queue) {
+    ID3D12Device* device = nullptr;
+    if (FAILED(queue->GetDevice(IID_PPV_ARGS(&device))))
+        return true;
+    HRESULT removed = device->GetDeviceRemovedReason();
+    device->Release();
+    return FAILED(removed);
+}
+
+template <typename Entry>
+bool ReleaseRemoved(std::vector<Entry>& entries) {
+    bool released = false;
+    for (size_t i = 0; i < entries.size();) {
+        if (OnRemovedDevice(entries[i].queue)) {
+            entries[i].queue->Release();
+            entries.erase(entries.begin() + static_cast<std::ptrdiff_t>(i));
+            released = true;
+            continue;
+        }
+        ++i;
+    }
+    return released;
+}
+
+// Queue `swapChain` presents on, with a reference. `known` is false for a
+// guess. Null when its device was removed: nothing is drawn on it.
 ID3D12CommandQueue* QueueFor(IDXGISwapChain* swapChain, bool& known) {
     IUnknown* identity = Identity(swapChain);
     ID3D12Device* device = nullptr;
     if (FAILED(swapChain->GetDevice(IID_PPV_ARGS(&device))))
         return nullptr;
+    HRESULT removed = device->GetDeviceRemovedReason();
     device->Release();
+    if (FAILED(removed))
+        return nullptr;
 
     std::lock_guard<std::mutex> lock(g_queueMutex);
     ID3D12CommandQueue* queue = nullptr;
@@ -546,6 +577,14 @@ void UninstallQueueHook() {
 void NoTeardown() {}
 
 } // namespace
+
+void ReleaseRemovedQueues() {
+    std::lock_guard<std::mutex> lock(g_queueMutex);
+    bool swapChains = ReleaseRemoved(g_swapChainQueues);
+    // A new queue may reuse the address of a released one in the per-thread cache.
+    if (ReleaseRemoved(g_directQueues) || swapChains)
+        ++g_session;
+}
 
 const DxgiPresenter kD3D12Presenter = {Backend::D3D12, Probe, Render, PreResize, Teardown};
 const Renderer kD3D12QueueRenderer = {"D3D12", L"d3d12.dll", InstallQueueHook, UninstallQueueHook, NoTeardown};

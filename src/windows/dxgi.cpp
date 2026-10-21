@@ -28,6 +28,7 @@ ResizeBuffers1Fn g_resizeBuffers1 = nullptr;
 // D3D10 devices also expose ID3D11Device, so D3D10 is probed before D3D11.
 const DxgiPresenter* const kPresenters[] = {&kD3D12Presenter, &kD3D10Presenter, &kD3D11Presenter};
 const DxgiPresenter* g_presenter = nullptr;
+std::atomic<bool> g_deviceRemoved{false};
 
 void Teardown() {
     if (g_presenter)
@@ -54,12 +55,28 @@ void OnPresent(IDXGISwapChain* swapChain, UINT flags) {
     }
 }
 
+// The application answers a removed device with a new one. D3D12 gives it
+// the removed device back while references to it remain, so the overlay
+// releases its own before the application sees the result.
+HRESULT AfterPresent(HRESULT result) {
+    bool removed = result == DXGI_ERROR_DEVICE_REMOVED || result == DXGI_ERROR_DEVICE_RESET;
+    if (removed && !g_deviceRemoved.exchange(true))
+        Log("Device removed (0x%08lX), releasing the overlay", result);
+    if (removed) {
+        ReleaseOverlay(Teardown);
+        ReleaseRemovedQueues();
+    } else {
+        g_deviceRemoved = false;
+    }
+    return result;
+}
+
 HRESULT STDMETHODCALLTYPE HookPresent(IDXGISwapChain* swapChain, UINT syncInterval, UINT flags) {
     ScopedCall call;
     Guarded([&] { OnPresent(swapChain, flags); });
     if (g_presenter)
         ServiceTeardown(g_presenter->backend, Teardown);
-    return g_present(swapChain, syncInterval, flags);
+    return AfterPresent(g_present(swapChain, syncInterval, flags));
 }
 
 HRESULT STDMETHODCALLTYPE HookPresent1(IDXGISwapChain1* swapChain, UINT syncInterval, UINT flags, const DXGI_PRESENT_PARAMETERS* params) {
@@ -67,7 +84,7 @@ HRESULT STDMETHODCALLTYPE HookPresent1(IDXGISwapChain1* swapChain, UINT syncInte
     Guarded([&] { OnPresent(swapChain, flags); });
     if (g_presenter)
         ServiceTeardown(g_presenter->backend, Teardown);
-    return g_present1(swapChain, syncInterval, flags, params);
+    return AfterPresent(g_present1(swapChain, syncInterval, flags, params));
 }
 
 HRESULT STDMETHODCALLTYPE HookResizeBuffers(IDXGISwapChain* swapChain, UINT bufferCount, UINT width, UINT height, DXGI_FORMAT format, UINT flags) {

@@ -249,15 +249,17 @@ void ServiceTeardown(Backend backend, void (*teardown)()) {
         return;
     if (g_activeBackend != backend || !g_teardownPending.exchange(false))
         return;
-    {
-        std::lock_guard<std::mutex> lock(g_frameMutex);
-        Guarded([&] { teardown(); });
-    }
+    ReleaseOverlay(teardown);
     {
         std::lock_guard<std::mutex> lock(g_teardownMutex);
         g_teardownDone = true;
     }
     g_teardownSignal.notify_all();
+}
+
+void ReleaseOverlay(void (*release)()) {
+    std::lock_guard<std::mutex> lock(g_frameMutex);
+    Guarded([&] { release(); });
 }
 
 bool TeardownOnRenderThread(unsigned timeoutMs) {
