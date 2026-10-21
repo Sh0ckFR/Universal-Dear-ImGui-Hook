@@ -65,6 +65,9 @@ struct Options {
     bool secondWindow = false;
     // Images created with uih::CreateTexture() and drawn every frame.
     int textures = 0;
+    // Removes the device of the host while the menu is open, then creates a
+    // new one, as a game recovering from a GPU fault does.
+    bool removeDevice = false;
 };
 
 // Display mode of the fullscreen scenario.
@@ -84,6 +87,8 @@ struct Host {
     // Exclusive fullscreen at kFullscreen, or back to the window, through the
     // API. False when the API has no exclusive mode.
     virtual bool Fullscreen(bool) { return false; }
+    // Makes the device removed, as a GPU fault does. False when the API cannot.
+    virtual bool RemoveDevice() { return false; }
     // Errors reported by the validation layers enabled for the test, 0 without them.
     virtual int ValidationErrors() const { return 0; }
 };

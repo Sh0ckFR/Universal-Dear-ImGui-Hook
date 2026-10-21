@@ -444,6 +444,15 @@ struct D3D12Host : Host {
 
     bool Fullscreen(bool on) override { return DxgiFullscreen(swapChain, on) && Resize(0, 0); }
 
+    bool RemoveDevice() override {
+        ID3D12Device5* device5 = nullptr;
+        if (FAILED(device->QueryInterface(IID_PPV_ARGS(&device5))))
+            return false;
+        device5->RemoveDevice();
+        device5->Release();
+        return true;
+    }
+
     void Frame() override {
         UINT index = swapChain->GetCurrentBackBufferIndex();
         allocator->Reset();
@@ -1392,6 +1401,7 @@ int main(int argc, char** argv) {
         else if (arg == "--fault" && i + 1 < argc) options.fault = argv[++i];
         else if (arg == "--second-window") options.secondWindow = true;
         else if (arg == "--textures" && i + 1 < argc) options.textures = atoi(argv[++i]);
+        else if (arg == "--remove-device") options.removeDevice = true;
         else if (arg == "--warp") options.warp = true;
         else if (arg == "--capture") options.capture = true;
         else if (arg == "--device-proc-addr") options.deviceProcAddr = true;
@@ -1405,7 +1415,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception] [--second-window] [--textures N] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception] [--second-window] [--textures N] [--remove-device] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -1545,6 +1555,39 @@ int main(int argc, char** argv) {
                     result = Fail("a texture was not uploaded");
             if (result)
                 break;
+            if (options.removeDevice) {
+                if (!host->RemoveDevice()) {
+                    result = Fail("the host could not remove its device");
+                    break;
+                }
+                ULONGLONG start = GetTickCount64();
+                for (int i = 0; i < 30; ++i) {
+                    PumpMessages();
+                    host->Frame();
+                }
+                ULONGLONG elapsed = GetTickCount64() - start;
+                printf("30 frames on the removed device in %llu ms\n", elapsed);
+                if (elapsed > 3000) {
+                    result = Fail("the overlay holds up the frames of the removed device");
+                    break;
+                }
+                host.reset();
+                host = CreateHost(options.api);
+                if (!host->Init(window, options)) {
+                    result = Fail("the host could not create a new device");
+                    break;
+                }
+                for (int i = 0; i < 60; ++i) {
+                    PumpMessages();
+                    host->Frame();
+                }
+                int vertices = ImGui::GetCurrentContext() ? ImGui::GetIO().MetricsRenderVertices : 0;
+                printf("new device: %d vertices\n", vertices);
+                if (vertices == 0 || g_texture->Status != ImTextureStatus_OK) {
+                    result = Fail("the overlay did not come back on the new device");
+                    break;
+                }
+            }
             if (options.resize) {
                 for (const auto& size : kResizes) {
                     ResizeWindow(window, size[0], size[1]);
