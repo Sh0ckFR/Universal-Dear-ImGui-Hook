@@ -64,6 +64,9 @@ extern const DxgiPresenter kD3D10Presenter;
 extern const DxgiPresenter kD3D11Presenter;
 extern const DxgiPresenter kD3D12Presenter;
 
+// Drops the references the D3D12 hooks keep to queues of removed devices.
+void ReleaseRemovedQueues();
+
 // Format usable for a render target view on a swap chain buffer.
 DXGI_FORMAT RenderTargetFormat(DXGI_FORMAT format);
 // True for render target formats that store linear values.
