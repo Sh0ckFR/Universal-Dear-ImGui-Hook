@@ -367,6 +367,7 @@ int main(int argc, char** argv) {
         else if (arg == "--egl") options.egl = true;
         else if (arg == "--lookup") options.lookup = true;
         else if (arg == "--device-proc-addr") options.deviceProcAddr = true;
+        else if (arg == "--transfer-only") options.transferOnly = true;
         else if (arg == "--menu-key" && i + 1 < argc) options.menuKey = static_cast<int>(strtol(argv[++i], nullptr, 0));
         else if (arg == "--unload-key" && i + 1 < argc) options.unloadKey = static_cast<int>(strtol(argv[++i], nullptr, 0));
         else if (arg == "--resize") options.resize = true;
@@ -374,7 +375,7 @@ int main(int argc, char** argv) {
         else if (arg == "--second-window") options.secondWindow = true;
     }
     if (options.api != "opengl" && options.api != "vulkan") {
-        printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--menu-key keysym] [--unload-key keysym] [--resize] [--reload] [--second-window]\n");
+        printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--transfer-only] [--menu-key keysym] [--unload-key keysym] [--resize] [--reload] [--second-window]\n");
         return 2;
     }
     setvbuf(stdout, nullptr, _IOLBF, 0);
@@ -398,7 +399,8 @@ int main(int argc, char** argv) {
         return openGL;
     };
     std::unique_ptr<Host> host = createHost();
-    std::string name = options.api + (options.egl ? " egl" : "") + (options.lookup ? " lookup" : "") + (options.deviceProcAddr ? " device-proc-addr" : "");
+    std::string name = options.api + (options.egl ? " egl" : "") + (options.lookup ? " lookup" : "") + (options.deviceProcAddr ? " device-proc-addr" : "") +
+                       (options.transferOnly ? " transfer-only" : "");
 
     Window window = visual ? CreateHostWindow(display, visual) : 0;
     if (!window || !host->Init({display, window}, options))

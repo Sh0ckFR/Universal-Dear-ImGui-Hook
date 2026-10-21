@@ -252,7 +252,9 @@ struct VulkanHost : Host {
         swapchainInfo.imageColorSpace = format.colorSpace;
         swapchainInfo.imageExtent = capabilities.currentExtent;
         swapchainInfo.imageArrayLayers = 1;
-        swapchainInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        swapchainInfo.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        if (!options.transferOnly)
+            swapchainInfo.imageUsage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
         swapchainInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
         swapchainInfo.preTransform = capabilities.currentTransform;
         swapchainInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;

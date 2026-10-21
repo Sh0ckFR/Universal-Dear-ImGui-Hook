@@ -65,6 +65,9 @@ struct Options {
     bool secondWindow = false;
     // Images created with uih::CreateTexture() and drawn every frame.
     int textures = 0;
+    // The Vulkan swap chain images are only written by transfers, as by
+    // engines that copy their frame into them.
+    bool transferOnly = false;
 };
 
 // Display mode of the fullscreen scenario.
