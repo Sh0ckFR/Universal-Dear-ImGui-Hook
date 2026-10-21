@@ -44,8 +44,8 @@ Prebuilt libraries are attached to each [release](../../releases), and every com
 
 | Game | File |
 | --- | --- |
-| Windows, 64-bit | `Universal-ImGui-Hook-msvc-x64.dll` or `-mingw-x86_64.dll` |
-| Windows, 32-bit | `Universal-ImGui-Hook-msvc-Win32.dll` or `-mingw-i686.dll` |
+| Windows, 64-bit | `Universal-ImGui-Hook-msvc-x64.dll` |
+| Windows, 32-bit | `Universal-ImGui-Hook-msvc-Win32.dll` |
 | Linux, x86-64 or ARM64 | `Universal-ImGui-Hook-linux-x86_64.so` or `-linux-aarch64.so` (glibc 2.28 or later) |
 
 To build it yourself on Windows, open `Universal-ImGui-Hook.sln` in Visual Studio 2022 or newer and build `Release|x64`: the DLL is `build/vs/x64/Release/Universal-ImGui-Hook.dll`. On Linux:
@@ -298,7 +298,7 @@ The [CI](.github/workflows/build.yml) runs on every push and pull request:
 | DDNet OpenGL, Vulkan | The released library in a real game |
 | FetchContent consumer | The repository as a CMake dependency |
 
-Pushing a `v*` tag publishes the libraries as a release.
+Pushing a `v*` tag publishes the MSVC and Linux portable libraries as a release, once every job above has passed.
 
 ## Contributing
 
@@ -325,7 +325,7 @@ Pushing a `v*` tag publishes the libraries as a release.
 - HDR10 swap chains (PQ color space) show the overlay with wrong colors.
 - A Vulkan swap chain created before the hook has no overlay until the game recreates it: its presents report `VK_SUBOPTIMAL_KHR`, which games answer by recreating it.
 - Native ARM64 Windows games are not supported: MinHook only handles x86 and x64.
-- Only Windows builds made with MSVC survive an exception in the overlay: MinGW-w64 has no structured exception handling, and Linux builds are not protected either.
+- Only Windows builds made with MSVC, the released ones, survive an exception in the overlay: MinGW-w64 has no structured exception handling, and Linux builds are not protected either.
 
 ## Built With
 
