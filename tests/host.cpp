@@ -554,6 +554,9 @@ constexpr uint8_t kProbe[3] = {200, 100, 50};
 constexpr int kProbeX = 650;
 constexpr int kProbeY = 500;
 ImTextureData* g_texture = nullptr;
+// Textures of the textures scenario. The last one, of the probe color, is
+// drawn on the probe.
+std::vector<ImTextureData*> g_textures;
 bool g_setupCalled = false;
 // Set by the fault scenario.
 const char* g_fault = nullptr;
@@ -567,20 +570,31 @@ void DrawTestMenu() {
         volatile int* volatile address = nullptr;
         *address = 1;
     }
-    ImGui::GetForegroundDrawList()->AddRectFilled(ImVec2(kProbeX - 50.0f, kProbeY - 50.0f), ImVec2(kProbeX + 50.0f, kProbeY + 50.0f),
-                                                  IM_COL32(kProbe[0], kProbe[1], kProbe[2], 255));
+    ImDrawList* foreground = ImGui::GetForegroundDrawList();
+    ImVec2 probeMin(kProbeX - 50.0f, kProbeY - 50.0f);
+    ImVec2 probeMax(kProbeX + 50.0f, kProbeY + 50.0f);
+    if (g_textures.empty()) {
+        foreground->AddRectFilled(probeMin, probeMax, IM_COL32(kProbe[0], kProbe[1], kProbe[2], 255));
+    } else {
+        for (size_t i = 0; i + 1 < g_textures.size(); ++i)
+            foreground->AddImage(g_textures[i]->GetTexRef(), ImVec2(0, 0), ImVec2(1, 1));
+        foreground->AddImage(g_textures.back()->GetTexRef(), probeMin, probeMax);
+    }
     ImGui::SetNextWindowPos(ImVec2(50, 50));
     ImGui::SetNextWindowSize(ImVec2(500, 400));
     ImGui::Begin("uih host", nullptr, ImGuiWindowFlags_NoResize);
     ImGui::Text("Backend: %s", uih::BackendName(uih::ActiveBackend()));
     ImGui::Image(g_texture->GetTexRef(), ImVec2(64, 64));
-    // Created and drawn in the same frame, as menus often do.
+    // Created and drawn in the same frame, as menus often do. Refused when
+    // the textures scenario reached the limit.
     static ImTextureData* late = [] {
         std::vector<uint32_t> pixels(16 * 16, IM_COL32(50, 200, 100, 255));
         return uih::CreateTexture(pixels.data(), 16, 16);
     }();
-    ImGui::SameLine();
-    ImGui::Image(late->GetTexRef(), ImVec2(64, 64));
+    if (late) {
+        ImGui::SameLine();
+        ImGui::Image(late->GetTexRef(), ImVec2(64, 64));
+    }
     ImGui::Button("Button", ImVec2(400, 200));
     ImGui::End();
 }
@@ -1377,6 +1391,7 @@ int main(int argc, char** argv) {
         else if (arg == "--remove") options.remove = true;
         else if (arg == "--fault" && i + 1 < argc) options.fault = argv[++i];
         else if (arg == "--second-window") options.secondWindow = true;
+        else if (arg == "--textures" && i + 1 < argc) options.textures = atoi(argv[++i]);
         else if (arg == "--warp") options.warp = true;
         else if (arg == "--capture") options.capture = true;
         else if (arg == "--device-proc-addr") options.deviceProcAddr = true;
@@ -1390,7 +1405,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception] [--second-window] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception] [--second-window] [--textures N] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -1407,6 +1422,16 @@ int main(int argc, char** argv) {
     // Created before the hook starts, registered with its context on the first frame.
     std::vector<uint32_t> pixels(32 * 32, IM_COL32(200, 100, 50, 255));
     g_texture = uih::CreateTexture(pixels.data(), 32, 32);
+    if (options.textures > 0) {
+        std::vector<uint32_t> probe(4 * 4, IM_COL32(kProbe[0], kProbe[1], kProbe[2], 255));
+        for (int i = 0; i < options.textures; ++i)
+            if (ImTextureData* texture = uih::CreateTexture(probe.data(), 4, 4))
+                g_textures.push_back(texture);
+        size_t expected = std::min<size_t>(options.textures, uih::kMaxTextures - 1);
+        printf("%zu textures created, %zu expected\n", g_textures.size(), expected);
+        if (g_textures.size() != expected)
+            return Fail("the texture limit was not applied");
+    }
 
     if (options.injectAt == 0 && options.dll.empty())
         StartHook(options);
@@ -1515,6 +1540,11 @@ int main(int argc, char** argv) {
                 result = Fail("the texture was not uploaded");
                 break;
             }
+            for (ImTextureData* texture : g_textures)
+                if (result == 0 && (texture->Status != ImTextureStatus_OK || texture->GetTexID() == ImTextureID_Invalid))
+                    result = Fail("a texture was not uploaded");
+            if (result)
+                break;
             if (options.resize) {
                 for (const auto& size : kResizes) {
                     ResizeWindow(window, size[0], size[1]);
@@ -1598,6 +1628,9 @@ int main(int argc, char** argv) {
                 result = Fail("hook did not release its resources");
             else if (g_texture->GetTexID() != ImTextureID_Invalid)
                 result = Fail("the texture was not released");
+            for (ImTextureData* texture : g_textures)
+                if (result == 0 && texture->GetTexID() != ImTextureID_Invalid)
+                    result = Fail("a texture was not released");
         } else if (stopFrame >= 0 && frame == stopFrame + 60) {
             if (!options.reload || cycle == 2)
                 break;
@@ -1612,6 +1645,8 @@ int main(int argc, char** argv) {
 
     uih::Stop();
     uih::DestroyTexture(g_texture);
+    for (ImTextureData* texture : g_textures)
+        uih::DestroyTexture(texture);
     int validationErrors = host->ValidationErrors();
     if (result == 0 && validationErrors > 0)
         result = Fail("the validation layer reported errors");

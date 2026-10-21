@@ -21,6 +21,10 @@ using NativeWindow = uint32_t;
 
 void Log(const char* fmt, ...);
 
+// Descriptors the renderer backends reserve for textures: those of
+// CreateTexture() and the font atlas, which may hold several while it grows.
+constexpr int kTextureDescriptors = kMaxTextures + 8;
+
 // Every hook keeps one of these alive while it runs so Stop() can wait for
 // in-flight calls before the hooks are removed.
 class ScopedCall {

@@ -86,11 +86,14 @@ void SetMenuOpen(bool open);
 
 const char* BackendName(Backend backend);
 
+// Textures that CreateTexture() keeps at once, until DestroyTexture() releases them.
+constexpr int kMaxTextures = 256;
+
 // Creates an image from `width` * `height` RGBA pixels, 8 bits per channel,
 // rows from top to bottom. Draw it with ImGui::Image(texture->GetTexRef(), size).
 // The pixels are copied and uploaded by the active backend on the next frame,
 // and again after a backend switch. Callable from any thread, before or
-// after Start().
+// after Start(). Null when `kMaxTextures` textures already exist.
 ImTextureData* CreateTexture(const void* rgba, int width, int height);
 // Releases a texture on the next frame. Do not draw it afterwards.
 void DestroyTexture(ImTextureData* texture);
