@@ -458,7 +458,7 @@ bool CreateDeviceResources(VkDevice device, VkQueue queue, uint32_t family, VkPh
     info.Device = device;
     info.QueueFamily = family;
     info.Queue = queue;
-    info.DescriptorPoolSize = 16;
+    info.DescriptorPoolSize = kTextureDescriptors;
     info.MinImageCount = 2;
     info.ImageCount = imageCount;
     info.PipelineInfoMain.RenderPass = r.renderPass;

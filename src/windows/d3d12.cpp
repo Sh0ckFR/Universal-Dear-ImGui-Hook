@@ -29,7 +29,6 @@ constexpr size_t kCreateSwapChainForCompositionIndex = 24;
 // Swap chains and direct queues remembered; the oldest entry goes first.
 constexpr size_t kMaxSwapChains = 16;
 constexpr size_t kMaxDirectQueues = 16;
-constexpr UINT kSrvHeapSize = 64;
 // Presents of a swap chain to wait before following an application that moved to another direct queue.
 constexpr int kQueueSwitchFrames = 60;
 
@@ -86,7 +85,8 @@ HANDLE g_fenceEvent = nullptr;
 UINT64 g_fenceValue = 0;
 std::vector<FrameContext> g_frames;
 DXGI_FORMAT g_format = DXGI_FORMAT_UNKNOWN;
-uint64_t g_srvFree = 0;
+// Unused slots of the SRV heap, the lowest last.
+std::vector<UINT> g_freeSrvs;
 UINT g_bufferCount = 0;
 int g_queueMisses = 0;
 bool g_framesDirty = false;
@@ -196,11 +196,9 @@ void ReleaseFrames() {
 }
 
 void AllocateSrv(ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE* cpu, D3D12_GPU_DESCRIPTOR_HANDLE* gpu) {
-    UINT index = 0;
-    while (index < kSrvHeapSize && !(g_srvFree & (1ull << index)))
-        ++index;
-    IM_ASSERT(index < kSrvHeapSize && "SRV descriptor heap exhausted");
-    g_srvFree &= ~(1ull << index);
+    IM_ASSERT(!g_freeSrvs.empty() && "SRV descriptor heap exhausted");
+    UINT index = g_freeSrvs.back();
+    g_freeSrvs.pop_back();
     UINT increment = g_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     *cpu = g_srvHeap->GetCPUDescriptorHandleForHeapStart();
     *gpu = g_srvHeap->GetGPUDescriptorHandleForHeapStart();
@@ -211,7 +209,7 @@ void AllocateSrv(ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE* cpu, D3D
 void FreeSrv(ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE cpu, D3D12_GPU_DESCRIPTOR_HANDLE) {
     UINT increment = g_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     SIZE_T index = (cpu.ptr - g_srvHeap->GetCPUDescriptorHandleForHeapStart().ptr) / increment;
-    g_srvFree |= 1ull << index;
+    g_freeSrvs.push_back(static_cast<UINT>(index));
 }
 
 bool Probe(IDXGISwapChain* swapChain) {
@@ -298,7 +296,7 @@ bool Init(IDXGISwapChain* swapChain, ID3D12CommandQueue* queue) {
 
         D3D12_DESCRIPTOR_HEAP_DESC heapDesc{};
         heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-        heapDesc.NumDescriptors = kSrvHeapSize;
+        heapDesc.NumDescriptors = kTextureDescriptors;
         heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
         g_fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
         if (FAILED(g_device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&g_srvHeap))) ||
@@ -308,7 +306,9 @@ bool Init(IDXGISwapChain* swapChain, ID3D12CommandQueue* queue) {
             Teardown();
             return false;
         }
-        g_srvFree = ~0ull;
+        g_freeSrvs.clear();
+        for (UINT index = kTextureDescriptors; index-- > 0;)
+            g_freeSrvs.push_back(index);
         g_fenceValue = 0;
 
         ImGui_ImplDX12_InitInfo info{};

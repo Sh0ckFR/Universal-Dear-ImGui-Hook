@@ -63,6 +63,8 @@ struct Options {
     std::string fault;
     // A second window with its own swap chain presents too.
     bool secondWindow = false;
+    // Images created with uih::CreateTexture() and drawn every frame.
+    int textures = 0;
 };
 
 // Display mode of the fullscreen scenario.

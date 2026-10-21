@@ -428,11 +428,16 @@ void SetMenuOpen(bool open) {
 ImTextureData* CreateTexture(const void* rgba, int width, int height) {
     if (!rgba || width <= 0 || height <= 0)
         return nullptr;
+    std::lock_guard<std::mutex> lock(g_texturesMutex);
+    // Textures waiting for their release still hold a descriptor.
+    if (g_textures.size() >= static_cast<size_t>(kMaxTextures)) {
+        Log("CreateTexture: %d textures already exist", kMaxTextures);
+        return nullptr;
+    }
     auto* texture = new ImTextureData();
     texture->Create(ImTextureFormat_RGBA32, width, height);
     memcpy(texture->GetPixels(), rgba, static_cast<size_t>(width) * height * 4);
     texture->UseColors = true;
-    std::lock_guard<std::mutex> lock(g_texturesMutex);
     g_textures.push_back({texture, t_inRenderCallback, false});
     if (t_inRenderCallback)
         ImGui::RegisterUserTexture(texture);

@@ -152,7 +152,7 @@ Everything is in `include/uih.h`, namespace `uih`.
 | `Stop()` | Removes the overlay, releases the GPU resources on the rendering thread and removes the hooks. Blocks; not from `DllMain` or a hook. `Start()` can be called again afterwards. |
 | `ActiveBackend()`, `BackendName(backend)` | API the overlay is drawn with, `Backend::None` until the first frame. |
 | `IsMenuOpen()`, `SetMenuOpen(open)` | Menu state, also toggled by `menuKey`. |
-| `CreateTexture(rgba, width, height)` | Image from RGBA pixels, uploaded by the active backend on the next frame and again after a backend switch. Any thread. |
+| `CreateTexture(rgba, width, height)` | Image from RGBA pixels, uploaded by the active backend on the next frame and again after a backend switch. Any thread. Null once `kMaxTextures` (256) images exist. |
 | `DestroyTexture(texture)` | Releases an image on the next frame. |
 
 | `Config` field | Default | Description |
