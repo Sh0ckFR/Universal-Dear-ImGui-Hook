@@ -17,6 +17,7 @@
 #include <xinput.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -1118,6 +1119,116 @@ int RunFaultMode(HWND window, Host& host, const Options& options) {
     return result;
 }
 
+// Gives every allocation of Dear ImGui pages of its own, made inaccessible
+// when it is freed: a thread that uses memory another thread released, as
+// when both grow the same vector, crashes at once. 64-bit only: the address
+// space is never reused.
+void UseGuardedAllocator() {
+#ifdef _WIN64
+    static constexpr size_t kHeader = 16;
+    ImGui::SetAllocatorFunctions(
+        [](size_t size, void*) -> void* {
+            auto* block = static_cast<uint8_t*>(VirtualAlloc(nullptr, size + kHeader, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+            if (!block)
+                return nullptr;
+            *reinterpret_cast<size_t*>(block) = size + kHeader;
+            return block + kHeader;
+        },
+        [](void* pointer, void*) {
+            if (!pointer)
+                return;
+            uint8_t* block = static_cast<uint8_t*>(pointer) - kHeader;
+            VirtualFree(block, *reinterpret_cast<size_t*>(block), MEM_DECOMMIT);
+        });
+#endif
+}
+
+// Access violations raised in the process, even those the overlay recovers from.
+std::atomic<int> g_accessViolations{0};
+
+LONG CALLBACK CountAccessViolations(EXCEPTION_POINTERS* exception) {
+    if (exception->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION)
+        ++g_accessViolations;
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+// The host renders on a thread of its own while the thread of the window
+// dispatches a flood of input messages, and the hook starts and stops in the
+// middle of it: the window procedure must not meet the overlay in Dear ImGui.
+int RunRenderThreadMode(HWND window, const Options& options) {
+    std::atomic<int> started{0};
+    std::atomic<bool> done{false};
+    std::thread render([&] {
+        std::unique_ptr<Host> host = CreateHost(options.api);
+        if (!host->Init(window, options)) {
+            started = -1;
+            return;
+        }
+        started = 1;
+        while (!done)
+            host->Frame();
+    });
+    auto pumpUntil = [](auto condition) {
+        for (ULONGLONG start = GetTickCount64(); !condition() && GetTickCount64() - start < kDetectionTimeoutMs;)
+            PumpMessages();
+        return condition();
+    };
+    // Mouse moves, characters and keys, which Dear ImGui queues as events.
+    auto flood = [&](auto until) {
+        for (int i = 0; !until(); ++i) {
+            PostMessageW(window, WM_MOUSEMOVE, 0, MAKELPARAM(100 + i % 200, 100 + i % 50));
+            PostMessageW(window, WM_CHAR, 'a' + i % 26, 0);
+            PostMessageW(window, i % 2 ? WM_KEYUP : WM_KEYDOWN, VK_F13, 0);
+            if (i % 200 != 199)
+                continue;
+            MSG msg{};
+            while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+    };
+
+    PVOID handler = AddVectoredExceptionHandler(1, CountAccessViolations);
+    int result = 0;
+    pumpUntil([&] { return started != 0; });
+    if (started != 1)
+        result = Skip("the host could not render on its thread");
+    for (int cycle = 0; cycle < 20 && result == 0; ++cycle) {
+        // The input keeps coming while the overlay creates its context.
+        StartHook(options);
+        ULONGLONG start = GetTickCount64();
+        auto active = [] { return uih::ActiveBackend() != uih::Backend::None && ImGui::GetCurrentContext(); };
+        flood([&] { return active() || GetTickCount64() - start > kDetectionTimeoutMs; });
+        if (!active()) {
+            result = Fail("backend was not detected");
+            break;
+        }
+        uih::SetMenuOpen(true);
+        start = GetTickCount64();
+        flood([&] { return GetTickCount64() - start > 250; });
+        // Stopped from another thread, as the unload key does, while the input keeps coming.
+        std::atomic<bool> stopped{false};
+        std::thread stop([&] {
+            uih::Stop();
+            stopped = true;
+        });
+        flood([&] { return stopped.load(); });
+        stop.join();
+        if (g_accessViolations > 0)
+            result = Fail("the overlay raised an access violation");
+        else if (ImGui::GetCurrentContext())
+            result = Fail("hook did not release its resources");
+    }
+    uih::Stop();
+    done = true;
+    render.join();
+    RemoveVectoredExceptionHandler(handler);
+    if (result == 0)
+        printf("PASS: %s with a render thread\n", options.api.c_str());
+    return result;
+}
+
 // Input the application reads while the menu is open ----------------------
 
 struct RawInputSeen {
@@ -1408,6 +1519,7 @@ int main(int argc, char** argv) {
         else if (arg == "--textures" && i + 1 < argc) options.textures = atoi(argv[++i]);
         else if (arg == "--remove-device") options.removeDevice = true;
         else if (arg == "--transfer-only") options.transferOnly = true;
+        else if (arg == "--render-thread") options.renderThread = true;
         else if (arg == "--warp") options.warp = true;
         else if (arg == "--capture") options.capture = true;
         else if (arg == "--device-proc-addr") options.deviceProcAddr = true;
@@ -1421,12 +1533,15 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception] [--second-window] [--textures N] [--remove-device] [--transfer-only] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception] [--second-window] [--textures N] [--remove-device] [--transfer-only] [--render-thread] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 
     WNDCLASSEXW windowClass{sizeof(WNDCLASSEXW), CS_OWNDC, DefWindowProcW, 0, 0, GetModuleHandleW(nullptr), nullptr, nullptr, nullptr, nullptr, L"uih_host", nullptr};
     RegisterClassExW(&windowClass);
+    // Before the first allocation of Dear ImGui.
+    if (options.renderThread)
+        UseGuardedAllocator();
     RECT rect{0, 0, kWidth, kHeight};
     AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
     // Screen captures need the window above everything else.
@@ -1454,6 +1569,12 @@ int main(int argc, char** argv) {
 
     if (options.fullscreen && !getenv("UIH_TEST_FULLSCREEN"))
         return Skip("changes the display mode: set UIH_TEST_FULLSCREEN=1 to run it");
+
+    if (options.renderThread) {
+        int result = RunRenderThreadMode(window, options);
+        DestroyWindow(window);
+        return result;
+    }
 
     std::unique_ptr<Host> host = CreateHost(options.api);
     if (!host->Init(window, options)) {

@@ -71,6 +71,9 @@ struct Options {
     // The Vulkan swap chain images are only written by transfers, as by
     // engines that copy their frame into them.
     bool transferOnly = false;
+    // The host renders on a thread of its own while the thread of the window
+    // dispatches a flood of input messages, as engines with a render thread do.
+    bool renderThread = false;
 };
 
 // Display mode of the fullscreen scenario.
