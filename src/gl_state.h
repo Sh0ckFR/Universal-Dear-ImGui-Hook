@@ -14,9 +14,9 @@ namespace uih::detail {
 // Needs the loader of the Dear ImGui backend, which its NewFrame() loads.
 class OverlayGlState {
 public:
-    OverlayGlState() {
-        static const auto bindFramebuffer = reinterpret_cast<void(APIENTRYP)(GLenum, GLuint)>(imgl3wGetProcAddress("glBindFramebuffer"));
-        bindFramebuffer_ = bindFramebuffer;
+    // Not cached: the loader may unload the library on shutdown and load it at
+    // another address on the next start.
+    OverlayGlState() : bindFramebuffer_(reinterpret_cast<void(APIENTRYP)(GLenum, GLuint)>(imgl3wGetProcAddress("glBindFramebuffer"))) {
         if (bindFramebuffer_) {
             glGetIntegerv(kDrawFramebufferBinding, &drawFramebuffer_);
             bindFramebuffer_(kDrawFramebuffer, 0);
@@ -40,7 +40,7 @@ private:
     static constexpr GLenum kDrawFramebuffer = 0x8CA9;
     static constexpr GLenum kDrawFramebufferBinding = 0x8CA6;
     static constexpr GLenum kFramebufferSrgb = 0x8DB9;
-    void(APIENTRYP bindFramebuffer_)(GLenum, GLuint) = nullptr;
+    void(APIENTRYP bindFramebuffer_)(GLenum, GLuint);
     GLint drawFramebuffer_ = 0;
     GLint unpackBuffer_ = 0;
     GLboolean srgb_ = GL_FALSE;
