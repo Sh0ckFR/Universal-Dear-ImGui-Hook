@@ -11,11 +11,16 @@
 #include <dlfcn.h>
 #include <unistd.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
+
+#ifndef GL_APIENTRY
+#define GL_APIENTRY
+#endif
 
 namespace {
 
@@ -24,6 +29,54 @@ constexpr int kSecondWindow[4] = {820, 0, 400, 300};
 
 struct OpenGLHost : Host {
     virtual VisualID ChooseVisual(Display* display) = 0;
+
+    // Framebuffer object and pixel unpack buffer left bound by the
+    // bound framebuffer scenario.
+    GLuint framebuffer = 0;
+    GLuint unpackBuffer = 0;
+    void(GL_APIENTRY* bindFramebuffer)(GLenum, GLuint) = nullptr;
+    void(GL_APIENTRY* bindBuffer)(GLenum, GLuint) = nullptr;
+
+    template <typename Proc>
+    bool CreateOffscreenTarget(Proc proc) {
+        constexpr GLenum kFramebuffer = 0x8D40;
+        constexpr GLenum kColorAttachment0 = 0x8CE0;
+        constexpr GLenum kPixelUnpackBuffer = 0x88EC;
+        constexpr GLenum kStreamDraw = 0x88E0;
+        auto genFramebuffers = reinterpret_cast<void(GL_APIENTRY*)(GLsizei, GLuint*)>(proc("glGenFramebuffers"));
+        auto framebufferTexture2D = reinterpret_cast<void(GL_APIENTRY*)(GLenum, GLenum, GLenum, GLuint, GLint)>(proc("glFramebufferTexture2D"));
+        auto genBuffers = reinterpret_cast<void(GL_APIENTRY*)(GLsizei, GLuint*)>(proc("glGenBuffers"));
+        auto bufferData = reinterpret_cast<void(GL_APIENTRY*)(GLenum, ptrdiff_t, const void*, GLenum)>(proc("glBufferData"));
+        bindFramebuffer = reinterpret_cast<void(GL_APIENTRY*)(GLenum, GLuint)>(proc("glBindFramebuffer"));
+        bindBuffer = reinterpret_cast<void(GL_APIENTRY*)(GLenum, GLuint)>(proc("glBindBuffer"));
+        if (!genFramebuffers || !framebufferTexture2D || !genBuffers || !bufferData || !bindFramebuffer || !bindBuffer)
+            return false;
+        GLuint texture = 0;
+        glGenTextures(1, &texture);
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 64, 64, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        genFramebuffers(1, &framebuffer);
+        bindFramebuffer(kFramebuffer, framebuffer);
+        framebufferTexture2D(kFramebuffer, kColorAttachment0, GL_TEXTURE_2D, texture, 0);
+        bindFramebuffer(kFramebuffer, 0);
+        genBuffers(1, &unpackBuffer);
+        bindBuffer(kPixelUnpackBuffer, unpackBuffer);
+        bufferData(kPixelUnpackBuffer, 16, nullptr, kStreamDraw);
+        bindBuffer(kPixelUnpackBuffer, 0);
+        return true;
+    }
+
+    // The window is cleared through the default framebuffer, then the
+    // offscreen target is left bound for the swap.
+    void BindForSwap(bool offscreen) {
+        constexpr GLenum kFramebuffer = 0x8D40;
+        constexpr GLenum kPixelUnpackBuffer = 0x88EC;
+        if (!framebuffer)
+            return;
+        bindFramebuffer(kFramebuffer, offscreen ? framebuffer : 0);
+        bindBuffer(kPixelUnpackBuffer, offscreen ? unpackBuffer : 0);
+    }
 
     static bool IsVersion3() {
         const char* version = reinterpret_cast<const char*>(glGetString(GL_VERSION));
@@ -115,13 +168,18 @@ struct GlxHost : OpenGLHost {
             drawable = glXCreateWindow(display, config, window.window, nullptr);
         }
         context = glXCreateNewContext(display, config, GLX_RGBA_TYPE, nullptr, True);
-        return swapBuffers && context && glXMakeCurrent(display, drawable, context) && IsVersion3();
+        if (!swapBuffers || !context || !glXMakeCurrent(display, drawable, context) || !IsVersion3())
+            return false;
+        return !options.boundFramebuffer ||
+               CreateOffscreenTarget([](const char* name) { return reinterpret_cast<void*>(glXGetProcAddressARB(reinterpret_cast<const GLubyte*>(name))); });
     }
 
     void Frame() override {
         // Another host may have made its context current.
         glXMakeCurrent(display, drawable, context);
+        BindForSwap(false);
         Clear();
+        BindForSwap(true);
         swapBuffers(display, drawable);
     }
 
@@ -168,13 +226,17 @@ struct EglHost : OpenGLHost {
         }
         surface = eglCreateWindowSurface(display, config, window.window, nullptr);
         context = eglCreateContext(display, config, EGL_NO_CONTEXT, kContextAttributes);
-        return swapBuffers && surface != EGL_NO_SURFACE && context != EGL_NO_CONTEXT &&
-               eglMakeCurrent(display, surface, surface, context) && IsVersion3();
+        if (!swapBuffers || surface == EGL_NO_SURFACE || context == EGL_NO_CONTEXT || !eglMakeCurrent(display, surface, surface, context) ||
+            !IsVersion3())
+            return false;
+        return !options.boundFramebuffer || CreateOffscreenTarget([](const char* name) { return reinterpret_cast<void*>(eglGetProcAddress(name)); });
     }
 
     void Frame() override {
         eglMakeCurrent(display, surface, surface, context);
+        BindForSwap(false);
         Clear();
+        BindForSwap(true);
         swapBuffers(display, surface);
     }
 
@@ -448,9 +510,10 @@ int main(int argc, char** argv) {
         else if (arg == "--reload") options.reload = true;
         else if (arg == "--second-window") options.secondWindow = true;
         else if (arg == "--recreate-context") options.recreateContext = true;
+        else if (arg == "--bound-framebuffer") options.boundFramebuffer = true;
     }
     if (options.api != "opengl" && options.api != "vulkan") {
-        printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--transfer-only] [--menu-key keysym] [--unload-key keysym] [--resize] [--reload] [--second-window] [--recreate-context]\n");
+        printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--transfer-only] [--menu-key keysym] [--unload-key keysym] [--resize] [--reload] [--second-window] [--recreate-context] [--bound-framebuffer]\n");
         return 2;
     }
     setvbuf(stdout, nullptr, _IOLBF, 0);

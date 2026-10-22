@@ -2,7 +2,7 @@
 
 #include <unordered_map>
 
-#include "gl_srgb.h"
+#include "gl_state.h"
 #include "imgui_impl_opengl3.h"
 
 namespace uih::detail {
@@ -85,7 +85,7 @@ void Render(GetCurrentContextFn getCurrentContext, NativeWindow window, uint32_t
     input::SetSurfaceSize(width, height);
     ImGui_ImplOpenGL3_NewFrame();
     ImDrawData* drawData = Frame();
-    FramebufferSrgbOff srgbOff([](const char* name) { return interpose::kGlx.Next(name); });
+    OverlayGlState state;
     ImGui_ImplOpenGL3_RenderDrawData(drawData);
 }
 

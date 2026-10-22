@@ -1,6 +1,6 @@
 #include "internal.h"
 
-#include "gl_srgb.h"
+#include "gl_state.h"
 #include "imgui_impl_opengl3.h"
 
 namespace uih::detail {
@@ -66,7 +66,7 @@ void Render(HDC hdc) {
         return;
     ImGui_ImplOpenGL3_NewFrame();
     ImDrawData* drawData = Frame();
-    FramebufferSrgbOff srgbOff([](const char* name) { return GetProc<void*>(g_module, name); });
+    OverlayGlState state;
     ImGui_ImplOpenGL3_RenderDrawData(drawData);
 }
 
