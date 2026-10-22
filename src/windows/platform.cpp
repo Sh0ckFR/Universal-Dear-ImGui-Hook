@@ -180,6 +180,7 @@ bool BindWindow(HWND window) {
     if (g_window == window && ImGui::GetCurrentContext())
         return true;
 
+    InputLock lock;
     if (!CreateContext()) {
         input::Detach();
         ImGui_ImplWin32_Shutdown();
@@ -193,6 +194,7 @@ bool BindWindow(HWND window) {
 }
 
 void UnbindWindow() {
+    InputLock lock;
     if (!ImGui::GetCurrentContext())
         return;
     input::Detach();

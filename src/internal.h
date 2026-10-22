@@ -48,6 +48,24 @@ public:
 };
 bool InsideForeignPresent();
 
+// Dear ImGui is not thread-safe. The window procedure feeds its input on the
+// thread of the window while the overlay draws on the thread that presents:
+// both hold this lock while they use the input or create or destroy the context.
+class InputLock {
+public:
+    InputLock();
+    ~InputLock();
+    InputLock(const InputLock&) = delete;
+    InputLock& operator=(const InputLock&) = delete;
+
+private:
+    int depth_;
+};
+// Input locks held by this thread.
+int InputLockDepth();
+// Releases the input locks this thread took beyond `depth`.
+void ReleaseInputLocks(int depth);
+
 // Frame orchestration ----------------------------------------------------
 
 const Config& GetConfig();
@@ -134,7 +152,12 @@ NativeWindow FindProcessWindow(uint32_t width = 0, uint32_t height = 0);
 // or buttons bring it back. False when it faulted.
 template <typename Work>
 bool Guarded(Work&& work) {
-    return platform::RunGuarded([](void* context) { (*static_cast<std::remove_reference_t<Work>*>(context))(); }, &work);
+    int depth = InputLockDepth();
+    bool ok = platform::RunGuarded([](void* context) { (*static_cast<std::remove_reference_t<Work>*>(context))(); }, &work);
+    // The exception may have skipped the destructors of the locks `work` took.
+    if (!ok)
+        ReleaseInputLocks(depth);
+    return ok;
 }
 
 // Draws the overlay with `render` when `swapchain` is its target.

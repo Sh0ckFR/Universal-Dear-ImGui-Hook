@@ -200,6 +200,23 @@ bool WaitForIdleHooks(unsigned timeoutMs) {
     return true;
 }
 
+std::recursive_mutex g_inputMutex;
+thread_local int t_inputLocks = 0;
+
+InputLock::InputLock() : depth_(t_inputLocks) {
+    g_inputMutex.lock();
+    ++t_inputLocks;
+}
+
+InputLock::~InputLock() { ReleaseInputLocks(depth_); }
+
+int InputLockDepth() { return t_inputLocks; }
+
+void ReleaseInputLocks(int depth) {
+    for (; t_inputLocks > depth; --t_inputLocks)
+        g_inputMutex.unlock();
+}
+
 thread_local int g_foreignPresentDepth = 0;
 
 ForeignPresentScope::ForeignPresentScope() { ++g_foreignPresentDepth; }
@@ -341,17 +358,21 @@ void OnFault(unsigned long code) {
 
 ImDrawData* Frame() {
     UpdateTextures();
-    platform::NewFrame();
-    PollKeys();
-    ApplyScale();
-    ImGuiIO& io = ImGui::GetIO();
-    io.MouseDrawCursor = g_menuOpen;
-    // The game keeps its controller while the menu is closed.
-    if (g_menuOpen)
-        io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
-    else
-        io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableGamepad;
-    ImGui::NewFrame();
+    {
+        // The input events queued by the window procedure are consumed here.
+        InputLock lock;
+        platform::NewFrame();
+        PollKeys();
+        ApplyScale();
+        ImGuiIO& io = ImGui::GetIO();
+        io.MouseDrawCursor = g_menuOpen;
+        // The game keeps its controller while the menu is closed.
+        if (g_menuOpen)
+            io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+        else
+            io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableGamepad;
+        ImGui::NewFrame();
+    }
     t_inRenderCallback = true;
     if (g_config.render)
         g_config.render();
