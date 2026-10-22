@@ -275,6 +275,7 @@ Without a GPU, as on the CI runners, Direct3D uses WARP, and Mesa's software dri
 | `--remove` | `F11` removes the overlay and `INSERT` brings it back, twice, without a module to free |
 | `--second-window` | A second window with its own device presents too: the overlay must stay on one window, follow the focus, and come back when the second window stops presenting |
 | `--fault access\|exception` | The render callback writes to a null pointer or throws: the overlay must be removed while the host keeps rendering, then start again (MSVC) |
+| `--recreate-context` | The OpenGL context is deleted with the menu open and a new one, with textures of its own, takes over: the overlay comes back and leaves them alone |
 | `--input raw\|directinput` | What the game reads while the menu is open |
 | `--gamepad <fake xinput1_4.dll>` | Controller toggling the menu and hidden from the game while it is open |
 | `--resubclass` | The host subclasses its window after the overlay: with `--reload` the overlay starts again without calling itself through the host's procedure, with `--dll` the unload key leaves the DLL loaded and the procedures still chain |
@@ -284,7 +285,7 @@ Without a GPU, as on the CI runners, Direct3D uses WARP, and Mesa's software dri
 | `--proxy <path>` | Loads the DLL as `dinput8.dll` |
 | `--preview <path>` | Not a test: loads the DLL, opens its menu and renders until the window is closed, to look at a menu without a game |
 
-On Linux, `uih_host` does not link the hook: each test preloads the `.so`, opens the menu, checks the pixels and removes the overlay, through GLX, EGL, `dlsym()` lookups and Vulkan, with `--resize`, `--reload` and `--second-window` variants. It needs `libx11-dev libxtst-dev libgl-dev libegl-dev`; without a display, run `xvfb-run -a ctest --test-dir build/linux`. `tests/ddnet.sh` runs the same scenario on the game [DDNet](https://ddnet.org/). With `-DUIH_SANITIZE=ON`, the preload tests load the sanitizer runtime before the library, and any memory error or undefined behavior in the hook fails them.
+On Linux, `uih_host` does not link the hook: each test preloads the `.so`, opens the menu, checks the pixels and removes the overlay, through GLX, EGL, `dlsym()` lookups and Vulkan, with `--resize`, `--reload`, `--second-window` and `--recreate-context` variants. It needs `libx11-dev libxtst-dev libgl-dev libegl-dev`; without a display, run `xvfb-run -a ctest --test-dir build/linux`. `tests/ddnet.sh` runs the same scenario on the game [DDNet](https://ddnet.org/). With `-DUIH_SANITIZE=ON`, the preload tests load the sanitizer runtime before the library, and any memory error or undefined behavior in the hook fails them.
 
 The [CI](.github/workflows/build.yml) runs on every push and pull request:
 
