@@ -22,6 +22,8 @@ HANDLE g_stopEvent = nullptr;
 HANDLE g_wakeEvent = nullptr;
 void* g_dllNotificationCookie = nullptr;
 std::atomic<bool> g_unloadRequested{false};
+// False when Stop() left a thread inside a hook: the module must stay loaded.
+std::atomic<bool> g_hooksIdle{true};
 
 RendererSlot g_renderers[] = {
     {&kVulkanRenderer},
@@ -128,12 +130,22 @@ DWORD WINAPI Worker(void*) {
 
 DWORD WINAPI UnloadThread(void* module) {
     uih::Stop();
+    if (!g_hooksIdle) {
+        Log("A thread is still inside a hook, the library stays loaded");
+        return 0;
+    }
     FreeLibraryAndExitThread(static_cast<HMODULE>(module), 0);
 }
 
 DWORD WINAPI RemoveThread(void*) {
     StopUntilMenuInput();
     return 0;
+}
+
+void TeardownRenderers() {
+    for (RendererSlot& slot : g_renderers)
+        if (slot.installed)
+            Guarded([&] { slot.renderer->Teardown(); });
 }
 
 bool ApplicationFocused() {
@@ -229,16 +241,17 @@ void Stop() {
     g_worker = nullptr;
 
     // Release GPU resources on the thread that renders. Fall back to this
-    // thread when the application stopped presenting.
+    // thread when the application stopped presenting, but not while a frame
+    // of the overlay still uses them: they are left behind then.
     if (!TeardownOnRenderThread(1000)) {
         Log("Rendering thread did not respond, releasing resources from Stop()");
-        for (RendererSlot& slot : g_renderers)
-            if (slot.installed)
-                Guarded([&] { slot.renderer->Teardown(); });
+        if (!ReleaseOverlayWithin(2000, TeardownRenderers))
+            Log("The overlay is still drawing, its resources are left behind");
     }
 
     MH_DisableHook(MH_ALL_HOOKS);
-    if (!WaitForIdleHooks(2000))
+    g_hooksIdle = WaitForIdleHooks(2000);
+    if (!g_hooksIdle)
         Log("Hooks still running after timeout");
     Sleep(100);
     MH_RemoveHook(MH_ALL_HOOKS);

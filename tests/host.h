@@ -79,6 +79,9 @@ struct Options {
     // Deletes the OpenGL context while the menu is open and renders with a
     // new one, as games do when the video settings change.
     bool recreateContext = false;
+    // A frame of the overlay outlasts the wait of uih::Stop() for the thread
+    // that presents, as a slow render callback or a stalled GPU make it.
+    bool slowFrame = false;
 };
 
 // Display mode of the fullscreen scenario.
