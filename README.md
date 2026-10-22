@@ -275,14 +275,17 @@ Without a GPU, as on the CI runners, Direct3D uses WARP, and Mesa's software dri
 | `--remove` | `F11` removes the overlay and `INSERT` brings it back, twice, without a module to free |
 | `--second-window` | A second window with its own device presents too: the overlay must stay on one window, follow the focus, and come back when the second window stops presenting |
 | `--fault access\|exception` | The render callback writes to a null pointer or throws: the overlay must be removed while the host keeps rendering, then start again (MSVC) |
+| `--recreate-context` | The OpenGL context is deleted with the menu open and a new one, with textures of its own, takes over: the overlay comes back and leaves them alone |
 | `--input raw\|directinput` | What the game reads while the menu is open |
 | `--gamepad <fake xinput1_4.dll>` | Controller toggling the menu and hidden from the game while it is open |
+| `--resubclass` | The host subclasses its window after the overlay: with `--reload` the overlay starts again without calling itself through the host's procedure, with `--dll` the unload key leaves the DLL loaded and the procedures still chain |
+| `--render-thread` | The host presents from a thread of its own while the window thread dispatches a flood of input messages, and the hook starts and stops 20 times: no access violation may occur, and on x64 freed Dear ImGui memory is made inaccessible so that any use of it does |
 | `--dll <path>` | Loads the real DLL and drives it with `INSERT` and `F11` |
 | `--menu-key <vk>`, `--unload-key <vk>` | The keys a DLL built with other settings uses, such as `0x70` for F1 (X11 keysyms on Linux) |
 | `--proxy <path>` | Loads the DLL as `dinput8.dll` |
 | `--preview <path>` | Not a test: loads the DLL, opens its menu and renders until the window is closed, to look at a menu without a game |
 
-On Linux, `uih_host` does not link the hook: each test preloads the `.so`, opens the menu, checks the pixels and removes the overlay, through GLX, EGL, `dlsym()` lookups and Vulkan, with `--resize`, `--reload` and `--second-window` variants. It needs `libx11-dev libxtst-dev libgl-dev libegl-dev`; without a display, run `xvfb-run -a ctest --test-dir build/linux`. `tests/ddnet.sh` runs the same scenario on the game [DDNet](https://ddnet.org/). With `-DUIH_SANITIZE=ON`, the preload tests load the sanitizer runtime before the library, and any memory error or undefined behavior in the hook fails them.
+On Linux, `uih_host` does not link the hook: each test preloads the `.so`, opens the menu, checks the pixels and removes the overlay, through GLX, EGL, `dlsym()` lookups and Vulkan, with `--resize`, `--reload`, `--second-window` and `--recreate-context` variants. It needs `libx11-dev libxtst-dev libgl-dev libegl-dev`; without a display, run `xvfb-run -a ctest --test-dir build/linux`. `tests/ddnet.sh` runs the same scenario on the game [DDNet](https://ddnet.org/). With `-DUIH_SANITIZE=ON`, the preload tests load the sanitizer runtime before the library, and any memory error or undefined behavior in the hook fails them.
 
 The [CI](.github/workflows/build.yml) runs on every push and pull request:
 
@@ -324,6 +327,7 @@ Pushing a `v*` tag publishes the MSVC and Linux portable libraries as a release,
 - Linux: 32-bit games, OpenGL ES, and games that link their GL or Vulkan loader statically are not supported.
 - HDR10 swap chains (PQ color space) show the overlay with wrong colors.
 - A Vulkan swap chain created before the hook has no overlay until the game recreates it: its presents report `VK_SUBOPTIMAL_KHR`, which games answer by recreating it.
+- When the game, or another overlay, subclasses the window after the hook, the hook's window procedure stays in its chain: the unload key leaves the DLL loaded, and injecting it again does not start it.
 - Native ARM64 Windows games are not supported: MinHook only handles x86 and x64.
 - Only Windows builds made with MSVC, the released ones, survive an exception in the overlay: MinGW-w64 has no structured exception handling, and Linux builds are not protected either.
 
