@@ -12,6 +12,7 @@
 #include <d3d9.h>
 #include <dxgi1_4.h>
 #include <GL/gl.h>
+#define GL_APIENTRY APIENTRY
 #define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h>
 #include <xinput.h>
@@ -516,6 +517,53 @@ struct OpenGLHost : Host {
     HWND window = nullptr;
     HDC hdc = nullptr;
     HGLRC context = nullptr;
+    // Framebuffer object and pixel unpack buffer left bound by the
+    // bound framebuffer scenario.
+    GLuint framebuffer = 0;
+    GLuint unpackBuffer = 0;
+    void(GL_APIENTRY* bindFramebuffer)(GLenum, GLuint) = nullptr;
+    void(GL_APIENTRY* bindBuffer)(GLenum, GLuint) = nullptr;
+
+    template <typename Proc>
+    bool CreateOffscreenTarget(Proc proc) {
+        constexpr GLenum kFramebuffer = 0x8D40;
+        constexpr GLenum kColorAttachment0 = 0x8CE0;
+        constexpr GLenum kPixelUnpackBuffer = 0x88EC;
+        constexpr GLenum kStreamDraw = 0x88E0;
+        auto genFramebuffers = reinterpret_cast<void(GL_APIENTRY*)(GLsizei, GLuint*)>(proc("glGenFramebuffers"));
+        auto framebufferTexture2D = reinterpret_cast<void(GL_APIENTRY*)(GLenum, GLenum, GLenum, GLuint, GLint)>(proc("glFramebufferTexture2D"));
+        auto genBuffers = reinterpret_cast<void(GL_APIENTRY*)(GLsizei, GLuint*)>(proc("glGenBuffers"));
+        auto bufferData = reinterpret_cast<void(GL_APIENTRY*)(GLenum, ptrdiff_t, const void*, GLenum)>(proc("glBufferData"));
+        bindFramebuffer = reinterpret_cast<void(GL_APIENTRY*)(GLenum, GLuint)>(proc("glBindFramebuffer"));
+        bindBuffer = reinterpret_cast<void(GL_APIENTRY*)(GLenum, GLuint)>(proc("glBindBuffer"));
+        if (!genFramebuffers || !framebufferTexture2D || !genBuffers || !bufferData || !bindFramebuffer || !bindBuffer)
+            return false;
+        GLuint texture = 0;
+        glGenTextures(1, &texture);
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 64, 64, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        genFramebuffers(1, &framebuffer);
+        bindFramebuffer(kFramebuffer, framebuffer);
+        framebufferTexture2D(kFramebuffer, kColorAttachment0, GL_TEXTURE_2D, texture, 0);
+        bindFramebuffer(kFramebuffer, 0);
+        genBuffers(1, &unpackBuffer);
+        bindBuffer(kPixelUnpackBuffer, unpackBuffer);
+        bufferData(kPixelUnpackBuffer, 16, nullptr, kStreamDraw);
+        bindBuffer(kPixelUnpackBuffer, 0);
+        return true;
+    }
+
+    // The window is cleared through the default framebuffer, then the
+    // offscreen target is left bound for the swap.
+    void BindForSwap(bool offscreen) {
+        constexpr GLenum kFramebuffer = 0x8D40;
+        constexpr GLenum kPixelUnpackBuffer = 0x88EC;
+        if (!framebuffer)
+            return;
+        bindFramebuffer(kFramebuffer, offscreen ? framebuffer : 0);
+        bindBuffer(kPixelUnpackBuffer, offscreen ? unpackBuffer : 0);
+    }
     // Textures of the host, which the overlay must leave alone.
     std::vector<GLuint> textures;
     static constexpr uint32_t kTexel = 0xff996633;
@@ -573,7 +621,9 @@ struct OpenGLHost : Host {
         const char* version = reinterpret_cast<const char*>(glGetString(GL_VERSION));
         if (options.format == "srgb")
             glEnable(kFramebufferSrgb);
-        return version && version[0] >= '3';
+        if (!version || version[0] < '3')
+            return false;
+        return !options.boundFramebuffer || CreateOffscreenTarget([](const char* name) { return reinterpret_cast<void*>(wglGetProcAddress(name)); });
     }
 
     bool Resize(int width, int height) override {
@@ -582,8 +632,10 @@ struct OpenGLHost : Host {
     }
 
     void Frame() override {
+        BindForSwap(false);
         glClearColor(kClear[0], kClear[1], kClear[2], kClear[3]);
         glClear(GL_COLOR_BUFFER_BIT);
+        BindForSwap(true);
         SwapBuffers(hdc);
     }
 
@@ -1640,6 +1692,7 @@ int main(int argc, char** argv) {
         else if (arg == "--resubclass") options.resubclass = true;
         else if (arg == "--recreate-context") options.recreateContext = true;
         else if (arg == "--slow-frame") options.slowFrame = true;
+        else if (arg == "--bound-framebuffer") options.boundFramebuffer = true;
         else if (arg == "--warp") options.warp = true;
         else if (arg == "--capture") options.capture = true;
         else if (arg == "--device-proc-addr") options.deviceProcAddr = true;
@@ -1653,7 +1706,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception] [--second-window] [--textures N] [--remove-device] [--transfer-only] [--render-thread] [--resubclass] [--recreate-context] [--slow-frame] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception] [--second-window] [--textures N] [--remove-device] [--transfer-only] [--render-thread] [--resubclass] [--recreate-context] [--slow-frame] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 
