@@ -277,6 +277,7 @@ Without a GPU, as on the CI runners, Direct3D uses WARP, and Mesa's software dri
 | `--fault access\|exception` | The render callback writes to a null pointer or throws: the overlay must be removed while the host keeps rendering, then start again (MSVC) |
 | `--input raw\|directinput` | What the game reads while the menu is open |
 | `--gamepad <fake xinput1_4.dll>` | Controller toggling the menu and hidden from the game while it is open |
+| `--render-thread` | The host presents from a thread of its own while the window thread dispatches a flood of input messages, and the hook starts and stops 20 times: no access violation may occur, and on x64 freed Dear ImGui memory is made inaccessible so that any use of it does |
 | `--dll <path>` | Loads the real DLL and drives it with `INSERT` and `F11` |
 | `--menu-key <vk>`, `--unload-key <vk>` | The keys a DLL built with other settings uses, such as `0x70` for F1 (X11 keysyms on Linux) |
 | `--proxy <path>` | Loads the DLL as `dinput8.dll` |
