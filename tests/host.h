@@ -76,6 +76,9 @@ struct Options {
     bool renderThread = false;
     // The host subclasses its window after the overlay did.
     bool resubclass = false;
+    // Deletes the OpenGL context while the menu is open and renders with a
+    // new one, as games do when the video settings change.
+    bool recreateContext = false;
 };
 
 // Display mode of the fullscreen scenario.
@@ -97,6 +100,11 @@ struct Host {
     virtual bool Fullscreen(bool) { return false; }
     // Makes the device removed, as a GPU fault does. False when the API cannot.
     virtual bool RemoveDevice() { return false; }
+    // Deletes the context and makes a new one current, with textures of its
+    // own. False when the API has no context.
+    virtual bool RecreateContext() { return false; }
+    // False when the textures of RecreateContext() were deleted or changed.
+    virtual bool TexturesIntact() { return true; }
     // Errors reported by the validation layers enabled for the test, 0 without them.
     virtual int ValidationErrors() const { return 0; }
 };

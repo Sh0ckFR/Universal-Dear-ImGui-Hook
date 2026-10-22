@@ -5,10 +5,12 @@
         glXSwapBuffers;
         glXCreateWindow;
         glXDestroyWindow;
+        glXDestroyContext;
         glXGetProcAddress;
         glXGetProcAddressARB;
 
         eglSwapBuffers;
+        eglDestroyContext;
         eglGetProcAddress;
 
         vkGetInstanceProcAddr;

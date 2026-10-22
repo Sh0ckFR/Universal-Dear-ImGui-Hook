@@ -516,6 +516,41 @@ struct OpenGLHost : Host {
     HWND window = nullptr;
     HDC hdc = nullptr;
     HGLRC context = nullptr;
+    // Textures of the host, which the overlay must leave alone.
+    std::vector<GLuint> textures;
+    static constexpr uint32_t kTexel = 0xff996633;
+
+    void CreateTextures() {
+        textures.assign(8, 0);
+        glGenTextures(static_cast<GLsizei>(textures.size()), textures.data());
+        for (GLuint texture : textures) {
+            glBindTexture(GL_TEXTURE_2D, texture);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, &kTexel);
+        }
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+
+    bool TexturesIntact() override {
+        bool intact = true;
+        for (GLuint texture : textures) {
+            if (!glIsTexture(texture)) {
+                intact = false;
+                continue;
+            }
+            // Another texture may have been created under the name of a deleted one.
+            GLint width = 0;
+            GLint height = 0;
+            uint32_t texel = 0;
+            glBindTexture(GL_TEXTURE_2D, texture);
+            glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &width);
+            glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &height);
+            if (width == 1 && height == 1)
+                glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, &texel);
+            intact = intact && texel == kTexel;
+        }
+        glBindTexture(GL_TEXTURE_2D, 0);
+        return intact;
+    }
 
     bool Init(HWND hwnd, const Options& options) override {
         constexpr GLenum kFramebufferSrgb = 0x8DB9;
@@ -550,6 +585,16 @@ struct OpenGLHost : Host {
         glClearColor(kClear[0], kClear[1], kClear[2], kClear[3]);
         glClear(GL_COLOR_BUFFER_BIT);
         SwapBuffers(hdc);
+    }
+
+    bool RecreateContext() override {
+        wglMakeCurrent(nullptr, nullptr);
+        wglDeleteContext(context);
+        context = wglCreateContext(hdc);
+        if (!context || !wglMakeCurrent(hdc, context))
+            return false;
+        CreateTextures();
+        return true;
     }
 
     ~OpenGLHost() override {
@@ -1548,6 +1593,7 @@ int main(int argc, char** argv) {
         else if (arg == "--transfer-only") options.transferOnly = true;
         else if (arg == "--render-thread") options.renderThread = true;
         else if (arg == "--resubclass") options.resubclass = true;
+        else if (arg == "--recreate-context") options.recreateContext = true;
         else if (arg == "--warp") options.warp = true;
         else if (arg == "--capture") options.capture = true;
         else if (arg == "--device-proc-addr") options.deviceProcAddr = true;
@@ -1561,7 +1607,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception] [--second-window] [--textures N] [--remove-device] [--transfer-only] [--render-thread] [--resubclass] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception] [--second-window] [--textures N] [--remove-device] [--transfer-only] [--render-thread] [--resubclass] [--recreate-context] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -1746,6 +1792,27 @@ int main(int argc, char** argv) {
                 printf("new device: %d vertices\n", vertices);
                 if (vertices == 0 || g_texture->Status != ImTextureStatus_OK) {
                     result = Fail("the overlay did not come back on the new device");
+                    break;
+                }
+            }
+            if (options.recreateContext) {
+                if (!host->RecreateContext()) {
+                    result = Fail("the host could not create a new context");
+                    break;
+                }
+                // Beyond the frames the overlay waits before it follows another context.
+                for (int i = 0; i < 120; ++i) {
+                    PumpMessages();
+                    host->Frame();
+                }
+                int vertices = ImGui::GetCurrentContext() ? ImGui::GetIO().MetricsRenderVertices : 0;
+                printf("new context: %d vertices\n", vertices);
+                if (vertices == 0) {
+                    result = Fail("the overlay did not come back in the new context");
+                    break;
+                }
+                if (!host->TexturesIntact()) {
+                    result = Fail("the overlay deleted or changed textures of the new context");
                     break;
                 }
             }

@@ -11,9 +11,11 @@
 #include <dlfcn.h>
 #include <unistd.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 
 namespace {
 
@@ -36,6 +38,42 @@ struct OpenGLHost : Host {
     bool Resize(int width, int height) override {
         glViewport(0, 0, width, height);
         return true;
+    }
+
+    // Textures of the host, which the overlay must leave alone.
+    std::vector<GLuint> textures;
+    static constexpr uint32_t kTexel = 0xff996633;
+
+    void CreateTextures() {
+        textures.assign(8, 0);
+        glGenTextures(static_cast<GLsizei>(textures.size()), textures.data());
+        for (GLuint texture : textures) {
+            glBindTexture(GL_TEXTURE_2D, texture);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, &kTexel);
+        }
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+
+    bool TexturesIntact() override {
+        bool intact = true;
+        for (GLuint texture : textures) {
+            if (!glIsTexture(texture)) {
+                intact = false;
+                continue;
+            }
+            // Another texture may have been created under the name of a deleted one.
+            GLint width = 0;
+            GLint height = 0;
+            uint32_t texel = 0;
+            glBindTexture(GL_TEXTURE_2D, texture);
+            glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &width);
+            glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &height);
+            if (width == 1 && height == 1)
+                glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, &texel);
+            intact = intact && texel == kTexel;
+        }
+        glBindTexture(GL_TEXTURE_2D, 0);
+        return intact;
     }
 };
 
@@ -86,6 +124,16 @@ struct GlxHost : OpenGLHost {
         Clear();
         swapBuffers(display, drawable);
     }
+
+    bool RecreateContext() override {
+        glXMakeCurrent(display, None, nullptr);
+        glXDestroyContext(display, context);
+        context = glXCreateNewContext(display, config, GLX_RGBA_TYPE, nullptr, True);
+        if (!context || !glXMakeCurrent(display, drawable, context))
+            return false;
+        CreateTextures();
+        return true;
+    }
 };
 
 // EGL --------------------------------------------------------------------
@@ -96,6 +144,7 @@ struct EglHost : OpenGLHost {
     EGLSurface surface = EGL_NO_SURFACE;
     EGLContext context = EGL_NO_CONTEXT;
     EGLBoolean (*swapBuffers)(EGLDisplay, EGLSurface) = eglSwapBuffers;
+    static constexpr EGLint kContextAttributes[] = {EGL_CONTEXT_MAJOR_VERSION, 3, EGL_CONTEXT_MINOR_VERSION, 3, EGL_NONE};
 
     VisualID ChooseVisual(Display* dpy) override {
         display = eglGetDisplay(dpy);
@@ -117,9 +166,8 @@ struct EglHost : OpenGLHost {
             void* library = dlopen("libEGL.so.1", RTLD_NOW);
             swapBuffers = library ? reinterpret_cast<EGLBoolean (*)(EGLDisplay, EGLSurface)>(dlsym(library, "eglSwapBuffers")) : nullptr;
         }
-        const EGLint attributes[] = {EGL_CONTEXT_MAJOR_VERSION, 3, EGL_CONTEXT_MINOR_VERSION, 3, EGL_NONE};
         surface = eglCreateWindowSurface(display, config, window.window, nullptr);
-        context = eglCreateContext(display, config, EGL_NO_CONTEXT, attributes);
+        context = eglCreateContext(display, config, EGL_NO_CONTEXT, kContextAttributes);
         return swapBuffers && surface != EGL_NO_SURFACE && context != EGL_NO_CONTEXT &&
                eglMakeCurrent(display, surface, surface, context) && IsVersion3();
     }
@@ -128,6 +176,16 @@ struct EglHost : OpenGLHost {
         eglMakeCurrent(display, surface, surface, context);
         Clear();
         swapBuffers(display, surface);
+    }
+
+    bool RecreateContext() override {
+        eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        eglDestroyContext(display, context);
+        context = eglCreateContext(display, config, EGL_NO_CONTEXT, kContextAttributes);
+        if (context == EGL_NO_CONTEXT || !eglMakeCurrent(display, surface, surface, context))
+            return false;
+        CreateTextures();
+        return true;
     }
 };
 
@@ -256,6 +314,22 @@ int Run(Display* display, Window window, Host& host, const std::string& name, co
                 if (pixels < visible)
                     return Fail("overlay is not visible after the resize");
             }
+            if (options.recreateContext) {
+                if (!host.RecreateContext())
+                    return Fail("the host could not create a new context");
+                // Beyond the frames the overlay waits before it follows another context.
+                for (int i = 0; i < 120; ++i) {
+                    PumpEvents(display);
+                    host.Frame();
+                    usleep(5000);
+                }
+                pixels = CountOverlayPixels(display, window);
+                printf("new context: %d overlay pixels\n", pixels);
+                if (pixels < visible)
+                    return Fail("the overlay did not come back in the new context");
+                if (!host.TexturesIntact())
+                    return Fail("the overlay deleted or changed textures of the new context");
+            }
             if (!PressKey(display, window, unloadKey))
                 return Skip("the host window lost the focus");
         }
@@ -373,9 +447,10 @@ int main(int argc, char** argv) {
         else if (arg == "--resize") options.resize = true;
         else if (arg == "--reload") options.reload = true;
         else if (arg == "--second-window") options.secondWindow = true;
+        else if (arg == "--recreate-context") options.recreateContext = true;
     }
     if (options.api != "opengl" && options.api != "vulkan") {
-        printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--transfer-only] [--menu-key keysym] [--unload-key keysym] [--resize] [--reload] [--second-window]\n");
+        printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--transfer-only] [--menu-key keysym] [--unload-key keysym] [--resize] [--reload] [--second-window] [--recreate-context]\n");
         return 2;
     }
     setvbuf(stdout, nullptr, _IOLBF, 0);
