@@ -43,9 +43,11 @@ bool Start() {
 }
 
 void Stop() {
+    // Not while a frame of the overlay still uses the resources: they are left behind then.
     if (!TeardownOnRenderThread(1000)) {
         Log("Rendering thread did not respond, releasing resources from Stop()");
-        TeardownVulkan();
+        if (!ReleaseOverlayWithin(2000, TeardownVulkan))
+            Log("The overlay is still drawing, its resources are left behind");
     }
 }
 

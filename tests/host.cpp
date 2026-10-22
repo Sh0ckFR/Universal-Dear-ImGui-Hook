@@ -620,8 +620,12 @@ std::vector<ImTextureData*> g_textures;
 bool g_setupCalled = false;
 // Set by the fault scenario.
 const char* g_fault = nullptr;
+// Set by the slow frame scenario: the next frame of the menu lasts that long.
+std::atomic<DWORD> g_slowFrameMs{0};
 
 void DrawTestMenu() {
+    if (DWORD ms = g_slowFrameMs.exchange(0))
+        Sleep(ms);
     if (!uih::IsMenuOpen())
         return;
     if (g_fault && strcmp(g_fault, "exception") == 0)
@@ -1224,6 +1228,47 @@ LONG CALLBACK CountAccessViolations(EXCEPTION_POINTERS* exception) {
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
+// uih::Stop() is called while a frame of the overlay outlasts its wait for
+// the thread that presents: it must not release what that frame still uses.
+int RunSlowFrameMode(HWND window, Host& host, const Options& options) {
+    auto run = [&](int frames) {
+        for (int frame = 0; frame < frames; ++frame) {
+            PumpMessages();
+            host.Frame();
+        }
+    };
+    StartHook(options);
+    for (ULONGLONG start = GetTickCount64(); WaitingForBackend(start);)
+        run(1);
+    if (uih::ActiveBackend() == uih::Backend::None) {
+        uih::Stop();
+        return Fail("backend was not detected");
+    }
+    uih::SetMenuOpen(true);
+    run(30);
+
+    PVOID handler = AddVectoredExceptionHandler(1, CountAccessViolations);
+    g_slowFrameMs = 2500;
+    std::thread stop([] {
+        // Once the slow frame started.
+        Sleep(200);
+        uih::Stop();
+    });
+    run(1);
+    stop.join();
+    run(30);
+    RemoveVectoredExceptionHandler(handler);
+
+    int result = 0;
+    if (g_accessViolations > 0)
+        result = Fail("the overlay raised an access violation");
+    else if (ImGui::GetCurrentContext() || uih::ActiveBackend() != uih::Backend::None)
+        result = Fail("hook did not release its resources");
+    if (result == 0)
+        printf("PASS: %s, stopped during a slow frame\n", options.api.c_str());
+    return result;
+}
+
 // The host renders on a thread of its own while the thread of the window
 // dispatches a flood of input messages, and the hook starts and stops in the
 // middle of it: the window procedure must not meet the overlay in Dear ImGui.
@@ -1594,6 +1639,7 @@ int main(int argc, char** argv) {
         else if (arg == "--render-thread") options.renderThread = true;
         else if (arg == "--resubclass") options.resubclass = true;
         else if (arg == "--recreate-context") options.recreateContext = true;
+        else if (arg == "--slow-frame") options.slowFrame = true;
         else if (arg == "--warp") options.warp = true;
         else if (arg == "--capture") options.capture = true;
         else if (arg == "--device-proc-addr") options.deviceProcAddr = true;
@@ -1607,7 +1653,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception] [--second-window] [--textures N] [--remove-device] [--transfer-only] [--render-thread] [--resubclass] [--recreate-context] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception] [--second-window] [--textures N] [--remove-device] [--transfer-only] [--render-thread] [--resubclass] [--recreate-context] [--slow-frame] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -1676,6 +1722,12 @@ int main(int argc, char** argv) {
     }
     if (!options.gamepad.empty()) {
         int result = RunGamepadMode(window, *host, options.gamepad);
+        host.reset();
+        DestroyWindow(window);
+        return result;
+    }
+    if (options.slowFrame) {
+        int result = RunSlowFrameMode(window, *host, options);
         host.reset();
         DestroyWindow(window);
         return result;

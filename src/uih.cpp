@@ -58,7 +58,7 @@ struct OverlayTarget {
     NativeWindow window{};
     std::chrono::steady_clock::time_point lastPresent{};
 };
-std::mutex g_frameMutex;
+std::timed_mutex g_frameMutex;
 OverlayTarget g_target;
 std::chrono::steady_clock::time_point g_lastFocusCheck{};
 // Thread that drew the last overlay frame, the one to release its resources.
@@ -275,8 +275,16 @@ void ServiceTeardown(Backend backend, void (*teardown)()) {
 }
 
 void ReleaseOverlay(void (*release)()) {
-    std::lock_guard<std::mutex> lock(g_frameMutex);
+    std::lock_guard<std::timed_mutex> lock(g_frameMutex);
     Guarded([&] { release(); });
+}
+
+bool ReleaseOverlayWithin(unsigned timeoutMs, void (*release)()) {
+    std::unique_lock<std::timed_mutex> lock(g_frameMutex, std::chrono::milliseconds(timeoutMs));
+    if (!lock)
+        return false;
+    Guarded([&] { release(); });
+    return true;
 }
 
 bool TeardownOnRenderThread(unsigned timeoutMs) {
