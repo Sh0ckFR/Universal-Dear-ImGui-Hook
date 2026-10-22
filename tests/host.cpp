@@ -816,11 +816,27 @@ bool PressKey(HWND window, int key) {
     return true;
 }
 
-// Loads the example DLL like an injector would and drives it with its hotkeys:
-// INSERT opens the menu, F11 removes the overlay. A DLL named dinput8.dll is
-// loaded the way a game loads a proxy: F11 only removes the overlay, and
-// INSERT brings it back. Otherwise F11 unloads the DLL, and --reload injects
-// it again.
+// Procedure the host installs over the one of the overlay, as overlays and
+// engines that subclass the window late do. It calls the overlay's.
+WNDPROC g_previousProc = nullptr;
+int g_subclassMessages = 0;
+
+LRESULT CALLBACK HostSubclass(HWND window, UINT msg, WPARAM wParam, LPARAM lParam) {
+    ++g_subclassMessages;
+    return CallWindowProcW(g_previousProc, window, msg, wParam, lParam);
+}
+
+void SubclassWindow(HWND window) {
+    g_previousProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(HostSubclass)));
+}
+
+// True when a message goes through the procedures of the window and back.
+bool ProcedureChainWorks(HWND window) {
+    int messages = g_subclassMessages;
+    SendMessageW(window, WM_MOUSEMOVE, 0, MAKELPARAM(10, 10));
+    return g_subclassMessages == messages + 1;
+}
+
 // Loads a library, opens its menu and renders until the window is closed:
 // a quick look at a menu without a game. Like a game, the host resizes its
 // back buffers with the window, so nothing is stretched.
@@ -848,6 +864,13 @@ int RunPreviewMode(HWND window, Host& host, const Options& options) {
     return 0;
 }
 
+// Loads the example DLL like an injector would and drives it with its hotkeys:
+// INSERT opens the menu, F11 removes the overlay. A DLL named dinput8.dll is
+// loaded the way a game loads a proxy: F11 only removes the overlay, and
+// INSERT brings it back. Otherwise F11 unloads the DLL, and --reload injects
+// it again.
+// With --resubclass, the host subclasses the window after the overlay: the
+// DLL stays loaded after F11, as the host's procedure still calls its own.
 int RunDllMode(HWND window, Host& host, const Options& options) {
     const int menuKey = options.menuKey ? options.menuKey : VK_INSERT;
     const int unloadKey = options.unloadKey ? options.unloadKey : VK_F11;
@@ -900,11 +923,13 @@ int RunDllMode(HWND window, Host& host, const Options& options) {
         if (pixels < visible)
             return Fail("overlay is not visible on screen");
 
+        if (options.resubclass)
+            SubclassWindow(window);
         if (!PressKey(window, unloadKey))
             return Skip("the host window lost the focus");
         run(5);
         HoldKey(unloadKey, false);
-        if (proxy) {
+        if (proxy || options.resubclass) {
             for (ULONGLONG start = GetTickCount64(); pixels >= visible && GetTickCount64() - start < 10000;) {
                 run(15);
                 pixels = overlayPixels();
@@ -913,6 +938,8 @@ int RunDllMode(HWND window, Host& host, const Options& options) {
             if (pixels >= visible)
                 return Fail("overlay is still visible after the unload key");
             run(30);
+            if (options.resubclass && !ProcedureChainWorks(window))
+                return Fail("the procedures of the window no longer chain");
         } else {
             for (ULONGLONG start = GetTickCount64(); GetModuleHandleW(name.c_str()) && GetTickCount64() - start < 10000;)
                 run(1);
@@ -1520,6 +1547,7 @@ int main(int argc, char** argv) {
         else if (arg == "--remove-device") options.removeDevice = true;
         else if (arg == "--transfer-only") options.transferOnly = true;
         else if (arg == "--render-thread") options.renderThread = true;
+        else if (arg == "--resubclass") options.resubclass = true;
         else if (arg == "--warp") options.warp = true;
         else if (arg == "--capture") options.capture = true;
         else if (arg == "--device-proc-addr") options.deviceProcAddr = true;
@@ -1533,7 +1561,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception] [--second-window] [--textures N] [--remove-device] [--transfer-only] [--render-thread] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception] [--second-window] [--textures N] [--remove-device] [--transfer-only] [--render-thread] [--resubclass] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -1646,6 +1674,8 @@ int main(int argc, char** argv) {
                 activeImGuiFrame = ImGui::GetCurrentContext() ? ImGui::GetFrameCount() : 0;
                 printf("%s backend active after %d frames\n", options.api.c_str(), frame - options.injectAt);
                 uih::SetMenuOpen(true);
+                if (options.resubclass && cycle == 1)
+                    SubclassWindow(window);
             } else if (frame > options.injectAt && GetTickCount64() - injectTime > kDetectionTimeoutMs) {
                 result = Fail("backend was not detected");
             }
@@ -1655,6 +1685,10 @@ int main(int argc, char** argv) {
                 break;
             }
             printf("ImGui rendered %d vertices\n", ImGui::GetIO().MetricsRenderVertices);
+            if (options.resubclass && !ProcedureChainWorks(window)) {
+                result = Fail("the procedures of the window no longer chain");
+                break;
+            }
             int imguiFrames = ImGui::GetFrameCount() - activeImGuiFrame;
             if (imguiFrames > frame - activeFrame + 1) {
                 printf("ImGui ran %d frames for %d presents\n", imguiFrames, frame - activeFrame);

@@ -74,6 +74,8 @@ struct Options {
     // The host renders on a thread of its own while the thread of the window
     // dispatches a flood of input messages, as engines with a render thread do.
     bool renderThread = false;
+    // The host subclasses its window after the overlay did.
+    bool resubclass = false;
 };
 
 // Display mode of the fullscreen scenario.

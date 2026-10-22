@@ -1,5 +1,7 @@
 #include "internal.h"
 
+#include <vector>
+
 #include "imgui_impl_win32.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -25,9 +27,19 @@ GetKeyboardStateFn g_getKeyboardState = nullptr;
 GetRawInputDataFn g_getRawInputData = nullptr;
 GetRawInputBufferFn g_getRawInputBuffer = nullptr;
 
+// Windows whose procedure was replaced by WndProc, guarded by the input
+// lock. An entry outlives the subclassing: a message that is still being
+// dispatched needs its original procedure.
+struct Subclass {
+    HWND window;
+    WNDPROC original;
+    bool unicode;
+    // WndProc is still in the chain of procedures of the window.
+    bool chained;
+};
+std::vector<Subclass> g_subclasses;
+// Window whose input feeds the overlay.
 HWND g_window = nullptr;
-WNDPROC g_originalProc = nullptr;
-bool g_unicode = false;
 
 thread_local int g_ownCalls = 0;
 // Cursor position the application sees while the menu is open.
@@ -139,8 +151,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     {
         // The thread that presents may be drawing the overlay or destroying its context.
         InputLock lock;
-        original = g_originalProc;
-        unicode = g_unicode;
+        for (const Subclass& entry : g_subclasses) {
+            if (entry.window == hwnd) {
+                original = entry.original;
+                unicode = entry.unicode;
+            }
+        }
         if (ImGui::GetCurrentContext() && hwnd == g_window) {
             handled = true;
             Guarded([&] {
@@ -160,16 +176,31 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     return CallWindowProcA(original, hwnd, msg, wParam, lParam);
 }
 
-WNDPROC SetProc(HWND hwnd, WNDPROC proc) {
+WNDPROC SetProc(HWND hwnd, bool unicode, WNDPROC proc) {
     LONG_PTR value = reinterpret_cast<LONG_PTR>(proc);
-    LONG_PTR previous = g_unicode ? SetWindowLongPtrW(hwnd, GWLP_WNDPROC, value)
-                                  : SetWindowLongPtrA(hwnd, GWLP_WNDPROC, value);
+    LONG_PTR previous = unicode ? SetWindowLongPtrW(hwnd, GWLP_WNDPROC, value)
+                                : SetWindowLongPtrA(hwnd, GWLP_WNDPROC, value);
     return reinterpret_cast<WNDPROC>(previous);
 }
 
-WNDPROC CurrentProc(HWND hwnd) {
-    LONG_PTR value = g_unicode ? GetWindowLongPtrW(hwnd, GWLP_WNDPROC) : GetWindowLongPtrA(hwnd, GWLP_WNDPROC);
+WNDPROC CurrentProc(HWND hwnd, bool unicode) {
+    LONG_PTR value = unicode ? GetWindowLongPtrW(hwnd, GWLP_WNDPROC) : GetWindowLongPtrA(hwnd, GWLP_WNDPROC);
     return reinterpret_cast<WNDPROC>(value);
+}
+
+Subclass* FindSubclass(HWND window) {
+    for (Subclass& entry : g_subclasses)
+        if (entry.window == window)
+            return &entry;
+    return nullptr;
+}
+
+// The procedure the application installed after WndProc calls it: the code
+// of WndProc must stay in memory after the library is unloaded.
+void PinModule() {
+    HMODULE module = nullptr;
+    if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN, reinterpret_cast<LPCWSTR>(&WndProc), &module))
+        Log("The library stays loaded: unloading it is ignored, and loading it again does not start it");
 }
 
 struct WindowSearch {
@@ -246,25 +277,39 @@ void InstallHooks() {
 void Attach(HWND window) {
     if (g_window)
         Detach();
-    g_window = window;
-    g_unicode = IsWindowUnicode(window) != FALSE;
-    g_originalProc = SetProc(window, WndProc);
-    if (!g_originalProc) {
-        Log("SetWindowLongPtr failed on %p: %lu", window, GetLastError());
-        g_window = nullptr;
+    Subclass* entry = FindSubclass(window);
+    // Subclassing the window again would make WndProc call itself through
+    // the procedure installed after it.
+    if (entry && entry->chained) {
+        g_window = window;
+        return;
     }
+    bool unicode = IsWindowUnicode(window) != FALSE;
+    WNDPROC original = SetProc(window, unicode, WndProc);
+    if (!original) {
+        Log("SetWindowLongPtr failed on %p: %lu", window, GetLastError());
+        return;
+    }
+    if (entry)
+        *entry = {window, original, unicode, true};
+    else
+        g_subclasses.push_back({window, original, unicode, true});
+    g_window = window;
 }
 
 void Detach() {
     if (!g_window)
         return;
-    if (IsWindow(g_window)) {
-        if (CurrentProc(g_window) == WndProc)
-            SetProc(g_window, g_originalProc);
-        else
-            Log("Window %p was re-subclassed by someone else, leaving its procedure in place", g_window);
+    Subclass* entry = FindSubclass(g_window);
+    if (!IsWindow(g_window)) {
+        entry->chained = false;
+    } else if (CurrentProc(g_window, entry->unicode) == WndProc) {
+        SetProc(g_window, entry->unicode, entry->original);
+        entry->chained = false;
+    } else {
+        Log("Window %p was subclassed again by the application, WndProc stays in its chain", g_window);
+        PinModule();
     }
-    // g_originalProc stays valid for a message that is still being dispatched.
     g_window = nullptr;
 }
 
