@@ -8,6 +8,7 @@ namespace {
 
 using WglSwapBuffersFn = BOOL(WINAPI*)(HDC);
 using WglGetCurrentContextFn = HGLRC(WINAPI*)();
+using WglDeleteContextFn = BOOL(WINAPI*)(HGLRC);
 
 // Presents to wait before following an application that renders with another context.
 constexpr int kContextSwitchFrames = 60;
@@ -15,6 +16,7 @@ constexpr int kContextSwitchFrames = 60;
 HMODULE g_module = nullptr;
 WglSwapBuffersFn g_swapBuffers = nullptr;
 WglGetCurrentContextFn g_getCurrentContext = nullptr;
+WglDeleteContextFn g_deleteContext = nullptr;
 HGLRC g_context = nullptr;
 int g_contextMisses = 0;
 bool g_ready = false;
@@ -22,7 +24,12 @@ bool g_ready = false;
 void Teardown() {
     if (!g_ready)
         return;
-    ImGui_ImplOpenGL3_Shutdown();
+    // Object names belong to a context: deleting them in another one would
+    // delete objects of the application.
+    if (g_getCurrentContext() == g_context)
+        ImGui_ImplOpenGL3_Shutdown();
+    else
+        AbandonRenderer();
     UnbindWindow();
     g_ready = false;
     g_context = nullptr;
@@ -74,17 +81,28 @@ BOOL WINAPI HookSwapBuffers(HDC hdc) {
     return g_swapBuffers(hdc);
 }
 
+BOOL WINAPI HookDeleteContext(HGLRC context) {
+    ScopedCall call;
+    // A new context may get the same handle: the overlay must not take it for its own.
+    if (context && context == g_context)
+        ReleaseOverlay(Teardown);
+    return g_deleteContext(context);
+}
+
 bool Install() {
     g_module = LoadLibraryW(L"opengl32.dll");
     g_getCurrentContext = GetProc<WglGetCurrentContextFn>(g_module, "wglGetCurrentContext");
     void* target = GetProc<void*>(g_module, "wglSwapBuffers");
-    if (!g_getCurrentContext || !target)
+    void* deleteContext = GetProc<void*>(g_module, "wglDeleteContext");
+    if (!g_getCurrentContext || !target || !deleteContext)
         return false;
-    return CreateHook("wglSwapBuffers", target, reinterpret_cast<void*>(HookSwapBuffers), reinterpret_cast<void**>(&g_swapBuffers));
+    return CreateHook("wglDeleteContext", deleteContext, reinterpret_cast<void*>(HookDeleteContext), reinterpret_cast<void**>(&g_deleteContext)) &&
+           CreateHook("wglSwapBuffers", target, reinterpret_cast<void*>(HookSwapBuffers), reinterpret_cast<void**>(&g_swapBuffers));
 }
 
 void Uninstall() {
     g_swapBuffers = nullptr;
+    g_deleteContext = nullptr;
     g_getCurrentContext = nullptr;
     if (g_module) {
         FreeLibrary(g_module);

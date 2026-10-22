@@ -19,7 +19,11 @@ constexpr unsigned int kEglOpenGLApi = 0x30A2;
 // Presents to wait before following an application that renders with another context.
 constexpr int kContextSwitchFrames = 60;
 
+using GetCurrentContextFn = void* (*)();
+
 void* g_context = nullptr;
+// Current context of the API g_context belongs to, GLX or EGL.
+GetCurrentContextFn g_getCurrentContext = nullptr;
 int g_contextMisses = 0;
 bool g_ready = false;
 
@@ -38,14 +42,19 @@ ProcAddress Substitute(const interpose::Library& library, ProcAddress function, 
 void Teardown() {
     if (!g_ready)
         return;
-    ImGui_ImplOpenGL3_Shutdown();
+    // Object names belong to a context: deleting them in another one would
+    // delete objects of the application.
+    if (g_getCurrentContext() == g_context)
+        ImGui_ImplOpenGL3_Shutdown();
+    else
+        AbandonRenderer();
     UnbindWindow();
     g_ready = false;
     g_context = nullptr;
     g_contextMisses = 0;
 }
 
-bool Init(NativeWindow window, void* context) {
+bool Init(NativeWindow window, void* context, GetCurrentContextFn getCurrentContext) {
     if (!ClaimBackend(Backend::OpenGL) || !BindWindow(window))
         return false;
     if (!ImGui_ImplOpenGL3_Init()) {
@@ -54,11 +63,13 @@ bool Init(NativeWindow window, void* context) {
         return false;
     }
     g_context = context;
+    g_getCurrentContext = getCurrentContext;
     g_ready = true;
     return true;
 }
 
-void Render(void* context, NativeWindow window, uint32_t width, uint32_t height) {
+void Render(GetCurrentContextFn getCurrentContext, NativeWindow window, uint32_t width, uint32_t height) {
+    void* context = getCurrentContext();
     if (!context || width == 0 || height == 0)
         return;
     if (g_ready && context != g_context) {
@@ -66,7 +77,7 @@ void Render(void* context, NativeWindow window, uint32_t width, uint32_t height)
             return;
         Teardown();
     }
-    if (!g_ready && !Init(window, context))
+    if (!g_ready && !Init(window, context, getCurrentContext))
         return;
     g_contextMisses = 0;
     if (!BindWindow(window))
@@ -78,10 +89,16 @@ void Render(void* context, NativeWindow window, uint32_t width, uint32_t height)
     ImGui_ImplOpenGL3_RenderDrawData(drawData);
 }
 
-// Stop() gave up waiting for this thread: release here, where the context is current.
+// Stop() gave up waiting for this thread: release here, where the context of the overlay may be current.
 void ReleaseAbandoned() {
     if (g_ready && ActiveBackend() != Backend::OpenGL)
         Teardown();
+}
+
+// A new context may get the address of a destroyed one: the overlay must not take it for its own.
+void OnContextDestroyed(void* context) {
+    if (context && context == g_context)
+        ReleaseOverlay(Teardown);
 }
 
 NativeWindow WindowOf(GlxDrawable drawable) {
@@ -105,7 +122,7 @@ UIH_EXPORT void glXSwapBuffers(void* display, GlxDrawable drawable) {
         uint32_t width = 0;
         uint32_t height = 0;
         if (input::WindowSize(window, width, height))
-            DrawOverlay(drawable, window, [&] { Render(getCurrentContext(), window, width, height); });
+            DrawOverlay(drawable, window, [&] { Render(getCurrentContext, window, width, height); });
     }
     ServiceTeardown(Backend::OpenGL, Teardown);
     swapBuffers(display, drawable);
@@ -128,6 +145,13 @@ UIH_EXPORT void glXDestroyWindow(void* display, GlxDrawable drawable) {
         g_glxWindows.erase(drawable);
     }
     destroyWindow(display, drawable);
+}
+
+UIH_EXPORT void glXDestroyContext(void* display, void* context) {
+    static const auto destroyContext = Next<void (*)(void*, void*)>(interpose::kGlx, "glXDestroyContext");
+    ScopedCall call;
+    OnContextDestroyed(context);
+    destroyContext(display, context);
 }
 
 UIH_EXPORT ProcAddress glXGetProcAddress(const unsigned char* name) {
@@ -158,10 +182,17 @@ UIH_EXPORT unsigned int eglSwapBuffers(void* display, void* surface) {
         querySurface(display, surface, kEglWidth, &width);
         querySurface(display, surface, kEglHeight, &height);
         if (width > 0 && height > 0)
-            DrawOverlay(SwapchainKey(surface), 0, [&] { Render(getCurrentContext(), 0, static_cast<uint32_t>(width), static_cast<uint32_t>(height)); });
+            DrawOverlay(SwapchainKey(surface), 0, [&] { Render(getCurrentContext, 0, static_cast<uint32_t>(width), static_cast<uint32_t>(height)); });
     }
     ServiceTeardown(Backend::OpenGL, Teardown);
     return swapBuffers(display, surface);
+}
+
+UIH_EXPORT unsigned int eglDestroyContext(void* display, void* context) {
+    static const auto destroyContext = Next<unsigned int (*)(void*, void*)>(interpose::kEgl, "eglDestroyContext");
+    ScopedCall call;
+    OnContextDestroyed(context);
+    return destroyContext(display, context);
 }
 
 UIH_EXPORT ProcAddress eglGetProcAddress(const char* name) {
@@ -179,11 +210,13 @@ const interpose::Function kGlxExports[] = {
     UIH_GL_EXPORT(glXSwapBuffers),
     UIH_GL_EXPORT(glXCreateWindow),
     UIH_GL_EXPORT(glXDestroyWindow),
+    UIH_GL_EXPORT(glXDestroyContext),
     UIH_GL_EXPORT(glXGetProcAddress),
     UIH_GL_EXPORT(glXGetProcAddressARB),
 };
 const interpose::Function kEglExports[] = {
     UIH_GL_EXPORT(eglSwapBuffers),
+    UIH_GL_EXPORT(eglDestroyContext),
     UIH_GL_EXPORT(eglGetProcAddress),
 };
 #undef UIH_GL_EXPORT

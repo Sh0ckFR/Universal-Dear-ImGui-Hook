@@ -105,6 +105,10 @@ ImDrawData* Frame();
 void LinearizeColors(ImDrawData* drawData);
 // Detaches the platform backend and destroys the ImGui context.
 void UnbindWindow();
+// Detaches the renderer backend without a call to the graphics API, when its
+// objects belong to a context that is not current: they go with that context.
+// The few bytes of the backend's state are left behind.
+void AbandonRenderer();
 // For a library that cannot leave the process: stops the hook, then starts
 // it again with the menu open when the menu key or buttons are pressed in
 // the application. Runs on a thread of its own.

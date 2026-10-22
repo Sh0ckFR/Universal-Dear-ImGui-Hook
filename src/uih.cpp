@@ -381,6 +381,22 @@ ImDrawData* Frame() {
     return ImGui::GetDrawData();
 }
 
+void AbandonRenderer() {
+    ImGuiIO& io = ImGui::GetIO();
+    ImGuiPlatformIO& platformIo = ImGui::GetPlatformIO();
+    // As the backend's shutdown leaves them: created again by the next backend.
+    for (ImTextureData* texture : platformIo.Textures) {
+        if (texture->RefCount == 1) {
+            texture->SetTexID(ImTextureID_Invalid);
+            texture->SetStatus(ImTextureStatus_Destroyed);
+        }
+    }
+    io.BackendRendererName = nullptr;
+    io.BackendRendererUserData = nullptr;
+    io.BackendFlags &= ~(ImGuiBackendFlags_RendererHasVtxOffset | ImGuiBackendFlags_RendererHasTextures);
+    platformIo.ClearRendererHandlers();
+}
+
 void LinearizeColors(ImDrawData* drawData) {
     static const std::array<ImU32, 256> kLinear = [] {
         std::array<ImU32, 256> table{};
