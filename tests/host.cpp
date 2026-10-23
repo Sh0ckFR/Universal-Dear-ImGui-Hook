@@ -1560,6 +1560,46 @@ int CheckReleaseWithMenuOpen(HWND window, Host& host, bool useDirectInput) {
     return 0;
 }
 
+// The menu frees the cursor of a game that confines it to its window, and
+// confines it again when it closes, to the rectangle the game asked for last.
+int CheckCursorClip(HWND window, Host& host) {
+    auto run = [&](int frames) {
+        for (int frame = 0; frame < frames; ++frame) {
+            PumpRawInput();
+            host.Frame();
+        }
+    };
+    RECT client{};
+    GetClientRect(window, &client);
+    MapWindowPoints(window, nullptr, reinterpret_cast<POINT*>(&client), 2);
+    RECT clip{};
+    ClipCursor(&client);
+    GetClipCursor(&clip);
+    if (!EqualRect(&clip, &client)) {
+        ClipCursor(nullptr);
+        return Skip("the host cannot confine the cursor");
+    }
+    uih::SetMenuOpen(true);
+    run(5);
+    RECT open{};
+    GetClipCursor(&open);
+    RECT inner = client;
+    InflateRect(&inner, -10, -10);
+    ClipCursor(&inner);
+    run(5);
+    uih::SetMenuOpen(false);
+    run(5);
+    GetClipCursor(&clip);
+    ClipCursor(nullptr);
+    printf("cursor clip: %ld,%ld %ld,%ld with the menu open, %ld,%ld %ld,%ld after it closed\n", open.left, open.top, open.right, open.bottom, clip.left,
+           clip.top, clip.right, clip.bottom);
+    if (EqualRect(&open, &client))
+        return Fail("the cursor stays confined while the menu is open");
+    if (!EqualRect(&clip, &inner))
+        return Fail("the cursor is not confined again when the menu closes");
+    return 0;
+}
+
 // Checks that the keyboard and the mouse reach the host while the menu is
 // closed, and that the host reads nothing while it is open. DirectInput
 // registers the keyboard for raw input itself, and a process has one raw
@@ -1620,6 +1660,8 @@ int RunInputMode(HWND window, Host& host, bool useDirectInput) {
     }
     if (result == 0)
         result = CheckReleaseWithMenuOpen(window, host, useDirectInput);
+    if (result == 0)
+        result = CheckCursorClip(window, host);
 
     uih::Stop();
     if (keyboard) {

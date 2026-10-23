@@ -45,6 +45,10 @@ thread_local int g_ownCalls = 0;
 // Cursor position the application sees while the menu is open.
 POINT g_frozenCursor{};
 std::atomic<bool> g_cursorFrozen{false};
+// Rectangle the application confines the cursor to, applied again when the menu closes.
+std::mutex g_clipMutex;
+bool g_clipped = false;
+RECT g_clip{};
 
 constexpr USHORT kMouseButtonReleases = RI_MOUSE_LEFT_BUTTON_UP | RI_MOUSE_RIGHT_BUTTON_UP | RI_MOUSE_MIDDLE_BUTTON_UP |
                                         RI_MOUSE_BUTTON_4_UP | RI_MOUSE_BUTTON_5_UP;
@@ -74,8 +78,13 @@ BOOL WINAPI HookSetCursorPos(int x, int y) {
 
 BOOL WINAPI HookClipCursor(const RECT* rect) {
     ScopedCall call;
-    if (IsMenuOpen())
+    std::lock_guard<std::mutex> lock(g_clipMutex);
+    if (IsMenuOpen()) {
+        g_clipped = rect != nullptr;
+        if (rect)
+            g_clip = *rect;
         return TRUE;
+    }
     return g_clipCursor(rect);
 }
 
@@ -339,17 +348,30 @@ void Detach() {
 }
 
 void OnMenuToggled(bool open) {
+    // The real functions stand in while the hooks are being installed.
+    ClipCursorFn clipCursor = g_clipCursor ? g_clipCursor : ClipCursor;
     if (open) {
-        // The real functions stand in while the hooks are being installed.
-        ClipCursorFn clipCursor = g_clipCursor ? g_clipCursor : ClipCursor;
+        {
+            // An unconfined cursor reports the whole virtual screen.
+            std::lock_guard<std::mutex> lock(g_clipMutex);
+            RECT desktop{GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN)};
+            desktop.right = desktop.left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
+            desktop.bottom = desktop.top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
+            g_clipped = GetClipCursor(&g_clip) && !EqualRect(&g_clip, &desktop);
+        }
         clipCursor(nullptr);
         GetCursorPosFn getCursorPos = g_getCursorPos ? g_getCursorPos : GetCursorPos;
         g_cursorFrozen = getCursorPos(&g_frozenCursor) != FALSE;
-    } else if (g_cursorFrozen.exchange(false)) {
+        return;
+    }
+    if (g_cursorFrozen.exchange(false)) {
         // The application finds the cursor where it left it.
         SetCursorPosFn setCursorPos = g_setCursorPos ? g_setCursorPos : SetCursorPos;
         setCursorPos(g_frozenCursor.x, g_frozenCursor.y);
     }
+    std::lock_guard<std::mutex> lock(g_clipMutex);
+    if (g_clipped)
+        clipCursor(&g_clip);
 }
 
 HWND FindProcessWindow(uint32_t width, uint32_t height) {
