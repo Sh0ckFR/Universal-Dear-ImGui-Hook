@@ -10,6 +10,7 @@ jobs:
   msvc:
     name: MSVC ${{ matrix.arch }}
     runs-on: windows-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -34,6 +35,7 @@ jobs:
   windows-tests:
     name: Windows tests ${{ matrix.arch }}
     runs-on: windows-latest
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -129,6 +131,7 @@ jobs:
   solution:
     name: Visual Studio solution ${{ matrix.platform }}
     runs-on: windows-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -146,6 +149,7 @@ jobs:
   mingw:
     name: MinGW-w64 ${{ matrix.arch }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -153,23 +157,27 @@ jobs:
           - os: ubuntu-latest
             arch: x86_64
             preset: mingw-x64
-            install: sudo apt-get update && sudo apt-get install -y ninja-build g++-mingw-w64-x86-64
+            packages: ninja-build g++-mingw-w64-x86-64
           - os: ubuntu-latest
             arch: i686
             preset: mingw-x86
-            install: sudo apt-get update && sudo apt-get install -y ninja-build g++-mingw-w64-i686
+            packages: ninja-build g++-mingw-w64-i686
           - os: macos-latest
             arch: x86_64
             preset: mingw-x64
-            install: brew install ninja mingw-w64
           - os: macos-latest
             arch: i686
             preset: mingw-x86
-            install: brew install ninja mingw-w64
     steps:
       - uses: actions/checkout@v4
       - name: Install toolchain
-        run: ${{ matrix.install }}
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/apt-install
+        with:
+          packages: ${{ matrix.packages }}
+      - name: Install toolchain
+        if: runner.os == 'macOS'
+        run: brew install ninja mingw-w64
       - name: Configure
         run: cmake --preset ${{ matrix.preset }} -DUIH_BUILD_TESTS=ON
       - name: Build
@@ -185,6 +193,7 @@ jobs:
   linux:
     name: Linux ${{ matrix.compiler }} ${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -210,9 +219,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ninja-build pkg-config libxcb1-dev libx11-dev libxtst-dev libgl-dev libegl-dev xvfb libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libvulkan1 mesa-vulkan-drivers vulkan-validationlayers
+        uses: ./.github/actions/apt-install
+        with:
+          packages: ninja-build pkg-config libxcb1-dev libx11-dev libxtst-dev libgl-dev libegl-dev xvfb libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libvulkan1 mesa-vulkan-drivers vulkan-validationlayers
       - name: Configure
         run: cmake --preset linux -DUIH_BUILD_TESTS=ON
       - name: Build
@@ -245,12 +254,13 @@ jobs:
   linux-sanitizers:
     name: Linux sanitizers (ASan, UBSan)
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ninja-build pkg-config libxcb1-dev libx11-dev libxtst-dev libgl-dev libegl-dev xvfb libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libvulkan1 mesa-vulkan-drivers
+        uses: ./.github/actions/apt-install
+        with:
+          packages: ninja-build pkg-config libxcb1-dev libx11-dev libxtst-dev libgl-dev libegl-dev xvfb libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libvulkan1 mesa-vulkan-drivers
       - name: Configure
         run: cmake --preset linux -DUIH_BUILD_TESTS=ON -DUIH_SANITIZE=ON
       - name: Build
@@ -265,6 +275,7 @@ jobs:
   linux-portable:
     name: Linux portable ${{ matrix.arch }} (glibc 2.28)
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     container: quay.io/pypa/manylinux_2_28_${{ matrix.arch }}
     strategy:
       fail-fast: false
@@ -324,16 +335,18 @@ jobs:
         with:
           name: Universal-ImGui-Hook-linux-x86_64
       # The distribution package of DDNet brings the libraries the official build needs.
+      - name: Install the libraries of the game
+        uses: ./.github/actions/apt-install
+        with:
+          packages: >-
+            xvfb xdotool imagemagick libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libvulkan1 mesa-vulkan-drivers
+            ${{ matrix.game == 'DDNet' && 'ddnet' || 'libxcursor1 libxinerama1 libxrandr2 libxi6 libxkbcommon0 libfontconfig1' }}
       - name: Install the game
         run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb xdotool imagemagick libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libvulkan1 mesa-vulkan-drivers
           if [ "${{ matrix.game }}" = DDNet ]; then
-            sudo apt-get install -y ddnet
             curl -fsSL --retry 3 --connect-timeout 20 --max-time 300 -o ddnet.tar.xz https://ddnet.org/downloads/$DDNET.tar.xz
             tar -xJf ddnet.tar.xz
           else
-            sudo apt-get install -y libxcursor1 libxinerama1 libxrandr2 libxi6 libxkbcommon0 libfontconfig1
             curl -fsSL --retry 3 --connect-timeout 20 --max-time 300 -o godot.zip https://github.com/godotengine/godot/releases/download/4.7.2-stable/$GODOT.zip
             unzip -q godot.zip && chmod +x $GODOT
           fi
@@ -429,6 +442,7 @@ jobs:
   consumer:
     name: FetchContent consumer
     runs-on: windows-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Configure
@@ -441,6 +455,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [msvc, windows-tests, solution, mingw, linux, linux-sanitizers, linux-portable, games-linux, games-windows, consumer]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
