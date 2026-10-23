@@ -143,6 +143,30 @@ bool IsInputMessage(UINT msg) {
            msg == WM_INPUT || msg == WM_MOUSEHOVER || msg == WM_MOUSELEAVE;
 }
 
+// Input the application does not see while the menu is open. Releases reach
+// it, so that no key or button stays down in it, and so does keyboard and
+// mouse raw input, which the GetRawInputData hook rids of presses and motion.
+bool HiddenFromApplication(UINT msg, LPARAM lParam) {
+    switch (msg) {
+    case WM_KEYUP:
+    case WM_SYSKEYUP:
+    case WM_LBUTTONUP:
+    case WM_RBUTTONUP:
+    case WM_MBUTTONUP:
+    case WM_XBUTTONUP:
+        return false;
+    case WM_INPUT: {
+        RAWINPUTHEADER header{};
+        UINT size = sizeof(header);
+        return !g_getRawInputData ||
+               g_getRawInputData(reinterpret_cast<HRAWINPUT>(lParam), RID_HEADER, &header, &size, sizeof(header)) == static_cast<UINT>(-1) ||
+               header.dwType == RIM_TYPEHID;
+    }
+    default:
+        return IsInputMessage(msg);
+    }
+}
+
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     ScopedCall call;
     WNDPROC original = nullptr;
@@ -165,9 +189,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             });
         }
     }
-    if (handled && IsMenuOpen() && IsInputMessage(msg)) {
-        // The system frees raw input data in DefWindowProc.
-        if (msg == WM_INPUT)
+    if (handled && IsMenuOpen() && HiddenFromApplication(msg, lParam)) {
+        // The system frees raw input data in DefWindowProc, which also turns
+        // Alt+F4 into a request to close the window.
+        if (msg == WM_INPUT || (msg == WM_SYSKEYDOWN && wParam == VK_F4))
             return unicode ? DefWindowProcW(hwnd, msg, wParam, lParam) : DefWindowProcA(hwnd, msg, wParam, lParam);
         return 0;
     }
