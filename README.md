@@ -76,7 +76,7 @@ To load it without an injector, rename it to `dinput8.dll` and put it next to th
 
 An injected DLL is unloaded by `F11`; inject it again to bring the overlay back.
 
-Logs (`config.debugLog`) go to `OutputDebugString`: read them with [DebugView](https://learn.microsoft.com/sysinternals/downloads/debugview).
+Logs (`config.debugLog`) go to `OutputDebugString`: read them with [DebugView](https://learn.microsoft.com/sysinternals/downloads/debugview). The example DLL writes them when the game runs with the environment variable `UIH_DEBUG=1`.
 
 ### Linux
 
@@ -290,7 +290,9 @@ Without a GPU, as on the CI runners, Direct3D uses WARP, and Mesa's software dri
 | `--proxy <path>` | Loads the DLL as `dinput8.dll` |
 | `--preview <path>` | Not a test: loads the DLL, opens its menu and renders until the window is closed, to look at a menu without a game |
 
-On Linux, `uih_host` does not link the hook: each test preloads the `.so`, opens the menu, checks the pixels and removes the overlay, through GLX, EGL, `dlsym()` lookups and Vulkan, with `--resize`, `--reload`, `--second-window`, `--recreate-context` and `--bound-framebuffer` variants, presents through `eglSwapBuffersWithDamage` that redraw and post a single pixel once `EGL_EXT_buffer_age` allows it (`--swap-with-damage`), and the Vulkan loader opened as `libvulkan.so` (`--vulkan-library`). It needs `libx11-dev libxtst-dev libgl-dev libegl-dev`; without a display, run `xvfb-run -a ctest --test-dir build/linux`. `tests/ddnet.sh` runs the same scenario on the game [DDNet](https://ddnet.org/). With `-DUIH_SANITIZE=ON`, the preload tests load the sanitizer runtime before the library, and any memory error or undefined behavior in the hook fails them.
+`uih_game --dll <path> --backend <name> -- game.exe [arguments]` runs a game and injects the DLL once its window shows, as an injector does: the backend must become active, `INSERT` must show the menu on screen and `F11` remove it while the game keeps running. It reads the log of the DLL as DebugView does, so DebugView must not run at the same time, and saves its captures as `game-before.bmp`, `game-menu.bmp` and `game-after.bmp` (`--captures <prefix>`).
+
+On Linux, `uih_host` does not link the hook: each test preloads the `.so`, opens the menu, checks the pixels and removes the overlay, through GLX, EGL, `dlsym()` lookups and Vulkan, with `--resize`, `--reload`, `--second-window`, `--recreate-context` and `--bound-framebuffer` variants, presents through `eglSwapBuffersWithDamage` that redraw and post a single pixel once `EGL_EXT_buffer_age` allows it (`--swap-with-damage`), and the Vulkan loader opened as `libvulkan.so` (`--vulkan-library`). It needs `libx11-dev libxtst-dev libgl-dev libegl-dev`; without a display, run `xvfb-run -a ctest --test-dir build/linux`. `tests/game.sh` runs the same scenario on a game, such as [DDNet](https://ddnet.org/) or a [Godot](https://godotengine.org/) project. With `-DUIH_SANITIZE=ON`, the preload tests load the sanitizer runtime before the library, and any memory error or undefined behavior in the hook fails them.
 
 The [CI](.github/workflows/build.yml) runs on every push and pull request:
 
@@ -303,7 +305,8 @@ The [CI](.github/workflows/build.yml) runs on every push and pull request:
 | Linux GCC, Clang x86_64, GCC aarch64 | The preload tests under Xvfb with llvmpipe and lavapipe, including resizes and the overlay brought back after `F11`, then the Vulkan ones under the validation layer |
 | Linux sanitizers | The preload tests with the library built with AddressSanitizer and UndefinedBehaviorSanitizer |
 | Linux portable x86_64, aarch64 | The released libraries, built and tested against glibc 2.28 |
-| DDNet OpenGL, Vulkan | The released library in a real game |
+| DDNet, Godot on Linux | The released library preloaded into [DDNet](https://ddnet.org/) and an empty [Godot](https://godotengine.org/) project (`tests/godot`), with OpenGL and Vulkan |
+| DDNet, Godot on Windows | The DLL injected into the same games once they render: DDNet with OpenGL and Vulkan, Godot with Direct3D 12, Vulkan and OpenGL, without GPU |
 | FetchContent consumer | The repository as a CMake dependency |
 
 Pushing a `v*` tag publishes the MSVC and Linux portable libraries as a release, once every job above has passed.
@@ -318,7 +321,7 @@ Pushing a `v*` tag publishes the MSVC and Linux portable libraries as a release,
 | `src/windows/` | MinHook, Direct3D, WGL, Win32 input, DirectInput, XInput |
 | `src/linux/` | Symbol interposition, GLX, EGL, X11 input, `exports.map` |
 | `example/` | The built library: `config.cpp` (settings), `menu.cpp` (the widget tour), `image.cpp` and `image.rc` (`imgui.png` embedded), `dllmain.cpp`, `proxy.cpp`, `preload.cpp` |
-| `tests/` | `uih_host`, the DDNet script, the `FetchContent` consumer |
+| `tests/` | `uih_host`, `uih_game` and `game.sh` for real games, the Godot project they run, the `FetchContent` consumer |
 | `vs/`, `Universal-ImGui-Hook.sln` | Visual Studio projects |
 | `third_party/` | Dear ImGui, MinHook, Vulkan headers, stb_image (example only) |
 

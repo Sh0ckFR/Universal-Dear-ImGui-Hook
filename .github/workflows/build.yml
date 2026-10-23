@@ -304,36 +304,121 @@ jobs:
           name: Universal-ImGui-Hook-linux-${{ matrix.arch }}
           path: build/linux/Universal-ImGui-Hook.so
 
-  ddnet:
-    name: DDNet (${{ matrix.backend }})
+  # Released games with the released library preloaded.
+  games-linux:
+    name: ${{ matrix.game }} on Linux (${{ matrix.backend }})
     needs: linux-portable
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
+        game: [DDNet, Godot]
         backend: [OpenGL, Vulkan]
     env:
       DDNET: DDNet-20.1.1-linux_x86_64
+      GODOT: Godot_v4.7.2-stable_linux.x86_64
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: Universal-ImGui-Hook-linux-x86_64
-      # The distribution package brings the libraries the official build needs.
-      - name: Install DDNet
+      # The distribution package of DDNet brings the libraries the official build needs.
+      - name: Install the game
         run: |
           sudo apt-get update
-          sudo apt-get install -y ddnet xvfb xdotool imagemagick libgl1-mesa-dri libglx-mesa0 libvulkan1 mesa-vulkan-drivers
-          curl -fsSL --retry 3 --connect-timeout 20 --max-time 300 -o ddnet.tar.xz https://ddnet.org/downloads/$DDNET.tar.xz
-          tar -xJf ddnet.tar.xz
+          sudo apt-get install -y xvfb xdotool imagemagick libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libvulkan1 mesa-vulkan-drivers \
+            ddnet libxcursor1 libxinerama1 libxrandr2 libxi6 libxkbcommon0 libfontconfig1
+          if [ "${{ matrix.game }}" = DDNet ]; then
+            curl -fsSL --retry 3 --connect-timeout 20 --max-time 300 -o ddnet.tar.xz https://ddnet.org/downloads/$DDNET.tar.xz
+            tar -xJf ddnet.tar.xz
+          else
+            curl -fsSL --retry 3 --connect-timeout 20 --max-time 300 -o godot.zip https://github.com/godotengine/godot/releases/download/4.7.2-stable/$GODOT.zip
+            unzip -q godot.zip && chmod +x $GODOT
+          fi
       - name: Run DDNet with the hook preloaded
-        run: xvfb-run -a -s "-screen 0 1280x800x24" sh tests/ddnet.sh Universal-ImGui-Hook.so $DDNET/DDNet ${{ matrix.backend }} ddnet-${{ matrix.backend }}.png
+        if: matrix.game == 'DDNet'
+        run: |
+          xvfb-run -a -s "-screen 0 1280x800x24" sh tests/game.sh Universal-ImGui-Hook.so ${{ matrix.backend }} game.png \
+            $DDNET/DDNet "gfx_backend ${{ matrix.backend }}" "gfx_fullscreen 0" "gfx_screen_width 1024" "gfx_screen_height 768"
+      - name: Run Godot with the hook preloaded
+        if: matrix.game == 'Godot'
+        run: |
+          if [ "${{ matrix.backend }}" = OpenGL ]; then driver="--rendering-driver opengl3 --rendering-method gl_compatibility"; else driver="--rendering-driver vulkan"; fi
+          xvfb-run -a -s "-screen 0 1280x800x24" sh tests/game.sh Universal-ImGui-Hook.so ${{ matrix.backend }} game.png \
+            ./$GODOT --path "$PWD/tests/godot" $driver
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ddnet-${{ matrix.backend }}
-          path: ddnet-${{ matrix.backend }}.png
+          name: ${{ matrix.game }}-linux-${{ matrix.backend }}
+          path: game.png
+          if-no-files-found: ignore
+
+  # The same games on Windows, with the DLL injected once they render, as an
+  # injector does, and without GPU as in windows-tests.
+  games-windows:
+    name: ${{ matrix.game }} on Windows
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        game: [DDNet, Godot]
+    env:
+      MESA: 26.2.4
+      VULKAN_RUNTIME: 1.4.363.0
+      GALLIUM_DRIVER: llvmpipe
+      DDNET: DDNet-20.1.1-win64
+      GODOT: Godot_v4.7.2-stable_win64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -A x64 -DUIH_BUILD_TESTS=ON
+      - name: Build
+        run: cmake --build build --config Release --target uih_example uih_game
+      - name: Install the game and software drivers
+        shell: pwsh
+        run: |
+          if ("${{ matrix.game }}" -eq "DDNet") {
+            curl.exe -fsSL --retry 3 -o game.zip "https://ddnet.org/downloads/$env:DDNET.zip"
+            Expand-Archive game.zip .
+            $game = $env:DDNET
+          } else {
+            curl.exe -fsSL --retry 3 -o game.zip "https://github.com/godotengine/godot/releases/download/4.7.2-stable/$env:GODOT.exe.zip"
+            Expand-Archive game.zip $env:GODOT
+            $game = $env:GODOT
+          }
+          curl.exe -fsSL --retry 3 -o mesa.7z "https://github.com/pal1000/mesa-dist-win/releases/download/$env:MESA/mesa3d-$env:MESA-release-msvc.7z"
+          7z x mesa.7z -omesa | Out-Null
+          curl.exe -fsSL --retry 3 -o vulkan.zip "https://sdk.lunarg.com/sdk/download/$env:VULKAN_RUNTIME/windows/vulkan-runtime-components.zip"
+          Expand-Archive vulkan.zip vulkan
+          Copy-Item mesa/x64/opengl32.dll, mesa/x64/libgallium_wgl.dll $game
+          if (-not (Test-Path "$game/vulkan-1.dll")) {
+            Copy-Item (Get-ChildItem vulkan -Recurse -Filter vulkan-1.dll | Where-Object { $_.Directory.Name -eq "x64" }).FullName $game
+          }
+          $icd = (Get-ChildItem mesa/x64 -Filter "lvp_icd.*.json").FullName
+          New-Item -Path HKLM:\SOFTWARE\Khronos\Vulkan\Drivers -Force | Out-Null
+          New-ItemProperty -Path HKLM:\SOFTWARE\Khronos\Vulkan\Drivers -Name $icd -Value 0 -PropertyType DWord -Force | Out-Null
+      - name: DDNet with OpenGL
+        if: matrix.game == 'DDNet' && !cancelled()
+        run: build\tests\Release\uih_game.exe --dll build\Release\Universal-ImGui-Hook.dll --backend OpenGL --captures ddnet-opengl -- "$env:DDNET\DDNet.exe" "gfx_backend OpenGL" "gfx_fullscreen 0" "gfx_screen_width 1024" "gfx_screen_height 768"
+      - name: DDNet with Vulkan
+        if: matrix.game == 'DDNet' && !cancelled()
+        run: build\tests\Release\uih_game.exe --dll build\Release\Universal-ImGui-Hook.dll --backend Vulkan --captures ddnet-vulkan -- "$env:DDNET\DDNet.exe" "gfx_backend Vulkan" "gfx_fullscreen 0" "gfx_screen_width 1024" "gfx_screen_height 768"
+      - name: Godot with D3D12
+        if: matrix.game == 'Godot' && !cancelled()
+        run: build\tests\Release\uih_game.exe --dll build\Release\Universal-ImGui-Hook.dll --backend D3D12 --captures godot-d3d12 -- "$env:GODOT\$env:GODOT.exe" --path "$pwd\tests\godot" --rendering-driver d3d12
+      - name: Godot with Vulkan
+        if: matrix.game == 'Godot' && !cancelled()
+        run: build\tests\Release\uih_game.exe --dll build\Release\Universal-ImGui-Hook.dll --backend Vulkan --captures godot-vulkan -- "$env:GODOT\$env:GODOT.exe" --path "$pwd\tests\godot" --rendering-driver vulkan
+      - name: Godot with OpenGL
+        if: matrix.game == 'Godot' && !cancelled()
+        run: build\tests\Release\uih_game.exe --dll build\Release\Universal-ImGui-Hook.dll --backend OpenGL --captures godot-opengl -- "$env:GODOT\$env:GODOT.exe" --path "$pwd\tests\godot" --rendering-driver opengl3 --rendering-method gl_compatibility
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ matrix.game }}-windows
+          path: '*.bmp'
           if-no-files-found: ignore
 
   consumer:
@@ -349,7 +434,7 @@ jobs:
   release:
     name: Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [msvc, windows-tests, solution, mingw, linux, linux-sanitizers, linux-portable, ddnet, consumer]
+    needs: [msvc, windows-tests, solution, mingw, linux, linux-sanitizers, linux-portable, games-linux, games-windows, consumer]
     runs-on: ubuntu-latest
     permissions:
       contents: write

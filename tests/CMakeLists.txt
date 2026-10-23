@@ -17,6 +17,10 @@ if(WIN32)
         target_link_options(uih_fake_xinput PRIVATE -Wl,--enable-stdcall-fixup)
     endif()
 
+    # Not a CTest scenario: runs a game given on its command line, see the CI.
+    add_executable(uih_game game.cpp)
+    target_compile_definitions(uih_game PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+
     uih_add_host_test(d3d9 --api d3d9)
     uih_add_host_test(d3d9ex --api d3d9ex)
     uih_add_host_test(d3d10 --api d3d10)

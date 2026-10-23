@@ -21,7 +21,8 @@ BOOL WINAPI DllMain(HMODULE module, DWORD reason, LPVOID) {
         ApplySettings(config);
         config.module = LoadedAsProxy(module) ? nullptr : module;
         config.render = DrawMenu;
-        config.debugLog = false;
+        // With UIH_DEBUG set, the log goes to OutputDebugString(), which DebugView shows.
+        config.debugLog = GetEnvironmentVariableW(L"UIH_DEBUG", nullptr, 0) > 0;
         uih::Start(config);
     }
     return TRUE;
