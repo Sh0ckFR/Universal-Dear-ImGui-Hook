@@ -467,6 +467,8 @@ void Stop() {
         return;
     g_state = State::Stopping;
     Log("Stopping");
+    // The application gets its input and its cursor back.
+    SetMenuOpen(false);
 
     platform::Stop();
 

@@ -1611,6 +1611,18 @@ int CheckCursorClip(HWND window, Host& host) {
         return Fail("the cursor stays confined while the menu is open");
     if (!EqualRect(&clip, &inner))
         return Fail("the cursor is not confined again when the menu closes");
+
+    // Stopping the hook closes the menu.
+    ClipCursor(&client);
+    uih::SetMenuOpen(true);
+    run(5);
+    uih::Stop();
+    GetClipCursor(&clip);
+    ClipCursor(nullptr);
+    if (uih::IsMenuOpen())
+        return Fail("the menu stays open after uih::Stop()");
+    if (!EqualRect(&clip, &client))
+        return Fail("the cursor is not confined again when uih::Stop() closes the menu");
     return 0;
 }
 
