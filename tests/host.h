@@ -71,6 +71,9 @@ struct Options {
     // The Vulkan swap chain images are only written by transfers, as by
     // engines that copy their frame into them.
     bool transferOnly = false;
+    // Linux: path the host opens the Vulkan loader from instead of
+    // libvulkan.so.1, as applications that open libvulkan.so do.
+    std::string vulkanLibrary;
     // The host renders on a thread of its own while the thread of the window
     // dispatches a flood of input messages, as engines with a render thread do.
     bool renderThread = false;

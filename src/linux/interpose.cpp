@@ -1,6 +1,7 @@
 #include "internal.h"
 
 #include <dlfcn.h>
+#include <link.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -56,15 +57,23 @@ void* Library::Detour(const char* name) const {
     return nullptr;
 }
 
+// By soname: the application may have opened the library under another
+// name, such as libvulkan.so.
 bool Library::Contains(const void* address) const {
     Dl_info info{};
-    if (!address || !dladdr(address, &info) || !info.dli_fname)
+    link_map* object = nullptr;
+    if (!address || !dladdr1(address, &info, reinterpret_cast<void**>(&object), RTLD_DL_LINKMAP) || !object)
         return false;
-    const char* separator = strrchr(info.dli_fname, '/');
-    const char* file = separator ? separator + 1 : info.dli_fname;
-    for (const char* const* soname = sonames; *soname; ++soname)
-        if (strncmp(file, *soname, strlen(*soname)) == 0)
+    for (const char* const* soname = sonames; *soname; ++soname) {
+        void* handle = dlopen(*soname, RTLD_LAZY | RTLD_NOLOAD);
+        if (!handle)
+            continue;
+        link_map* library = nullptr;
+        bool same = dlinfo(handle, RTLD_DI_LINKMAP, &library) == 0 && library == object;
+        dlclose(handle);
+        if (same)
             return true;
+    }
     return false;
 }
 
