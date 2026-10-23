@@ -97,22 +97,22 @@ struct WindowSearch {
     HWND window;
 };
 
-// The largest visible top-level window of the game.
+BOOL CALLBACK MatchGameWindow(HWND window, LPARAM param) {
+    auto* search = reinterpret_cast<WindowSearch*>(param);
+    DWORD owner = 0;
+    GetWindowThreadProcessId(window, &owner);
+    RECT client{};
+    if (owner != search->pid || !IsWindowVisible(window) || GetWindow(window, GW_OWNER) || !GetClientRect(window, &client) ||
+        client.right < 320 || client.bottom < 240)
+        return TRUE;
+    search->window = window;
+    return FALSE;
+}
+
+// The first visible top-level window of the game large enough to render it.
 HWND FindGameWindow(DWORD pid) {
     WindowSearch search{pid, nullptr};
-    EnumWindows(
-        [](HWND window, LPARAM param) -> BOOL {
-            auto* search = reinterpret_cast<WindowSearch*>(param);
-            DWORD owner = 0;
-            GetWindowThreadProcessId(window, &owner);
-            RECT client{};
-            if (owner != search->pid || !IsWindowVisible(window) || GetWindow(window, GW_OWNER) || !GetClientRect(window, &client) ||
-                client.right < 320 || client.bottom < 240)
-                return TRUE;
-            search->window = window;
-            return FALSE;
-        },
-        reinterpret_cast<LPARAM>(&search));
+    EnumWindows(MatchGameWindow, reinterpret_cast<LPARAM>(&search));
     return search.window;
 }
 
@@ -150,12 +150,6 @@ bool BringToFront(HWND window) {
         Sleep(200);
     }
     return GetForegroundWindow() == window;
-}
-
-void PressKey(WORD key) {
-    HoldKey(key, true);
-    Sleep(300);
-    HoldKey(key, false);
 }
 
 // Client area of `window` as shown on screen, top-down BGRA rows.
@@ -302,6 +296,14 @@ int main(int argc, char** argv) {
         }
         return log.Contains(text);
     };
+    // The library reads the keys once per frame: a game that renders without
+    // GPU can take longer than a key press between two frames.
+    auto pressUntil = [&](WORD key, const char* text) {
+        HoldKey(key, true);
+        bool seen = waitFor(text);
+        HoldKey(key, false);
+        return seen;
+    };
 
     HWND window = nullptr;
     for (ULONGLONG start = GetTickCount64(); !window && alive() && GetTickCount64() - start < kStartTimeoutMs; Sleep(200))
@@ -324,8 +326,7 @@ int main(int argc, char** argv) {
         return finish(Fail(alive() ? "the expected backend did not become active" : "the game exited after the library was loaded"));
 
     BringToFront(window);
-    PressKey(VK_INSERT);
-    if (!waitFor("[uih] Menu opened"))
+    if (!pressUntil(VK_INSERT, "[uih] Menu opened"))
         return finish(Fail(alive() ? "the menu key did not open the menu" : "the game exited when the menu opened"));
     Sleep(1500);
     std::vector<uint8_t> open = CaptureWindow(window, width, height);
@@ -336,8 +337,7 @@ int main(int argc, char** argv) {
         return finish(Fail("the menu is not visible on screen"));
 
     BringToFront(window);
-    PressKey(VK_F11);
-    if (!waitFor("[uih] Stopped"))
+    if (!pressUntil(VK_F11, "[uih] Unload requested") || !waitFor("[uih] Stopped"))
         return finish(Fail(alive() ? "the unload key did not remove the overlay" : "the game exited when the overlay was removed"));
     Sleep(2000);
     if (!alive())

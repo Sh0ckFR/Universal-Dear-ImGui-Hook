@@ -392,7 +392,9 @@ jobs:
           7z x mesa.7z -omesa | Out-Null
           curl.exe -fsSL --retry 3 -o vulkan.zip "https://sdk.lunarg.com/sdk/download/$env:VULKAN_RUNTIME/windows/vulkan-runtime-components.zip"
           Expand-Archive vulkan.zip vulkan
-          Copy-Item mesa/x64/opengl32.dll, mesa/x64/libgallium_wgl.dll $game
+          if ("${{ matrix.game }}" -eq "DDNet") {
+            Copy-Item mesa/x64/opengl32.dll, mesa/x64/libgallium_wgl.dll $game
+          }
           if (-not (Test-Path "$game/vulkan-1.dll")) {
             Copy-Item (Get-ChildItem vulkan -Recurse -Filter vulkan-1.dll | Where-Object { $_.Directory.Name -eq "x64" }).FullName $game
           }
@@ -411,9 +413,11 @@ jobs:
       - name: Godot with Vulkan
         if: matrix.game == 'Godot' && !cancelled()
         run: build\tests\Release\uih_game.exe --dll build\Release\Universal-ImGui-Hook.dll --backend Vulkan --captures godot-vulkan -- "$env:GODOT\$env:GODOT.exe" --path "$pwd\tests\godot" --rendering-driver vulkan
-      - name: Godot with OpenGL
+      # Godot does not create its OpenGL window with llvmpipe: ANGLE draws its
+      # OpenGL renderer with Direct3D 11.
+      - name: Godot with D3D11
         if: matrix.game == 'Godot' && !cancelled()
-        run: build\tests\Release\uih_game.exe --dll build\Release\Universal-ImGui-Hook.dll --backend OpenGL --captures godot-opengl -- "$env:GODOT\$env:GODOT.exe" --path "$pwd\tests\godot" --rendering-driver opengl3 --rendering-method gl_compatibility
+        run: build\tests\Release\uih_game.exe --dll build\Release\Universal-ImGui-Hook.dll --backend D3D11 --captures godot-d3d11 -- "$env:GODOT\$env:GODOT.exe" --path "$pwd\tests\godot" --rendering-driver opengl3_angle --rendering-method gl_compatibility
       - uses: actions/upload-artifact@v4
         if: always()
         with:

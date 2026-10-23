@@ -306,7 +306,7 @@ The [CI](.github/workflows/build.yml) runs on every push and pull request:
 | Linux sanitizers | The preload tests with the library built with AddressSanitizer and UndefinedBehaviorSanitizer |
 | Linux portable x86_64, aarch64 | The released libraries, built and tested against glibc 2.28 |
 | DDNet, Godot on Linux | The released library preloaded into [DDNet](https://ddnet.org/) and an empty [Godot](https://godotengine.org/) project (`tests/godot`), with OpenGL and Vulkan |
-| DDNet, Godot on Windows | The DLL injected into the same games once they render: DDNet with OpenGL and Vulkan, Godot with Direct3D 12, Vulkan and OpenGL, without GPU |
+| DDNet, Godot on Windows | The DLL injected into the same games once they render: DDNet with OpenGL and Vulkan, Godot with Direct3D 12, Vulkan and Direct3D 11 (its OpenGL renderer through ANGLE), without GPU |
 | FetchContent consumer | The repository as a CMake dependency |
 
 Pushing a `v*` tag publishes the MSVC and Linux portable libraries as a release, once every job above has passed.
