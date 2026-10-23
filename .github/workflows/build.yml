@@ -327,12 +327,13 @@ jobs:
       - name: Install the game
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb xdotool imagemagick libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libvulkan1 mesa-vulkan-drivers \
-            ddnet libxcursor1 libxinerama1 libxrandr2 libxi6 libxkbcommon0 libfontconfig1
+          sudo apt-get install -y xvfb xdotool imagemagick libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libvulkan1 mesa-vulkan-drivers
           if [ "${{ matrix.game }}" = DDNet ]; then
+            sudo apt-get install -y ddnet
             curl -fsSL --retry 3 --connect-timeout 20 --max-time 300 -o ddnet.tar.xz https://ddnet.org/downloads/$DDNET.tar.xz
             tar -xJf ddnet.tar.xz
           else
+            sudo apt-get install -y libxcursor1 libxinerama1 libxrandr2 libxi6 libxkbcommon0 libfontconfig1
             curl -fsSL --retry 3 --connect-timeout 20 --max-time 300 -o godot.zip https://github.com/godotengine/godot/releases/download/4.7.2-stable/$GODOT.zip
             unzip -q godot.zip && chmod +x $GODOT
           fi
