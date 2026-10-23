@@ -91,7 +91,7 @@ void ServiceTeardown(Backend backend, void (*teardown)());
 // Runs `release` once no thread draws the overlay.
 void ReleaseOverlay(void (*release)());
 // Same, unless a thread still draws the overlay after `timeoutMs`: false
-// then, and `release` does not run.
+// then, and that thread releases the overlay once its frame ends.
 bool ReleaseOverlayWithin(unsigned timeoutMs, void (*release)());
 // False when the rendering thread did not answer and the caller has to release the resources.
 bool TeardownOnRenderThread(unsigned timeoutMs);

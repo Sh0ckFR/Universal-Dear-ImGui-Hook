@@ -275,7 +275,7 @@ Without a GPU, as on the CI runners, Direct3D uses WARP, and Mesa's software dri
 | `--remove` | `F11` removes the overlay and `INSERT` brings it back, twice, without a module to free |
 | `--second-window` | A second window with its own device presents too: the overlay must stay on one window, follow the focus, and come back when the second window stops presenting |
 | `--fault access\|exception` | The render callback writes to a null pointer or throws: the overlay must be removed while the host keeps rendering, then start again (MSVC) |
-| `--slow-frame` | One frame of the menu lasts 2.5 s while `Stop()` is called from another thread: nothing that frame uses may be released under it |
+| `--slow-frame ms` | One frame of the menu lasts `ms` while `Stop()` is called from another thread: nothing that frame uses may be released under it. `_slow_frame` tests last 2.5 s, within the waits of `Stop()`; `_stuck_frame` tests last 6 s, beyond them. The hook must then start again |
 | `--bound-framebuffer` | The OpenGL host leaves a framebuffer object and a pixel unpack buffer bound at every swap: the overlay must still show on the window |
 | `--recreate-context` | The OpenGL context is deleted with the menu open and a new one, with textures of its own, takes over: the overlay comes back and leaves them alone |
 | `--input raw\|directinput` | What the game reads while the menu is open |

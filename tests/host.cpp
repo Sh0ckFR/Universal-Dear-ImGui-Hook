@@ -1300,7 +1300,7 @@ int RunSlowFrameMode(HWND window, Host& host, const Options& options) {
     run(30);
 
     PVOID handler = AddVectoredExceptionHandler(1, CountAccessViolations);
-    g_slowFrameMs = 2500;
+    g_slowFrameMs = static_cast<DWORD>(options.slowFrameMs);
     std::thread stop([] {
         // Once the slow frame started.
         Sleep(200);
@@ -1316,8 +1316,19 @@ int RunSlowFrameMode(HWND window, Host& host, const Options& options) {
         result = Fail("the overlay raised an access violation");
     else if (ImGui::GetCurrentContext() || uih::ActiveBackend() != uih::Backend::None)
         result = Fail("hook did not release its resources");
-    if (result == 0)
-        printf("PASS: %s, stopped during a slow frame\n", options.api.c_str());
+    if (result != 0)
+        return result;
+
+    StartHook(options);
+    for (ULONGLONG start = GetTickCount64(); WaitingForBackend(start);)
+        run(1);
+    uih::SetMenuOpen(true);
+    run(30);
+    bool back = ImGui::GetCurrentContext() && ImGui::GetIO().MetricsRenderVertices > 0;
+    uih::Stop();
+    if (!back)
+        return Fail("the overlay did not come back after the slow frame");
+    printf("PASS: %s, stopped during a frame of %d ms\n", options.api.c_str(), options.slowFrameMs);
     return result;
 }
 
@@ -1691,7 +1702,7 @@ int main(int argc, char** argv) {
         else if (arg == "--render-thread") options.renderThread = true;
         else if (arg == "--resubclass") options.resubclass = true;
         else if (arg == "--recreate-context") options.recreateContext = true;
-        else if (arg == "--slow-frame") options.slowFrame = true;
+        else if (arg == "--slow-frame" && i + 1 < argc) options.slowFrameMs = atoi(argv[++i]);
         else if (arg == "--bound-framebuffer") options.boundFramebuffer = true;
         else if (arg == "--warp") options.warp = true;
         else if (arg == "--capture") options.capture = true;
@@ -1706,7 +1717,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception] [--second-window] [--textures N] [--remove-device] [--transfer-only] [--render-thread] [--resubclass] [--recreate-context] [--slow-frame] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception] [--second-window] [--textures N] [--remove-device] [--transfer-only] [--render-thread] [--resubclass] [--recreate-context] [--slow-frame ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -1779,7 +1790,7 @@ int main(int argc, char** argv) {
         DestroyWindow(window);
         return result;
     }
-    if (options.slowFrame) {
+    if (options.slowFrameMs > 0) {
         int result = RunSlowFrameMode(window, *host, options);
         host.reset();
         DestroyWindow(window);

@@ -79,9 +79,10 @@ struct Options {
     // Deletes the OpenGL context while the menu is open and renders with a
     // new one, as games do when the video settings change.
     bool recreateContext = false;
-    // A frame of the overlay outlasts the wait of uih::Stop() for the thread
-    // that presents, as a slow render callback or a stalled GPU make it.
-    bool slowFrame = false;
+    // Duration of a frame of the overlay that outlasts the wait of
+    // uih::Stop() for the thread that presents, as a slow render callback or
+    // a stalled GPU make it. 0 without it.
+    int slowFrameMs = 0;
     // The OpenGL host leaves a framebuffer object and a pixel unpack buffer
     // of its own bound when it swaps buffers, as engines that render offscreen do.
     bool boundFramebuffer = false;

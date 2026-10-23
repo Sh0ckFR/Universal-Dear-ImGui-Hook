@@ -29,6 +29,8 @@ std::atomic<bool> g_teardownPending{false};
 std::mutex g_teardownMutex;
 std::condition_variable g_teardownSignal;
 bool g_teardownDone = false;
+// Backend whose overlay the thread drawing it releases once its frame ends.
+std::atomic<Backend> g_abandonedBackend{Backend::None};
 
 float g_appliedScale = 1.0f;
 // Textures created with CreateTexture(). They are registered with each ImGui
@@ -264,6 +266,12 @@ void ServiceTeardown(Backend backend, void (*teardown)()) {
     std::thread::id renderThread = g_renderThread;
     if (renderThread != std::thread::id() && renderThread != std::this_thread::get_id())
         return;
+    // Stop() gave up waiting for the frame this thread was drawing.
+    Backend abandoned = backend;
+    if (g_abandonedBackend.compare_exchange_strong(abandoned, Backend::None)) {
+        ReleaseOverlay(teardown);
+        return;
+    }
     if (g_activeBackend != backend || !g_teardownPending.exchange(false))
         return;
     ReleaseOverlay(teardown);
@@ -280,9 +288,15 @@ void ReleaseOverlay(void (*release)()) {
 }
 
 bool ReleaseOverlayWithin(unsigned timeoutMs, void (*release)()) {
-    std::unique_lock<std::timed_mutex> lock(g_frameMutex, std::chrono::milliseconds(timeoutMs));
-    if (!lock)
-        return false;
+    std::unique_lock<std::timed_mutex> lock(g_frameMutex, std::defer_lock);
+    if (!lock.try_lock_for(std::chrono::milliseconds(timeoutMs))) {
+        g_abandonedBackend = g_activeBackend.load();
+        // The frame may have ended before its thread could see that.
+        if (!lock.try_lock())
+            return false;
+        if (g_abandonedBackend.exchange(Backend::None) == Backend::None)
+            return true;
+    }
     Guarded([&] { release(); });
     return true;
 }
