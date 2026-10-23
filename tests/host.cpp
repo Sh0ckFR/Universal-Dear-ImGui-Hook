@@ -952,6 +952,16 @@ void StartHook(const Options& options) {
     uih::Start(config);
 }
 
+int Fail(const char* message) {
+    printf("FAIL: %s\n", message);
+    return 1;
+}
+
+int Skip(const char* message) {
+    printf("SKIP: %s\n", message);
+    return kSkip;
+}
+
 // A client of the remote control, as remote/uih_mcp.py is.
 class RemoteClient {
 public:
@@ -1121,16 +1131,6 @@ void ResizeWindow(HWND window, int width, int height) {
     RECT rect{0, 0, width, height};
     AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
     SetWindowPos(window, nullptr, 0, 0, rect.right - rect.left, rect.bottom - rect.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-}
-
-int Fail(const char* message) {
-    printf("FAIL: %s\n", message);
-    return 1;
-}
-
-int Skip(const char* message) {
-    printf("SKIP: %s\n", message);
-    return kSkip;
 }
 
 void HoldKey(int key, bool down) {
