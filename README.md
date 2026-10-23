@@ -65,6 +65,7 @@ To make the overlay your own, you only edit the example:
 | --- | --- |
 | The menu | `example/menu.cpp`, plain Dear ImGui code run every frame |
 | Hotkeys, controller buttons, graphics API, interface scale | `example/config.cpp` |
+| Remote control by an AI assistant, its pipe name | `example/config.cpp`, see [Remote control by an AI assistant](#remote-control-by-an-ai-assistant) |
 | Fonts and style | a `config.setup` callback, run when the ImGui context is created, set next to `config.render` in `example/dllmain.cpp` (Windows) or `example/preload.cpp` (Linux) |
 
 The hook itself, in `src/`, needs no change.
@@ -277,6 +278,10 @@ Everything is in `include/uih.h`, namespace `uih`.
 
 **Faults.** On Windows, what the overlay runs in the game's threads (frames, teardown, window messages) is protected by structured exception handling. An exception there, such as an access violation in the `render` callback, removes the overlay from another thread, as the unload key does without a `module`: the game keeps running, and the menu key or buttons bring the overlay back. The frame runs before the backends take a reference to the back buffer, so a fault leaks none.
 
+**Frame capture.** When `CaptureFrame()` waits, the backend copies its back buffer at the next present, before it draws the overlay: `GetRenderTargetData` on D3D9, a staging texture on D3D10 and 11, a readback buffer on D3D12 and Vulkan, `glReadPixels` on OpenGL. Multisampled back buffers are resolved first. To allow the copy, Vulkan swap chains are created with `TRANSFER_SRC` usage, and again without it if the surface refuses.
+
+**Remote control** (Windows). With `remoteControl` set, a thread of the library serves the named pipe with overlapped I/O, so that `Stop()` ends a connection or a command at once. Messages are drawn after the `render` callback, in the frame of the overlay; keys go through `SendInput` when the game has the focus and as window messages otherwise.
+
 **Resolution changes** are followed on every API: D3D9 `Reset`/`ResetEx`, DXGI `ResizeBuffers`, a new Vulkan swap chain, or a new size of the OpenGL window; the overlay takes the new size on the next frame.
 
 ## Building
@@ -405,8 +410,10 @@ Pushing a `v*` tag publishes the MSVC and Linux portable libraries as a release,
 | `include/uih.h` | Public API |
 | `src/uih.cpp`, `src/internal.h` | Platform-independent core: lifecycle, frame, textures, scale |
 | `src/vulkan.cpp` | Vulkan renderer, shared by both platforms |
-| `src/windows/` | MinHook, Direct3D, WGL, Win32 input, DirectInput, XInput |
+| `src/windows/` | MinHook, Direct3D, WGL, Win32 input, DirectInput, XInput, remote control (`remote.cpp`) |
+| `src/gl_state.h` | OpenGL state set aside while the overlay draws, and the frame capture shared by WGL, GLX and EGL |
 | `src/linux/` | Symbol interposition, GLX, EGL, X11 input, `exports.map` |
+| `remote/` | `uih_mcp.py`, the MCP server of the remote control, and the DLL injector it includes |
 | `example/` | The built library: `config.cpp` (settings), `menu.cpp` (the widget tour), `image.cpp` and `image.rc` (`imgui.png` embedded), `dllmain.cpp`, `proxy.cpp`, `preload.cpp` |
 | `tests/` | `uih_host`, `uih_game` and `game.sh` for real games, the Godot project they run, the `FetchContent` consumer |
 | `vs/`, `Universal-ImGui-Hook.sln` | Visual Studio projects |
@@ -426,6 +433,8 @@ Pushing a `v*` tag publishes the MSVC and Linux portable libraries as a release,
 - Native ARM64 Windows games are not supported: MinHook only handles x86 and x64.
 - Only Windows builds made with MSVC, the released ones, survive an exception in the overlay: MinGW-w64 has no structured exception handling, and Linux builds are not protected either.
 - D3D9: after an exception in a draw callback (`ImDrawList::AddCallback`), the state block of the Dear ImGui backend is never released, and the game cannot reset its device.
+- `CaptureFrame()` only copies 8-bit and 10-bit back buffers: the floating-point ones of HDR output are not captured.
+- The remote control is Windows only; on Linux, `CaptureFrame()` is available to code that links the library.
 
 ## Built With
 
@@ -445,7 +454,7 @@ Pushing a `v*` tag publishes the MSVC and Linux portable libraries as a release,
 
 ## Support
 
-This project is free and MIT-licensed. Building it from scratch represents roughly 57 days of senior C++ work, about €37,000 at French freelance rates: six graphics backends on two operating systems, input blocking, crash protection, and about 80 test scenarios run on every commit. If it saved you time, consider [sponsoring](https://github.com/sponsors/Sh0ckFR) or starring the repository.
+This project is free and MIT-licensed. Building it from scratch represents roughly 83 days of senior C++ work, about €54,000 at French freelance rates: six graphics backends on two operating systems, input blocking, crash protection, frame capture and the remote control by an AI assistant, and about 130 test scenarios run on every commit, real games included. If it saved you time, consider [sponsoring](https://github.com/sponsors/Sh0ckFR) or starring the repository.
 
 ## License
 
