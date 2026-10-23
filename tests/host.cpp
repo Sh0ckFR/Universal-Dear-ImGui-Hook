@@ -1438,6 +1438,39 @@ void PumpRawInput() {
     }
 }
 
+// What the window procedure of the host saw, like games that read their
+// input there rather than in their message loop.
+struct ProcedureInput {
+    bool keyDown = false;
+    bool rawKeyDown = false;
+    bool closeRequested = false;
+};
+
+ProcedureInput g_procedureInput;
+
+LRESULT CALLBACK HostInputProc(HWND window, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if ((msg == WM_KEYDOWN || msg == WM_KEYUP) && wParam == VK_F13)
+        g_procedureInput.keyDown = msg == WM_KEYDOWN;
+    if (msg == WM_INPUT) {
+        RAWINPUT input{};
+        UINT size = sizeof(input);
+        if (GetRawInputData(reinterpret_cast<HRAWINPUT>(lParam), RID_INPUT, &input, &size, sizeof(RAWINPUTHEADER)) != static_cast<UINT>(-1) &&
+            input.header.dwType == RIM_TYPEKEYBOARD) {
+            if (input.data.keyboard.Flags & RI_KEY_BREAK) {
+                if (input.data.keyboard.VKey == VK_F13)
+                    g_procedureInput.rawKeyDown = false;
+            } else if (input.data.keyboard.VKey == VK_F13) {
+                g_procedureInput.rawKeyDown = true;
+            }
+        }
+    }
+    if (msg == WM_SYSCOMMAND && (wParam & 0xFFF0) == SC_CLOSE) {
+        g_procedureInput.closeRequested = true;
+        return 0;
+    }
+    return DefWindowProcW(window, msg, wParam, lParam);
+}
+
 struct InputState {
     bool asyncKey = false;
     bool keyState = false;
@@ -1488,12 +1521,52 @@ void PrintInput(const char* label, const InputState& state) {
            state.cursor.y);
 }
 
+// A key held when the menu opens and released while it is open must not
+// stay down in the application, and Alt+F4 still closes its window.
+int CheckReleaseWithMenuOpen(HWND window, Host& host, bool useDirectInput) {
+    auto run = [&](int frames) {
+        for (int frame = 0; frame < frames; ++frame) {
+            PumpRawInput();
+            host.Frame();
+        }
+    };
+    BYTE scanCode = static_cast<BYTE>(MapVirtualKeyW(VK_F13, MAPVK_VK_TO_VSC));
+    g_procedureInput = {};
+    keybd_event(VK_F13, scanCode, 0, 0);
+    run(10);
+    bool rawSeen = useDirectInput || g_procedureInput.rawKeyDown;
+    if (!g_procedureInput.keyDown || !rawSeen) {
+        keybd_event(VK_F13, scanCode, KEYEVENTF_KEYUP, 0);
+        run(5);
+        return Skip("the key press did not reach the window procedure of the host");
+    }
+    uih::SetMenuOpen(true);
+    run(5);
+    keybd_event(VK_F13, scanCode, KEYEVENTF_KEYUP, 0);
+    run(10);
+    // Alt+F4, as the system reports it to the window with the focus.
+    PostMessageW(window, WM_SYSKEYDOWN, VK_F4, 1 | (1 << 29));
+    run(5);
+    uih::SetMenuOpen(false);
+    run(5);
+    printf("procedure: key down %d, raw key down %d, close requested %d\n", g_procedureInput.keyDown, g_procedureInput.rawKeyDown,
+           g_procedureInput.closeRequested);
+    if (g_procedureInput.keyDown)
+        return Fail("a key released while the menu was open stays down in the application");
+    if (g_procedureInput.rawKeyDown)
+        return Fail("a key released while the menu was open stays down in the raw input of the application");
+    if (!g_procedureInput.closeRequested)
+        return Fail("Alt+F4 does not close the window while the menu is open");
+    return 0;
+}
+
 // Checks that the keyboard and the mouse reach the host while the menu is
 // closed, and that the host reads nothing while it is open. DirectInput
 // registers the keyboard for raw input itself, and a process has one raw
 // input target per device class, so raw input and DirectInput are checked
 // in separate runs.
 int RunInputMode(HWND window, Host& host, bool useDirectInput) {
+    SetWindowLongPtrW(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(HostInputProc));
     RAWINPUTDEVICE devices[] = {{0x01, 0x06, 0, window}, {0x01, 0x02, 0, window}};
     if (!useDirectInput)
         RegisterRawInputDevices(devices, 2, sizeof(RAWINPUTDEVICE));
@@ -1545,6 +1618,8 @@ int RunInputMode(HWND window, Host& host, bool useDirectInput) {
                 result = Fail("the cursor moves for the application while the menu is open");
         }
     }
+    if (result == 0)
+        result = CheckReleaseWithMenuOpen(window, host, useDirectInput);
 
     uih::Stop();
     if (keyboard) {
