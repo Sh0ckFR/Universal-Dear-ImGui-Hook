@@ -1123,8 +1123,8 @@ int RunSecondWindowMode(HWND window, Host& host, const Options& options) {
     AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
     HWND second = CreateWindowExW(WS_EX_TOPMOST, L"uih_host", L"uih host 2", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 0, 0, rect.right - rect.left,
                                   rect.bottom - rect.top, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
-    std::unique_ptr<Host> secondHost = CreateHost(options.api);
-    if (!second || !secondHost->Init(second, options)) {
+    std::unique_ptr<Host> secondHost = options.sharedDevice ? host.ShareDevice(second, options) : CreateHost(options.api);
+    if (!second || !secondHost || (!options.sharedDevice && !secondHost->Init(second, options))) {
         DestroyWindow(second);
         return Fail("the second window could not render");
     }
@@ -1813,6 +1813,7 @@ int main(int argc, char** argv) {
         else if (arg == "--remove") options.remove = true;
         else if (arg == "--fault" && i + 1 < argc) options.fault = argv[++i];
         else if (arg == "--second-window") options.secondWindow = true;
+        else if (arg == "--shared-device") options.sharedDevice = true;
         else if (arg == "--textures" && i + 1 < argc) options.textures = atoi(argv[++i]);
         else if (arg == "--remove-device") options.removeDevice = true;
         else if (arg == "--transfer-only") options.transferOnly = true;
@@ -1834,7 +1835,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception] [--second-window] [--textures N] [--remove-device] [--transfer-only] [--render-thread] [--resubclass] [--recreate-context] [--slow-frame ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception] [--second-window [--shared-device]] [--textures N] [--remove-device] [--transfer-only] [--render-thread] [--resubclass] [--recreate-context] [--slow-frame ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 
