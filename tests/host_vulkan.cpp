@@ -48,7 +48,7 @@ bool HasLayer(PFN_vkGetInstanceProcAddr getInstanceProcAddr, const char* name) {
 #ifdef _WIN32
 const char* const kSurfaceExtension = VK_KHR_WIN32_SURFACE_EXTENSION_NAME;
 
-PFN_vkGetInstanceProcAddr LoadGetInstanceProcAddr() {
+PFN_vkGetInstanceProcAddr LoadGetInstanceProcAddr(const Options&) {
     HMODULE module = LoadLibraryW(L"vulkan-1.dll");
     return module ? reinterpret_cast<PFN_vkGetInstanceProcAddr>(reinterpret_cast<void*>(GetProcAddress(module, "vkGetInstanceProcAddr"))) : nullptr;
 }
@@ -65,8 +65,8 @@ VkSurfaceKHR CreateSurface(PFN_vkGetInstanceProcAddr getInstanceProcAddr, VkInst
 #else
 const char* const kSurfaceExtension = VK_KHR_XLIB_SURFACE_EXTENSION_NAME;
 
-PFN_vkGetInstanceProcAddr LoadGetInstanceProcAddr() {
-    void* module = dlopen("libvulkan.so.1", RTLD_NOW);
+PFN_vkGetInstanceProcAddr LoadGetInstanceProcAddr(const Options& options) {
+    void* module = dlopen(options.vulkanLibrary.empty() ? "libvulkan.so.1" : options.vulkanLibrary.c_str(), RTLD_NOW);
     return module ? reinterpret_cast<PFN_vkGetInstanceProcAddr>(dlsym(module, "vkGetInstanceProcAddr")) : nullptr;
 }
 
@@ -134,7 +134,7 @@ struct VulkanHost : Host {
     uint32_t frame = 0;
 
     bool Init(HostWindow window, const Options& options) override {
-        getInstanceProcAddr = LoadGetInstanceProcAddr();
+        getInstanceProcAddr = LoadGetInstanceProcAddr(options);
         if (!getInstanceProcAddr)
             return false;
         auto createInstance = reinterpret_cast<PFN_vkCreateInstance>(getInstanceProcAddr(VK_NULL_HANDLE, "vkCreateInstance"));

@@ -504,6 +504,7 @@ int main(int argc, char** argv) {
         else if (arg == "--lookup") options.lookup = true;
         else if (arg == "--device-proc-addr") options.deviceProcAddr = true;
         else if (arg == "--transfer-only") options.transferOnly = true;
+        else if (arg == "--vulkan-library" && i + 1 < argc) options.vulkanLibrary = argv[++i];
         else if (arg == "--menu-key" && i + 1 < argc) options.menuKey = static_cast<int>(strtol(argv[++i], nullptr, 0));
         else if (arg == "--unload-key" && i + 1 < argc) options.unloadKey = static_cast<int>(strtol(argv[++i], nullptr, 0));
         else if (arg == "--resize") options.resize = true;
@@ -513,7 +514,7 @@ int main(int argc, char** argv) {
         else if (arg == "--bound-framebuffer") options.boundFramebuffer = true;
     }
     if (options.api != "opengl" && options.api != "vulkan") {
-        printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--transfer-only] [--menu-key keysym] [--unload-key keysym] [--resize] [--reload] [--second-window] [--recreate-context] [--bound-framebuffer]\n");
+        printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--transfer-only] [--vulkan-library path] [--menu-key keysym] [--unload-key keysym] [--resize] [--reload] [--second-window] [--recreate-context] [--bound-framebuffer]\n");
         return 2;
     }
     setvbuf(stdout, nullptr, _IOLBF, 0);
@@ -538,7 +539,7 @@ int main(int argc, char** argv) {
     };
     std::unique_ptr<Host> host = createHost();
     std::string name = options.api + (options.egl ? " egl" : "") + (options.lookup ? " lookup" : "") + (options.deviceProcAddr ? " device-proc-addr" : "") +
-                       (options.transferOnly ? " transfer-only" : "");
+                       (options.transferOnly ? " transfer-only" : "") + (options.vulkanLibrary.empty() ? "" : " " + options.vulkanLibrary);
 
     Window window = visual ? CreateHostWindow(display, visual) : 0;
     if (!window || !host->Init({display, window}, options))
