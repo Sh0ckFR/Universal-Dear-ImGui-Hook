@@ -76,7 +76,8 @@ struct Config {
 
 // Installs the hooks. Safe to call from DllMain or from a library constructor.
 void Start(const Config& config);
-// Removes the overlay and releases all resources. Blocks until it is done.
+// Closes the menu, removes the overlay and releases all resources. Blocks
+// until it is done.
 // Must not be called from DllMain or from inside a hook.
 void Stop();
 
