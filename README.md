@@ -1,6 +1,6 @@
 # Universal-Dear-ImGui-Hook
 
-A [Dear ImGui](https://github.com/ocornut/imgui) overlay that draws your interface inside another application, whatever graphics API it uses. The API is detected at runtime: build once, inject anywhere.
+A [Dear ImGui](https://github.com/ocornut/imgui) overlay that draws your interface inside another application, whatever graphics API it uses, and lets an AI assistant such as Claude Code see and play the game through [MCP over a local named pipe](#remote-control-by-an-ai-assistant) (Windows). The API is detected at runtime: build once, inject anywhere.
 
 | API | Windows (x86, x64) | Linux (x86-64, ARM64) |
 | --- | --- | --- |
@@ -17,7 +17,7 @@ Windows games running under Wine or Proton use the Windows DLL.
 
 - [Features](#features)
 - [Quick start](#quick-start)
-- [Usage](#usage)
+- [Usage](#usage): [Windows](#windows), [Linux](#linux), [settings](#settings), [your menu](#writing-your-menu), [as a library](#using-the-hook-as-a-library)
 - [Remote control by an AI assistant](#remote-control-by-an-ai-assistant)
 - [API](#api)
 - [How it works](#how-it-works)
@@ -27,23 +27,23 @@ Windows games running under Wine or Proton use the Windows DLL.
 - [Limitations](#limitations)
 - [Support](#support)
 
+Sections marked with ▶ unfold on click.
+
 ## Features
 
 - **One library for every API**: the backend is picked from the first API that presents a frame. Inject before or after the game initializes its graphics.
+- **Remote control by an AI assistant** (Windows): through [MCP](#remote-control-by-an-ai-assistant) and a local named pipe, an assistant such as Claude Code sees the game, writes to the player over it and presses its keys.
 - **Menu input**: `INSERT`, or L3 + R3 on a controller, opens the menu; `F11` removes the overlay and unloads the DLL. The keys are [settings](#settings) in `example/config.cpp`. While the menu is open the game sees no keyboard, mouse or controller input (Windows), and an XInput controller navigates the menu.
-- **Several windows**: when the game presents to more than one window or swap chain, the overlay stays on one of them and follows the focus.
-- **Readable on any display**: the interface follows the DPI of the game window, or a fixed scale.
-- **Correct colors** on sRGB and floating-point back buffers.
 - **No crash from the overlay** (Windows, MSVC builds): an exception in the overlay, from a renderer backend or the menu code, removes it instead of taking the game down; the menu key brings it back.
-- **Images**: `uih::CreateTexture()` turns RGBA pixels into an image for `ImGui::Image()`, on every backend.
-- **Frame capture**: `uih::CaptureFrame()` copies what the game draws, without the overlay, on every backend.
-- **Remote control by an AI assistant** (Windows): through [MCP](#remote-control-by-an-ai-assistant), an assistant such as Claude Code sees the game, writes to the player over it and presses its keys.
+- **Images and frame capture**: `uih::CreateTexture()` turns RGBA pixels into an image for `ImGui::Image()`, and `uih::CaptureFrame()` copies what the game draws, without the overlay, on every backend.
+- **Several windows**: when the game presents to more than one window or swap chain, the overlay stays on one of them and follows the focus.
+- **Readable on any display**: the interface follows the DPI of the game window, or a fixed scale, with correct colors on sRGB and floating-point back buffers.
 - **No injector needed**: the DLL can be loaded as `dinput8.dll`, and the Linux library with `LD_PRELOAD`.
 - **No dependencies**: Dear ImGui, MinHook and the Vulkan headers are vendored; the C and C++ runtimes are linked statically.
 
 ## Quick start
 
-Prebuilt libraries are attached to each [release](../../releases), and every commit's builds are kept as [workflow artifacts](../../actions). Pick the one that matches the **game**, not your machine:
+**1. Get the library.** Prebuilt libraries are attached to each [release](../../releases), and every commit's builds are kept as [workflow artifacts](../../actions). Pick the one that matches the **game**, not your machine:
 
 | Game | File |
 | --- | --- |
@@ -51,7 +51,7 @@ Prebuilt libraries are attached to each [release](../../releases), and every com
 | Windows, 32-bit | `Universal-ImGui-Hook-msvc-Win32.dll` |
 | Linux, x86-64 or ARM64 | `Universal-ImGui-Hook-linux-x86_64.so` or `-linux-aarch64.so` (glibc 2.28 or later) |
 
-To build it yourself on Windows, open `Universal-ImGui-Hook.sln` in Visual Studio 2022 or newer and build `Release|x64`: the DLL is `build/vs/x64/Release/Universal-ImGui-Hook.dll`. On Linux:
+**2. Or build it.** On Windows, open `Universal-ImGui-Hook.sln` in Visual Studio 2022 or newer and build `Release|x64`: the DLL is `build/vs/x64/Release/Universal-ImGui-Hook.dll`. On Linux:
 
 ```sh
 sudo apt install cmake ninja-build g++ pkg-config libxcb1-dev
@@ -59,7 +59,7 @@ cmake --preset linux && cmake --build --preset linux
 LD_PRELOAD=$PWD/build/linux/Universal-ImGui-Hook.so ./game
 ```
 
-To make the overlay your own, you only edit the example:
+**3. Make it yours.** You only edit the example; the hook itself, in `src/`, needs no change:
 
 | To change | Edit |
 | --- | --- |
@@ -68,17 +68,13 @@ To make the overlay your own, you only edit the example:
 | Remote control by an AI assistant, its pipe name | `example/config.cpp`, see [Remote control by an AI assistant](#remote-control-by-an-ai-assistant) |
 | Fonts and style | a `config.setup` callback, run when the ImGui context is created, set next to `config.render` in `example/dllmain.cpp` (Windows) or `example/preload.cpp` (Linux) |
 
-The hook itself, in `src/`, needs no change.
-
 ## Usage
 
 ### Windows
 
-Inject `Universal-ImGui-Hook.dll` with any injector or `LoadLibrary`.
+Inject `Universal-ImGui-Hook.dll` with any injector or `LoadLibrary`. An injected DLL is unloaded by `F11`; inject it again to bring the overlay back.
 
 To load it without an injector, rename it to `dinput8.dll` and put it next to the game's executable: it exports `DirectInput8Create` and forwards it to the system library, so any game that imports DirectInput 8 loads it. Under Wine or Proton, add `WINEDLLOVERRIDES="dinput8=n,b" %command%` to the launch options. Loaded this way the DLL stays in the game, which references it: `F11` removes the overlay and `INSERT` brings it back.
-
-An injected DLL is unloaded by `F11`; inject it again to bring the overlay back.
 
 Logs (`config.debugLog`) go to `OutputDebugString`: read them with [DebugView](https://learn.microsoft.com/sysinternals/downloads/debugview). The example DLL writes them when the game runs with the environment variable `UIH_DEBUG=1`.
 
@@ -106,6 +102,9 @@ void ApplySettings(uih::Config& config) {
 }
 ```
 
+<details>
+<summary>Values of each setting</summary>
+
 | Setting | Values |
 | --- | --- |
 | `menuKey`, `unloadKey` | Windows: [virtual-key codes](https://learn.microsoft.com/windows/win32/inputdev/virtual-key-codes) such as `VK_F1` or `'M'`. Linux: X11 keysyms from `X11/keysymdef.h`, such as `0xffbe` for `XK_F1`; the file has its own `#else` branch for them. `0` disables the key. |
@@ -113,6 +112,8 @@ void ApplySettings(uih::Config& config) {
 | `backend` | `uih::Backend::None` detects the API from the first one that presents a frame, which is right for nearly every game. `D3D9`, `D3D10`, `D3D11`, `D3D12`, `Vulkan` or `OpenGL` forces one, for a game that uses several. |
 | `scale` | `0` follows the DPI of the game window; `1.5` draws the interface at 150%. |
 | `remoteControl`, `remotePipe` | `true` serves the [remote control](#remote-control-by-an-ai-assistant) on the named pipe `\\.\pipe\<remotePipe>`; Windows only. |
+
+</details>
 
 ### Writing your menu
 
@@ -127,14 +128,14 @@ config.module = module;        // Windows: DLL unloaded by unloadKey
 uih::Start(config);
 ```
 
-The example menu is a tour of the common widgets (buttons, combo and list boxes, inputs, sliders, colors, tabs, trees, tables, plots, popups, draw lists) with `imgui.png` shown under the slider, and its *Menu* bar opens Dear ImGui's own demo window, which covers every function. `example/image.cpp` embeds the picture in the library and decodes it with [stb_image](https://github.com/nothings/stb).
-
 Images are created once from RGBA pixels and drawn like any ImGui texture:
 
 ```cpp
 static ImTextureData* logo = uih::CreateTexture(pixels, 64, 64);
 ImGui::Image(logo->GetTexRef(), ImVec2(64, 64));
 ```
+
+The example menu is a tour of the common widgets (buttons, combo and list boxes, inputs, sliders, colors, tabs, trees, tables, plots, popups, draw lists) with `imgui.png` shown under the slider, and its *Menu* bar opens Dear ImGui's own demo window, which covers every function. `example/image.cpp` embeds the picture in the library and decodes it with [stb_image](https://github.com/nothings/stb).
 
 ### Using the hook as a library
 
@@ -151,7 +152,7 @@ target_link_libraries(my_overlay PRIVATE uih::uih)
 
 ## Remote control by an AI assistant
 
-The DLL can let an AI assistant, such as [Claude Code](https://claude.com/claude-code), see the game, write to the player over it and press its keys, through the [Model Context Protocol](https://modelcontextprotocol.io) (MCP). Windows games, every graphics API.
+The DLL can let an AI assistant, such as [Claude Code](https://claude.com/claude-code), see the game, write to the player over it and press its keys, through the [Model Context Protocol](https://modelcontextprotocol.io) (MCP) and a local named pipe. Windows games, every graphics API.
 
 ```mermaid
 flowchart LR
@@ -204,6 +205,22 @@ The assistant gets these tools:
 | `press_key` | Holds keys for a duration, 150 ms by default; `right+space` holds them together |
 | `game_info` | Graphics API, window size, keyboard focus, menu state |
 
+<details>
+<summary>Good to know: security, focus, limits</summary>
+
+- **Any program you run can use the pipe**, so the remote control is off by default; other machines cannot. Turn it on for single-player games only: anti-cheat software watches injected DLLs.
+- **While you type to the assistant, the game does not have the focus**: the keys then reach it as window messages, which games that read the keyboard state directly (DirectInput, raw input) do not see. Click the game window after sending your request, or let the assistant play on a second screen.
+- While the overlay menu is open, the game sees no keys: the assistant can close it with `insert`.
+- The assistant plays turn by turn, a screenshot and a few keys at a time: fine for menus, puzzles and slow games, not for reflexes.
+- One game per pipe name: a second game started with the same name logs that the remote control is unavailable.
+- `unloadKey` stops the remote control with the overlay.
+- Screenshots of HDR back buffers, with more than 10 bits per channel, fail.
+
+</details>
+
+<details>
+<summary>The pipe protocol, to write your own client</summary>
+
 `remote/uih_mcp.py` speaks MCP with the assistant on its standard input and output, and forwards each tool call as one line to the DLL, which serves the pipe on a thread of its own (`src/windows/remote.cpp`):
 
 | Command | Answer |
@@ -215,15 +232,7 @@ The assistant gets these tools:
 
 Failures answer `error <reason>`. The screenshots come from `uih::CaptureFrame()`; the keys go through `SendInput` when the game has the focus.
 
-Good to know:
-
-- **Any program you run can use the pipe**, so the remote control is off by default; other machines cannot. Turn it on for single-player games only: anti-cheat software watches injected DLLs.
-- **While you type to the assistant, the game does not have the focus**: the keys then reach it as window messages, which games that read the keyboard state directly (DirectInput, raw input) do not see. Click the game window after sending your request, or let the assistant play on a second screen.
-- While the overlay menu is open, the game sees no keys: the assistant can close it with `insert`.
-- The assistant plays turn by turn, a screenshot and a few keys at a time: fine for menus, puzzles and slow games, not for reflexes.
-- One game per pipe name: a second game started with the same name logs that the remote control is unavailable.
-- `unloadKey` stops the remote control with the overlay.
-- Screenshots of HDR back buffers, with more than 10 bits per channel, fail.
+</details>
 
 ## API
 
@@ -239,6 +248,9 @@ Everything is in `include/uih.h`, namespace `uih`.
 | `DestroyTexture(texture)` | Releases an image on the next frame. |
 | `CaptureFrame(pixels, width, height, timeoutMs)` | Copies the next frame of the game, without the overlay, as RGBA pixels. Waits for that frame on any thread but the render callback's; false on timeout, or with a back buffer of more than 10 bits per channel (HDR). |
 
+<details>
+<summary>The <code>Config</code> fields</summary>
+
 | `Config` field | Default | Description |
 | --- | --- | --- |
 | `render` | `nullptr` | Called every frame, between `ImGui::NewFrame()` and `ImGui::Render()` |
@@ -252,11 +264,19 @@ Everything is in `include/uih.h`, namespace `uih`.
 | `remoteControl` | `false` | Windows: serves the [remote control](#remote-control-by-an-ai-assistant) on a named pipe, for local processes |
 | `remotePipe` | `"universal-imgui-hook"` | Windows: name of that pipe, `\\.\pipe\<remotePipe>`; copied by `Start()` |
 
+</details>
+
 ## How it works
 
-**Startup.** `Start()` launches a worker thread. On Windows it hooks every graphics and input DLL already loaded, then the others as they load (`LdrRegisterDllNotification`). The hooks are placed with MinHook on functions found through dummy objects: a hidden window, a D3D device, a Vulkan device per GPU. On Linux, the library exports the hooked functions under their own names and overrides `dlsym()`, so the game calls them whether it links them or looks them up like SDL and GLFW do.
+<details>
+<summary><b>Startup</b>: hooks found through dummy objects, or symbol interposition on Linux</summary>
 
-**Hook points.**
+`Start()` launches a worker thread. On Windows it hooks every graphics and input DLL already loaded, then the others as they load (`LdrRegisterDllNotification`). The hooks are placed with MinHook on functions found through dummy objects: a hidden window, a D3D device, a Vulkan device per GPU. On Linux, the library exports the hooked functions under their own names and overrides `dlsym()`, so the game calls them whether it links them or looks them up like SDL and GLFW do.
+
+</details>
+
+<details>
+<summary><b>Hook points</b>: the function each API draws in</summary>
 
 | API | Draws in | Also hooked |
 | --- | --- | --- |
@@ -266,23 +286,60 @@ Everything is in `include/uih.h`, namespace `uih`.
 | Vulkan | `vkQueuePresentKHR` | Device, queue, swap chain and surface creation and destruction; in each driver on Windows, the loader's exports on Linux |
 | OpenGL | `wglSwapBuffers`, `glXSwapBuffers`, `eglSwapBuffers` | `glXGetProcAddress`, `eglGetProcAddress` on Linux |
 
-**Each frame**, in the present hook: `uih::Frame()` registers new textures, polls the hotkeys, applies the DPI scale and runs `render`; the backend then draws the ImGui data on the back buffer, uploading textures as needed, and the game's present goes on. Vertex colors are converted to linear for back buffers that store linear values; OpenGL and D3D9 turn sRGB writes off instead. Vulkan submits its own command buffer, which waits on the game's semaphores and signals the one the present waits on.
+</details>
 
-**Input on Windows.** The game window is subclassed to feed ImGui, and its input messages are swallowed while the menu is open, except releases, keyboard and mouse raw input (filtered below) and Alt+F4. `GetRawInputData`, `GetRawInputBuffer`, `GetAsyncKeyState`, `GetKeyState`, `GetKeyboardState`, DirectInput and XInput then report no input to the game, and `GetCursorPos` a frozen position. The cursor is freed from the game's `ClipCursor` rectangle, which is applied again when the menu closes. Releases always go through, so no key stays stuck; calls made by the hook itself see the real state.
+<details>
+<summary><b>Each frame</b>: what the present hook does</summary>
 
-**Input on Linux.** The pointer and the keyboard are polled from the X server on a separate XCB connection.
-
-**Teardown.** `Stop()` asks the rendering thread to release the backend at its next present, or does it itself after one second, then removes the hooks once none of them is running. When the library cannot leave the process (Linux, `dinput8.dll` proxy, no `module`), the unload key runs `Stop()` on a thread that then polls the menu key and buttons, and starts the hook again with the menu open.
-
-**Several windows or swap chains.** The overlay is drawn on one swap chain, its target, by one thread at a time; the others present untouched. The target changes when it stops presenting for half a second, when the window of another swap chain has the focus and the target's does not, or when the game replaces its swap chain on the same window. A Vulkan surface created before the hook is matched to the window of the swap chain's size. EGL does not tell the window of a surface: there the overlay only moves when its target stops presenting.
-
-**Faults.** On Windows, what the overlay runs in the game's threads (frames, teardown, window messages) is protected by structured exception handling. An exception there, such as an access violation in the `render` callback, removes the overlay from another thread, as the unload key does without a `module`: the game keeps running, and the menu key or buttons bring the overlay back. The frame runs before the backends take a reference to the back buffer, so a fault leaks none.
-
-**Frame capture.** When `CaptureFrame()` waits, the backend copies its back buffer at the next present, before it draws the overlay: `GetRenderTargetData` on D3D9, a staging texture on D3D10 and 11, a readback buffer on D3D12 and Vulkan, `glReadPixels` on OpenGL. Multisampled back buffers are resolved first. To allow the copy, Vulkan swap chains are created with `TRANSFER_SRC` usage, and again without it if the surface refuses.
-
-**Remote control** (Windows). With `remoteControl` set, a thread of the library serves the named pipe with overlapped I/O, so that `Stop()` ends a connection or a command at once. Messages are drawn after the `render` callback, in the frame of the overlay; keys go through `SendInput` when the game has the focus and as window messages otherwise.
+`uih::Frame()` registers new textures, polls the hotkeys, applies the DPI scale and runs `render`; the backend then draws the ImGui data on the back buffer, uploading textures as needed, and the game's present goes on. Vertex colors are converted to linear for back buffers that store linear values; OpenGL and D3D9 turn sRGB writes off instead. Vulkan submits its own command buffer, which waits on the game's semaphores and signals the one the present waits on.
 
 **Resolution changes** are followed on every API: D3D9 `Reset`/`ResetEx`, DXGI `ResizeBuffers`, a new Vulkan swap chain, or a new size of the OpenGL window; the overlay takes the new size on the next frame.
+
+</details>
+
+<details>
+<summary><b>Input</b>: how the game is kept from seeing it while the menu is open</summary>
+
+**Windows.** The game window is subclassed to feed ImGui, and its input messages are swallowed while the menu is open, except releases, keyboard and mouse raw input (filtered below) and Alt+F4. `GetRawInputData`, `GetRawInputBuffer`, `GetAsyncKeyState`, `GetKeyState`, `GetKeyboardState`, DirectInput and XInput then report no input to the game, and `GetCursorPos` a frozen position. The cursor is freed from the game's `ClipCursor` rectangle, which is applied again when the menu closes. Releases always go through, so no key stays stuck; calls made by the hook itself see the real state.
+
+**Linux.** The pointer and the keyboard are polled from the X server on a separate XCB connection.
+
+</details>
+
+<details>
+<summary><b>Teardown</b>: what <code>Stop()</code> and the unload key do</summary>
+
+`Stop()` asks the rendering thread to release the backend at its next present, or does it itself after one second, then removes the hooks once none of them is running. When the library cannot leave the process (Linux, `dinput8.dll` proxy, no `module`), the unload key runs `Stop()` on a thread that then polls the menu key and buttons, and starts the hook again with the menu open.
+
+</details>
+
+<details>
+<summary><b>Several windows or swap chains</b>: which one gets the overlay</summary>
+
+The overlay is drawn on one swap chain, its target, by one thread at a time; the others present untouched. The target changes when it stops presenting for half a second, when the window of another swap chain has the focus and the target's does not, or when the game replaces its swap chain on the same window. A Vulkan surface created before the hook is matched to the window of the swap chain's size. EGL does not tell the window of a surface: there the overlay only moves when its target stops presenting.
+
+</details>
+
+<details>
+<summary><b>Faults</b>: why an exception in the overlay does not crash the game</summary>
+
+On Windows, what the overlay runs in the game's threads (frames, teardown, window messages) is protected by structured exception handling. An exception there, such as an access violation in the `render` callback, removes the overlay from another thread, as the unload key does without a `module`: the game keeps running, and the menu key or buttons bring the overlay back. The frame runs before the backends take a reference to the back buffer, so a fault leaks none.
+
+</details>
+
+<details>
+<summary><b>Frame capture</b>: how each API copies its back buffer</summary>
+
+When `CaptureFrame()` waits, the backend copies its back buffer at the next present, before it draws the overlay: `GetRenderTargetData` on D3D9, a staging texture on D3D10 and 11, a readback buffer on D3D12 and Vulkan, `glReadPixels` on OpenGL. Multisampled back buffers are resolved first. To allow the copy, Vulkan swap chains are created with `TRANSFER_SRC` usage, and again without it if the surface refuses.
+
+</details>
+
+<details>
+<summary><b>Remote control</b> (Windows): the named pipe thread</summary>
+
+With `remoteControl` set, a thread of the library serves the named pipe with overlapped I/O, so that `Stop()` ends a connection or a command at once. Messages are drawn after the `render` callback, in the frame of the overlay; keys go through `SendInput` when the game has the focus and as window messages otherwise.
+
+</details>
 
 ## Building
 
@@ -299,14 +356,22 @@ Each preset builds into `build/<preset>`.
 - Open the folder: Visual Studio reads `CMakePresets.json`.
 - Command line: `cmake --preset msvc-x64`, then `cmake --build --preset msvc-x64`.
 
-**MinGW-w64 on Windows**, from an [MSYS2](https://www.msys2.org/) UCRT64 shell or with a [winlibs](https://winlibs.com/) toolchain in `PATH`:
+<details>
+<summary><b>MinGW-w64 on Windows</b></summary>
+
+From an [MSYS2](https://www.msys2.org/) UCRT64 shell or with a [winlibs](https://winlibs.com/) toolchain in `PATH`:
 
 ```sh
 pacman -S mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja
 cmake --preset mingw-x64 && cmake --build --preset mingw-x64
 ```
 
-**Windows DLL from Linux or macOS**, with the `mingw-x64` and `mingw-x86` presets and the toolchain files in `cmake/`:
+</details>
+
+<details>
+<summary><b>Windows DLL from Linux or macOS</b></summary>
+
+With the `mingw-x64` and `mingw-x86` presets and the toolchain files in `cmake/`:
 
 | System | Packages |
 | --- | --- |
@@ -315,7 +380,12 @@ cmake --preset mingw-x64 && cmake --build --preset mingw-x64
 | Arch | `cmake ninja mingw-w64-gcc` |
 | macOS (Homebrew) | `cmake ninja mingw-w64` |
 
-**Linux library**, with the `linux` preset:
+</details>
+
+<details>
+<summary><b>Linux library</b></summary>
+
+With the `linux` preset:
 
 | Distribution | Packages |
 | --- | --- |
@@ -325,7 +395,12 @@ cmake --preset mingw-x64 && cmake --build --preset mingw-x64
 
 It only needs `libxcb` and glibc at run time, but a glibc at least as recent as the build machine's: to share it or to use it in the Steam Linux Runtime, build on an old distribution or take the prebuilt one. Set `CC=clang CXX=clang++` before configuring to use Clang.
 
-**Options**, passed at configure time, such as `-DUIH_BUILD_TESTS=ON`:
+</details>
+
+<details>
+<summary><b>CMake options and minimum versions</b></summary>
+
+Options are passed at configure time, such as `-DUIH_BUILD_TESTS=ON`:
 
 | Option | Default | Effect |
 | --- | --- | --- |
@@ -335,6 +410,8 @@ It only needs `libxcb` and glibc at run time, but a glibc at least as recent as 
 | `UIH_SANITIZE` | `OFF` | Linux with GCC: AddressSanitizer and UndefinedBehaviorSanitizer in every target, for the tests |
 
 **Minimum versions**: CMake 3.21, Visual Studio 2022, mingw-w64 11 with GCC 13, GCC 13 or Clang 18 on Linux; Windows 10 at run time. The mingw-w64 headers of Ubuntu 22.04 are too old for D3D12.
+
+</details>
 
 ## Tests
 
@@ -347,9 +424,17 @@ ctest --test-dir build/msvc-x64 -C Release
 
 Some tests press real keys and move the mouse. They are skipped when the host window does not have the focus: leave the machine alone while they run. A test whose screen check fails saves the capture as `build/tests/capture-*.bmp`.
 
+<details>
+<summary><b>Without a GPU</b>, and with the validation and debug layers</summary>
+
 Without a GPU, as on the CI runners, Direct3D uses WARP, and Mesa's software drivers from [mesa-dist-win](https://github.com/pal1000/mesa-dist-win) cover the rest: copy `opengl32.dll`, `libgallium_wgl.dll` and `dxil.dll` next to `uih_host.exe` with `GALLIUM_DRIVER=llvmpipe` (or `d3d12` for the D3D12-based driver of Microsoft's OpenGL compatibility pack, which needs `dxil.dll` to sign its shaders), and register `lvp_icd.*.json` under `HKLM\SOFTWARE\Khronos\Vulkan\Drivers` with a `vulkan-1.dll` from the Vulkan runtime.
 
 `UIH_TEST_VULKAN_VALIDATION=1` runs the Vulkan host under `VK_LAYER_KHRONOS_validation`, from the Vulkan SDK on Windows or `vulkan-validationlayers` on Linux, and `UIH_TEST_D3D_DEBUG=1` creates the Direct3D 10, 11 and 12 devices with the debug layer, from the Graphics Tools optional feature of Windows. Any error they report, from the host or from the hook, fails the test.
+
+</details>
+
+<details>
+<summary><b>The <code>uih_host</code> scenarios</b> (Windows), one option each</summary>
 
 | `uih_host` option (Windows) | Scenario |
 | --- | --- |
@@ -382,9 +467,33 @@ Without a GPU, as on the CI runners, Direct3D uses WARP, and Mesa's software dri
 | `--proxy <path>` | Loads the DLL as `dinput8.dll` |
 | `--preview <path>` | Not a test: loads the DLL, opens its menu and renders until the window is closed, to look at a menu without a game |
 
+</details>
+
+<details>
+<summary><b>Real games</b>: <code>uih_game</code> on Windows, <code>tests/game.sh</code> on Linux</summary>
+
 `uih_game --dll <path> --backend <name> -- game.exe [arguments]` runs a game and injects the DLL once its window shows, as an injector does: the backend must become active, `INSERT` must show the menu on screen and `F11` remove it while the game keeps running. It reads the log of the DLL as DebugView does, so DebugView must not run at the same time, and saves its captures as `game-before.bmp`, `game-menu.bmp` and `game-after.bmp` (`--captures <prefix>`).
 
-On Linux, `uih_host` does not link the hook: each test preloads the `.so`, opens the menu, checks the pixels and removes the overlay, through GLX, EGL, `dlsym()` lookups and Vulkan, with `--resize`, `--reload`, `--second-window`, `--recreate-context` and `--bound-framebuffer` variants, presents through `eglSwapBuffersWithDamage` that redraw and post a single pixel once `EGL_EXT_buffer_age` allows it (`--swap-with-damage`), and the Vulkan loader opened as `libvulkan.so` (`--vulkan-library`). It needs `libx11-dev libxtst-dev libgl-dev libegl-dev`; without a display, run `xvfb-run -a ctest --test-dir build/linux`. `tests/game.sh` runs the same scenario on a game, such as [DDNet](https://ddnet.org/) or a [Godot](https://godotengine.org/) project. With `-DUIH_SANITIZE=ON`, the preload tests load the sanitizer runtime before the library, and any memory error or undefined behavior in the hook fails them.
+`tests/game.sh` runs the same scenario on a Linux game, such as [DDNet](https://ddnet.org/) or a [Godot](https://godotengine.org/) project.
+
+</details>
+
+<details>
+<summary><b>Linux tests</b></summary>
+
+On Linux, `uih_host` does not link the hook: each test preloads the `.so`, opens the menu, checks the pixels and removes the overlay. They cover:
+
+- GLX, EGL, `dlsym()` lookups and Vulkan;
+- `--resize`, `--reload`, `--second-window`, `--recreate-context` and `--bound-framebuffer` variants;
+- presents through `eglSwapBuffersWithDamage` that redraw and post a single pixel once `EGL_EXT_buffer_age` allows it (`--swap-with-damage`);
+- the Vulkan loader opened as `libvulkan.so` (`--vulkan-library`).
+
+They need `libx11-dev libxtst-dev libgl-dev libegl-dev`; without a display, run `xvfb-run -a ctest --test-dir build/linux`. With `-DUIH_SANITIZE=ON`, the preload tests load the sanitizer runtime before the library, and any memory error or undefined behavior in the hook fails them.
+
+</details>
+
+<details>
+<summary><b>The CI</b>: what runs on every push and pull request</summary>
 
 The [CI](.github/workflows/build.yml) runs on every push and pull request:
 
@@ -403,7 +512,16 @@ The [CI](.github/workflows/build.yml) runs on every push and pull request:
 
 Pushing a `v*` tag publishes the MSVC and Linux portable libraries as a release, once every job above has passed.
 
+</details>
+
 ## Contributing
+
+- A new source file goes into `CMakeLists.txt` **and** the matching project in `vs/`.
+- A fix comes with a `uih_host` scenario that fails without it.
+- Run the CTest suite on Windows; the CI covers Linux.
+
+<details>
+<summary>Where the code is</summary>
 
 | Path | Content |
 | --- | --- |
@@ -419,38 +537,32 @@ Pushing a `v*` tag publishes the MSVC and Linux portable libraries as a release,
 | `vs/`, `Universal-ImGui-Hook.sln` | Visual Studio projects |
 | `third_party/` | Dear ImGui, MinHook, Vulkan headers, stb_image (example only) |
 
-- A new source file goes into `CMakeLists.txt` **and** the matching project in `vs/`.
-- A fix comes with a `uih_host` scenario that fails without it.
-- Run the CTest suite on Windows; the CI covers Linux.
+</details>
 
 ## Limitations
 
-- Linux reads input from the X server: native Wayland windows get no menu input (run SDL games with `SDL_VIDEODRIVER=x11`), and the game still receives the keyboard and the mouse while the menu is open. The mouse wheel and input methods are not handled.
-- Linux: 32-bit games, OpenGL ES, and games that link their GL or Vulkan loader statically are not supported.
-- HDR10 swap chains (PQ color space) show the overlay with wrong colors.
+**Windows**
+- HDR10 swap chains (PQ color space) show the overlay with wrong colors, and `CaptureFrame()` only copies 8-bit and 10-bit back buffers: the floating-point ones of HDR output are not captured.
 - A Vulkan swap chain created before the hook has no overlay until the game recreates it: its presents report `VK_SUBOPTIMAL_KHR`, which games answer by recreating it.
 - When the game, or another overlay, subclasses the window after the hook, the hook's window procedure stays in its chain: the unload key leaves the DLL loaded, and injecting it again does not start it.
 - Native ARM64 Windows games are not supported: MinHook only handles x86 and x64.
 - Only Windows builds made with MSVC, the released ones, survive an exception in the overlay: MinGW-w64 has no structured exception handling, and Linux builds are not protected either.
 - D3D9: after an exception in a draw callback (`ImDrawList::AddCallback`), the state block of the Dear ImGui backend is never released, and the game cannot reset its device.
-- `CaptureFrame()` only copies 8-bit and 10-bit back buffers: the floating-point ones of HDR output are not captured.
+
+**Linux**
+- Input is read from the X server: native Wayland windows get no menu input (run SDL games with `SDL_VIDEODRIVER=x11`), and the game still receives the keyboard and the mouse while the menu is open. The mouse wheel and input methods are not handled.
+- 32-bit games, OpenGL ES, and games that link their GL or Vulkan loader statically are not supported.
 - The remote control is Windows only; on Linux, `CaptureFrame()` is available to code that links the library.
 
-## Built With
+## Credits
 
-* [Dear ImGui](https://github.com/ocornut/imgui)
-* [MinHook](https://github.com/TsudaKageyu/minhook)
-* [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers)
-* [stb_image](https://github.com/nothings/stb) (the example's picture)
+Built with [Dear ImGui](https://github.com/ocornut/imgui), [MinHook](https://github.com/TsudaKageyu/minhook), [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) and [stb_image](https://github.com/nothings/stb) (the example's picture).
 
-## Authors
-
-* **Rebzzel** - *Initial work on the kiero library (no longer used)* - [Rebzzel](https://github.com/Rebzzel)
-* **Sh0ckFR** | **Revan600** - *ImGui and input hooks* - [Sh0ckFR](https://github.com/Sh0ckFR) - [Revan600](https://github.com/Revan600)
-
-## Contributors
-
-* **primemb** - *Bug fixes* - [primemb](https://github.com/primemb)
+| Who | What |
+| --- | --- |
+| [Sh0ckFR](https://github.com/Sh0ckFR), [Revan600](https://github.com/Revan600) | ImGui and input hooks |
+| [Rebzzel](https://github.com/Rebzzel) | Initial work on the kiero library (no longer used) |
+| [primemb](https://github.com/primemb) | Bug fixes |
 
 ## Support
 
