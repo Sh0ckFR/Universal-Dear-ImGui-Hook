@@ -723,8 +723,10 @@ void OnImageAcquired(VkDevice device, VkSwapchainKHR swapchain) {
 }
 
 void OnDeviceDestroyed(VkDevice device) {
-    if (g_renderer.device == device)
+    if (g_renderer.device == device) {
         Teardown();
+        ReleaseBackend(Backend::Vulkan);
+    }
     std::lock_guard<std::mutex> lock(g_mutex);
     g_devices.erase(device);
     g_deviceIcd.erase(device);

@@ -85,6 +85,10 @@ bool BeginOverlayFrame(uint64_t swapchain, NativeWindow window);
 void EndOverlayFrame();
 // Marks `backend` as the active one. Fails when another backend already owns the process.
 bool ClaimBackend(Backend backend);
+// The application destroyed the device or context the overlay drew with:
+// another backend may claim the process, as when a game renders its splash
+// screen with one API and the game with another.
+void ReleaseBackend(Backend backend);
 // Runs `teardown` when Stop() asked the active backend to release its resources
 // on the rendering thread.
 void ServiceTeardown(Backend backend, void (*teardown)());

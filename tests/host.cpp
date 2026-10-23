@@ -1261,6 +1261,50 @@ int RunFaultMode(HWND window, Host& host, const Options& options) {
     return result;
 }
 
+int RunSwitchApiMode(std::unique_ptr<Host>& host, const Options& options) {
+    auto run = [](Host& target, int frames) {
+        for (int frame = 0; frame < frames; ++frame) {
+            PumpMessages();
+            target.Frame();
+        }
+    };
+    StartHook(options);
+    for (ULONGLONG start = GetTickCount64(); WaitingForBackend(start);)
+        run(*host, 1);
+    if (uih::ActiveBackend() != ExpectedBackend(options.api)) {
+        uih::Stop();
+        return Fail("backend was not detected");
+    }
+    uih::SetMenuOpen(true);
+    run(*host, 30);
+    host.reset();
+
+    RECT rect{0, 0, kWidth, kHeight};
+    AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
+    HWND window = CreateWindowExW(0, L"uih_host", L"uih host 2", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 100, 100, rect.right - rect.left,
+                                  rect.bottom - rect.top, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    std::unique_ptr<Host> next = CreateHost(options.switchApi);
+    int result = 0;
+    uih::Backend expected = ExpectedBackend(options.switchApi);
+    if (!window || !next->Init(window, options)) {
+        result = Fail("the second API could not render");
+    } else {
+        for (ULONGLONG start = GetTickCount64(); uih::ActiveBackend() != expected && GetTickCount64() - start < kDetectionTimeoutMs;)
+            run(*next, 1);
+        run(*next, 30);
+        int vertices = ImGui::GetCurrentContext() ? ImGui::GetIO().MetricsRenderVertices : 0;
+        printf("%s backend active, %d vertices\n", uih::BackendName(uih::ActiveBackend()), vertices);
+        if (uih::ActiveBackend() != expected || vertices == 0)
+            result = Fail("the overlay did not follow the application to its second API");
+    }
+    uih::Stop();
+    next.reset();
+    DestroyWindow(window);
+    if (result == 0)
+        printf("PASS: %s, then %s\n", options.api.c_str(), options.switchApi.c_str());
+    return result;
+}
+
 // Gives every allocation of Dear ImGui pages of its own, made inaccessible
 // when it is freed: a thread that uses memory another thread released, as
 // when both grow the same vector, crashes at once. 64-bit only: the address
@@ -1846,6 +1890,7 @@ int main(int argc, char** argv) {
         else if (arg == "--render-thread") options.renderThread = true;
         else if (arg == "--resubclass") options.resubclass = true;
         else if (arg == "--recreate-context") options.recreateContext = true;
+        else if (arg == "--switch-api" && i + 1 < argc) options.switchApi = argv[++i];
         else if (arg == "--slow-frame" && i + 1 < argc) options.slowFrameMs = atoi(argv[++i]);
         else if (arg == "--bound-framebuffer") options.boundFramebuffer = true;
         else if (arg == "--warp") options.warp = true;
@@ -1861,7 +1906,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception|draw] [--second-window [--shared-device]] [--textures N] [--remove-device] [--transfer-only] [--render-thread] [--resubclass] [--recreate-context] [--slow-frame ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception|draw] [--second-window [--shared-device]] [--textures N] [--remove-device] [--transfer-only] [--render-thread] [--resubclass] [--recreate-context] [--switch-api api] [--slow-frame ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -1909,6 +1954,11 @@ int main(int argc, char** argv) {
         printf("SKIP: %s is not available on this machine\n", options.api.c_str());
         uih::Stop();
         return kSkip;
+    }
+    if (!options.switchApi.empty()) {
+        int result = RunSwitchApiMode(host, options);
+        DestroyWindow(window);
+        return result;
     }
     if (options.secondWindow) {
         int result = RunSecondWindowMode(window, *host, options);

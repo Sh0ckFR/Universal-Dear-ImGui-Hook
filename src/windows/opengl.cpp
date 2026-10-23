@@ -140,8 +140,10 @@ BOOL WINAPI HookSwapBuffers(HDC hdc) {
 BOOL WINAPI HookDeleteContext(HGLRC context) {
     ScopedCall call;
     // A new context may get the same handle: the overlay must not take it for its own.
-    if (context && context == g_context)
+    if (context && context == g_context) {
         ReleaseOverlay(Teardown);
+        ReleaseBackend(Backend::OpenGL);
+    }
     return g_deleteContext(context);
 }
 
