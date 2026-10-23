@@ -87,7 +87,9 @@ void Render(IDXGISwapChain* swapChain) {
     ID3D11DepthStencilView* depth = nullptr;
     g_context->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, previous, &depth);
     g_context->OMSetRenderTargets(1, &target, nullptr);
-    ImGui_ImplDX11_RenderDrawData(drawData);
+    // A fault in the backend, as in a draw callback of the application, must
+    // not leave the back buffer bound or referenced.
+    Guarded([&] { ImGui_ImplDX11_RenderDrawData(drawData); });
     g_context->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, previous, depth);
     for (ID3D11RenderTargetView* view : previous)
         Release(view);

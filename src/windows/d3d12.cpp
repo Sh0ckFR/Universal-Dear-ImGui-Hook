@@ -424,7 +424,13 @@ void Render(IDXGISwapChain* swapChain) {
     g_commandList->ResourceBarrier(1, &barrier);
     g_commandList->OMSetRenderTargets(1, &frame.target, FALSE, nullptr);
     g_commandList->SetDescriptorHeaps(1, &g_srvHeap);
-    ImGui_ImplDX12_RenderDrawData(drawData, g_commandList);
+    // A fault in the backend, as in a draw callback of the application, must
+    // not leave the back buffer referenced, and its commands are not run.
+    if (!Guarded([&] { ImGui_ImplDX12_RenderDrawData(drawData, g_commandList); })) {
+        g_commandList->Close();
+        buffer->Release();
+        return;
+    }
 
     barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
     barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
