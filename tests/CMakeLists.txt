@@ -30,6 +30,8 @@ if(WIN32)
     uih_add_host_test(vulkan --api vulkan)
     uih_add_host_test(vulkan_early --api vulkan --inject-at 0)
     uih_add_host_test(vulkan_transfer_only --api vulkan --transfer-only --capture)
+    # The swap chain was created before the hook, and the host ignores VK_SUBOPTIMAL_KHR.
+    uih_add_host_test(vulkan_ignore_suboptimal --api vulkan --ignore-suboptimal --capture)
     uih_add_host_test(vulkan_second_window_shared --api vulkan --second-window --shared-device)
     # Frames of the overlay are still in flight when it moves to the other swap chain.
     uih_add_host_test(d3d12_second_window_shared --api d3d12 --second-window --shared-device --gpu-latency 50)

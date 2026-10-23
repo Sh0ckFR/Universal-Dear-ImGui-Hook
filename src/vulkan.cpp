@@ -167,6 +167,9 @@ std::unordered_map<VkSurfaceKHR, NativeWindow> g_surfaces;
 VulkanState g_renderer;
 uint32_t g_setupFailures = 0;
 constexpr uint32_t kMaxSetupFailures = 5;
+// Presents of a swap chain created before the hook that report
+// VK_SUBOPTIMAL_KHR before VK_ERROR_OUT_OF_DATE_KHR.
+constexpr int kSuboptimalPresents = 30;
 
 // ICD lookup --------------------------------------------------------------
 
@@ -745,10 +748,12 @@ bool FormatKnown(VkSwapchainKHR swapchain) {
 // The format of a swap chain created before the hook cannot be queried.
 // Nothing is drawn on it, and its presents report VK_SUBOPTIMAL_KHR so that
 // the game recreates it, as after a resize: the new one is seen created.
+// Many games only recreate it after VK_ERROR_OUT_OF_DATE_KHR, which follows.
 VkResult PresentFrame(size_t icd, VkQueue queue, const VkPresentInfoKHR* info) {
     const VkPresentInfoKHR* forward = info;
     VkPresentInfoKHR patched;
     bool unknownFormat = false;
+    bool outOfDate = false;
     if (info && info->swapchainCount > 0 && info->pSwapchains && info->pImageIndices && ShouldRender(Backend::Vulkan)) {
         VkSwapchainKHR swapchain = info->pSwapchains[0];
         VkDevice device = DeviceForQueue(queue, swapchain);
@@ -763,18 +768,28 @@ VkResult PresentFrame(size_t icd, VkQueue queue, const VkPresentInfoKHR* info) {
             DrawOverlay(VulkanKey(swapchain), SwapchainWindow(swapchain), [&] { forward = Render(queue, device, info, patched); });
         } else if (device != VK_NULL_HANDLE) {
             static VkSwapchainKHR reported = VK_NULL_HANDLE;
-            if (reported != swapchain)
+            static int presents = 0;
+            if (reported != swapchain) {
                 Log("Vulkan swap chain %p was created before the hook, asking the game to recreate it", swapchain);
+                presents = 0;
+                // Drivers that present Vulkan through a DXGI swap chain of
+                // their own must not get the overlay in the meantime.
+                ClaimBackend(Backend::Vulkan);
+            }
             reported = swapchain;
             unknownFormat = true;
+            outOfDate = ++presents > kSuboptimalPresents;
+            if (presents == kSuboptimalPresents + 1)
+                Log("Vulkan swap chain %p is still presented, reporting it out of date", swapchain);
         }
     }
     VkResult result = Original<PFN_vkQueuePresentKHR>(icd, kQueuePresentKHR)(queue, forward);
     ServiceTeardown(Backend::Vulkan, Teardown);
-    if (unknownFormat && result == VK_SUCCESS) {
-        if (info->pResults && info->pResults[0] == VK_SUCCESS)
-            info->pResults[0] = VK_SUBOPTIMAL_KHR;
-        return VK_SUBOPTIMAL_KHR;
+    if (unknownFormat && (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR)) {
+        VkResult recreate = outOfDate ? VK_ERROR_OUT_OF_DATE_KHR : VK_SUBOPTIMAL_KHR;
+        if (info->pResults && info->pResults[0] >= VK_SUCCESS)
+            info->pResults[0] = recreate;
+        return recreate;
     }
     return result;
 }

@@ -133,8 +133,10 @@ struct VulkanHost : Host {
     VkSemaphore acquired[kFrames] = {};
     VkFence fences[kFrames] = {};
     uint32_t frame = 0;
+    bool ignoreSuboptimal = false;
 
     bool Init(HostWindow window, const Options& options) override {
+        ignoreSuboptimal = options.ignoreSuboptimal;
         getInstanceProcAddr = LoadGetInstanceProcAddr(options);
         if (!getInstanceProcAddr)
             return false;
@@ -394,7 +396,7 @@ struct VulkanHost : Host {
         present.pImageIndices = &imageIndex;
         VkResult presented = vkQueuePresentKHR(queue, &present);
         ++frame;
-        if (presented == VK_SUBOPTIMAL_KHR || presented == VK_ERROR_OUT_OF_DATE_KHR) {
+        if ((presented == VK_SUBOPTIMAL_KHR && !ignoreSuboptimal) || presented == VK_ERROR_OUT_OF_DATE_KHR) {
             printf("swap chain recreated after %s\n", presented == VK_SUBOPTIMAL_KHR ? "VK_SUBOPTIMAL_KHR" : "VK_ERROR_OUT_OF_DATE_KHR");
             Resize(0, 0);
         }
