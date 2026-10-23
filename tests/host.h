@@ -70,6 +70,9 @@ struct Options {
     // Removes the device of the host while the menu is open, then creates a
     // new one, as a game recovering from a GPU fault does.
     bool removeDevice = false;
+    // The Vulkan host recreates its swap chain after VK_ERROR_OUT_OF_DATE_KHR
+    // only, not after VK_SUBOPTIMAL_KHR, as many engines do.
+    bool ignoreSuboptimal = false;
     // The Vulkan swap chain images are only written by transfers, as by
     // engines that copy their frame into them.
     bool transferOnly = false;

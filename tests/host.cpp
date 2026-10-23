@@ -1973,6 +1973,7 @@ int main(int argc, char** argv) {
         else if (arg == "--textures" && i + 1 < argc) options.textures = atoi(argv[++i]);
         else if (arg == "--remove-device") options.removeDevice = true;
         else if (arg == "--transfer-only") options.transferOnly = true;
+        else if (arg == "--ignore-suboptimal") options.ignoreSuboptimal = true;
         else if (arg == "--render-thread") options.renderThread = true;
         else if (arg == "--resubclass") options.resubclass = true;
         else if (arg == "--recreate-context") options.recreateContext = true;
@@ -1993,7 +1994,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception|draw] [--second-window [--shared-device]] [--textures N] [--remove-device] [--transfer-only] [--render-thread] [--resubclass] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception|draw] [--second-window [--shared-device]] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 
