@@ -142,6 +142,18 @@ DWORD WINAPI RemoveThread(void*) {
     return 0;
 }
 
+// Once no thread runs the hooks: MinHook frees the trampolines they call
+// the application through, and Uninstall() clears the pointers to them.
+void RemoveHooks() {
+    Sleep(100);
+    MH_RemoveHook(MH_ALL_HOOKS);
+    MH_Uninitialize();
+    input::UninstallHooks();
+    for (RendererSlot& slot : g_renderers)
+        if (slot.attempted)
+            slot.renderer->Uninstall();
+}
+
 void TeardownRenderers() {
     for (RendererSlot& slot : g_renderers)
         if (slot.installed)
@@ -220,6 +232,14 @@ namespace platform {
 void WriteLog(const char* line) { OutputDebugStringA(line); }
 
 bool Start() {
+    if (!g_hooksIdle) {
+        if (!WaitForIdleHooks(0)) {
+            Log("A thread is still inside a hook, the hook cannot start yet");
+            return false;
+        }
+        RemoveHooks();
+        g_hooksIdle = true;
+    }
     g_unloadRequested = false;
     for (RendererSlot& slot : g_renderers)
         slot.attempted = slot.installed = false;
@@ -242,25 +262,19 @@ void Stop() {
 
     // Release GPU resources on the thread that renders. Fall back to this
     // thread when the application stopped presenting, but not while a frame
-    // of the overlay still uses them: they are left behind then.
+    // of the overlay still uses them: that thread releases them afterwards.
     if (!TeardownOnRenderThread(1000)) {
         Log("Rendering thread did not respond, releasing resources from Stop()");
         if (!ReleaseOverlayWithin(2000, TeardownRenderers))
-            Log("The overlay is still drawing, its resources are left behind");
+            Log("The overlay is still drawing, it is released when the frame ends");
     }
 
     MH_DisableHook(MH_ALL_HOOKS);
     g_hooksIdle = WaitForIdleHooks(2000);
-    if (!g_hooksIdle)
-        Log("Hooks still running after timeout");
-    Sleep(100);
-    MH_RemoveHook(MH_ALL_HOOKS);
-    MH_Uninitialize();
-    input::UninstallHooks();
-
-    for (RendererSlot& slot : g_renderers)
-        if (slot.attempted)
-            slot.renderer->Uninstall();
+    if (g_hooksIdle)
+        RemoveHooks();
+    else
+        Log("A thread is still inside a hook, the hooks are removed on the next start");
 
     CloseHandle(g_stopEvent);
     CloseHandle(g_wakeEvent);
