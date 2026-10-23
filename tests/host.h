@@ -63,6 +63,8 @@ struct Options {
     std::string fault;
     // A second window with its own swap chain presents too.
     bool secondWindow = false;
+    // The second window renders with the device of the first one.
+    bool sharedDevice = false;
     // Images created with uih::CreateTexture() and drawn every frame.
     int textures = 0;
     // Removes the device of the host while the menu is open, then creates a
@@ -102,6 +104,9 @@ struct Host {
     virtual ~Host() = default;
     virtual bool Init(HostWindow window, const Options& options) = 0;
     virtual void Frame() = 0;
+    // A host on `window` that renders with the device of this one, as an
+    // application with several windows does. Null when the API cannot.
+    virtual std::unique_ptr<Host> ShareDevice(HostWindow, const Options&) { return nullptr; }
     // Resizes the back buffers to the new size of the window, as a game does
     // when the resolution changes. False when the host cannot.
     virtual bool Resize(int, int) { return false; }

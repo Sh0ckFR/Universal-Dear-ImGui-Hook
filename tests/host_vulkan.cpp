@@ -126,6 +126,7 @@ struct VulkanHost : Host {
     VkSwapchainKHR swapchain = VK_NULL_HANDLE;
     VkSwapchainCreateInfoKHR swapchainInfo{};
     VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+    uint32_t family = 0;
     std::vector<VkImage> images;
     std::vector<VkSemaphore> renderDone;
     VkCommandBuffer commandBuffers[kFrames] = {};
@@ -185,7 +186,6 @@ struct VulkanHost : Host {
         vkEnumeratePhysicalDevices(instance, &count, nullptr);
         std::vector<VkPhysicalDevice> physicalDevices(count);
         vkEnumeratePhysicalDevices(instance, &count, physicalDevices.data());
-        uint32_t family = 0;
         for (VkPhysicalDevice candidate : physicalDevices) {
             uint32_t familyCount = 0;
             vkGetPhysicalDeviceQueueFamilyProperties(candidate, &familyCount, nullptr);
@@ -226,7 +226,11 @@ struct VulkanHost : Host {
 #undef HOST_VK_LOAD
         }
         vkGetDeviceQueue(device, family, 0, &queue);
+        return CreateSwapchain(surface, options);
+    }
 
+    // The swap chain on `surface`, and what its frames use.
+    bool CreateSwapchain(VkSurfaceKHR surface, const Options& options) {
         VkSurfaceCapabilitiesKHR capabilities{};
         vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &capabilities);
         uint32_t formatCount = 0;
@@ -294,6 +298,18 @@ struct VulkanHost : Host {
         for (VkSemaphore& semaphore : renderDone)
             vkCreateSemaphore(device, &semaphoreInfo, nullptr, &semaphore);
         return true;
+    }
+
+    std::unique_ptr<Host> ShareDevice(HostWindow window, const Options& options) override {
+        auto shared = std::make_unique<VulkanHost>(*this);
+        shared->frame = 0;
+        VkSurfaceKHR surface = CreateSurface(getInstanceProcAddr, instance, window);
+        VkBool32 supported = VK_FALSE;
+        if (surface != VK_NULL_HANDLE)
+            vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, family, surface, &supported);
+        if (!supported || !shared->CreateSwapchain(surface, options))
+            return nullptr;
+        return shared;
     }
 
     bool Resize(int, int) override {

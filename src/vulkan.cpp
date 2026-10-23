@@ -600,6 +600,10 @@ bool Setup(VkDevice device, VkQueue queue, VkSwapchainKHR swapchain) {
             ++g_setupFailures;
             return false;
         }
+    } else if (!BindWindow(swapchainInfo.window)) {
+        // The same device presents to another window: the input follows the overlay.
+        ++g_setupFailures;
+        return false;
     }
     if (!CreateSwapchainResources(swapchain, swapchainInfo.extent)) {
         Log("Vulkan swap chain resource creation failed");
