@@ -97,8 +97,10 @@ void ReleaseAbandoned() {
 
 // A new context may get the address of a destroyed one: the overlay must not take it for its own.
 void OnContextDestroyed(void* context) {
-    if (context && context == g_context)
+    if (context && context == g_context) {
         ReleaseOverlay(Teardown);
+        ReleaseBackend(Backend::OpenGL);
+    }
 }
 
 NativeWindow WindowOf(GlxDrawable drawable) {

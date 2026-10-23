@@ -248,6 +248,12 @@ bool ClaimBackend(Backend backend) {
     return false;
 }
 
+void ReleaseBackend(Backend backend) {
+    Backend expected = backend;
+    if (g_activeBackend.compare_exchange_strong(expected, Backend::None))
+        Log("%s backend released", BackendName(backend));
+}
+
 bool BeginOverlayFrame(uint64_t swapchain, NativeWindow window) {
     // Another thread draws the overlay: this one does not wait for it.
     if (!g_frameMutex.try_lock())
