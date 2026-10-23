@@ -1,0 +1,13 @@
+; A project with an empty scene, for tests/game.cpp.
+
+config_version=5
+
+[application]
+
+config/name="uih"
+run/main_scene="res://main.tscn"
+
+[display]
+
+window/size/viewport_width=1024
+window/size/viewport_height=768
