@@ -84,6 +84,9 @@ ID3D12Fence* g_fence = nullptr;
 HANDLE g_fenceEvent = nullptr;
 UINT64 g_fenceValue = 0;
 std::vector<FrameContext> g_frames;
+// The copy of a frame for CaptureFrame(), kept when the GPU did not finish it in time.
+ID3D12Resource* g_readback = nullptr;
+UINT64 g_readbackFence = 0;
 DXGI_FORMAT g_format = DXGI_FORMAT_UNKNOWN;
 // Unused slots of the SRV heap, the lowest last.
 std::vector<UINT> g_freeSrvs;
@@ -260,6 +263,7 @@ void Teardown() {
     g_imguiReady = false;
     UnbindWindow();
     ReleaseFrames();
+    Release(g_readback);
     Release(g_srvHeap);
     Release(g_commandList);
     Release(g_fence);
@@ -369,6 +373,66 @@ bool Init(IDXGISwapChain* swapChain, ID3D12CommandQueue* queue) {
     return true;
 }
 
+// Records the copy of the back buffer, before the overlay is drawn on it, to
+// a buffer the CPU reads. The back buffer is left as a copy source.
+bool RecordCapture(ID3D12Resource* buffer, D3D12_PLACED_SUBRESOURCE_FOOTPRINT& footprint, TexelLayout& layout, D3D12_RESOURCE_BARRIER& barrier) {
+    // The copy of a frame the GPU did not run in time.
+    if (g_readback) {
+        if (g_fence->GetCompletedValue() < g_readbackFence)
+            return false;
+        Release(g_readback);
+    }
+    D3D12_RESOURCE_DESC desc = buffer->GetDesc();
+    layout = DxgiTexelLayout(RenderTargetFormat(desc.Format));
+    UINT64 size = 0;
+    g_device->GetCopyableFootprints(&desc, 0, 1, 0, &footprint, nullptr, nullptr, &size);
+    D3D12_HEAP_PROPERTIES heap{};
+    heap.Type = D3D12_HEAP_TYPE_READBACK;
+    D3D12_RESOURCE_DESC bufferDesc{};
+    bufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    bufferDesc.Width = size;
+    bufferDesc.Height = 1;
+    bufferDesc.DepthOrArraySize = 1;
+    bufferDesc.MipLevels = 1;
+    bufferDesc.SampleDesc = {1, 0};
+    bufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    if (layout == TexelLayout::Unsupported || desc.SampleDesc.Count > 1 ||
+        FAILED(g_device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &bufferDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+                                                 IID_PPV_ARGS(&g_readback)))) {
+        CompleteCapture({}, 0, 0);
+        return false;
+    }
+    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    g_commandList->ResourceBarrier(1, &barrier);
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    D3D12_TEXTURE_COPY_LOCATION target{};
+    target.pResource = g_readback;
+    target.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    target.PlacedFootprint = footprint;
+    D3D12_TEXTURE_COPY_LOCATION source{};
+    source.pResource = buffer;
+    source.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    source.SubresourceIndex = 0;
+    g_commandList->CopyTextureRegion(&target, 0, 0, 0, &source, nullptr);
+    return true;
+}
+
+std::vector<uint8_t> ReadCapture(const D3D12_PLACED_SUBRESOURCE_FOOTPRINT& footprint, TexelLayout layout) {
+    std::vector<uint8_t> rgba;
+    WaitForGpu();
+    if (g_fence->GetCompletedValue() < g_readbackFence)
+        return rgba;
+    void* texels = nullptr;
+    // The last row ends without the padding of the others: the whole buffer is read.
+    if (SUCCEEDED(g_readback->Map(0, nullptr, &texels))) {
+        rgba = ToRgba(texels, footprint.Footprint.RowPitch, footprint.Footprint.Width, footprint.Footprint.Height, layout);
+        D3D12_RANGE written{0, 0};
+        g_readback->Unmap(0, &written);
+    }
+    Release(g_readback);
+    return rgba;
+}
+
 void Render(IDXGISwapChain* swapChain) {
     bool known = false;
     ID3D12CommandQueue* queue = QueueFor(swapChain, known);
@@ -423,6 +487,9 @@ void Render(IDXGISwapChain* swapChain) {
     barrier.Transition.pResource = buffer;
     barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
     barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};
+    TexelLayout layout = TexelLayout::Unsupported;
+    bool capture = CaptureWanted() && RecordCapture(buffer, footprint, layout, barrier);
     barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
     g_commandList->ResourceBarrier(1, &barrier);
     g_commandList->OMSetRenderTargets(1, &frame.target, FALSE, nullptr);
@@ -432,6 +499,8 @@ void Render(IDXGISwapChain* swapChain) {
     if (!Guarded([&] { ImGui_ImplDX12_RenderDrawData(drawData, g_commandList); })) {
         g_commandList->Close();
         buffer->Release();
+        if (capture)
+            Release(g_readback);
         return;
     }
 
@@ -445,6 +514,10 @@ void Render(IDXGISwapChain* swapChain) {
     g_queue->Signal(g_fence, ++g_fenceValue);
     frame.fenceValue = g_fenceValue;
     buffer->Release();
+    if (capture) {
+        g_readbackFence = g_fenceValue;
+        CompleteCapture(ReadCapture(footprint, layout), footprint.Footprint.Width, footprint.Footprint.Height);
+    }
 }
 
 void PreResize(IDXGISwapChain* swapChain) {

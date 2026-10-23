@@ -10,6 +10,9 @@
 #include <windows.h>
 #endif
 
+#include <cstdint>
+#include <vector>
+
 struct ImTextureData;
 
 namespace uih {
@@ -98,5 +101,13 @@ constexpr int kMaxTextures = 256;
 ImTextureData* CreateTexture(const void* rgba, int width, int height);
 // Releases a texture on the next frame. Do not draw it afterwards.
 void DestroyTexture(ImTextureData* texture);
+
+// Copies the next frame the game presents, without the overlay, as `width` *
+// `height` RGBA pixels, 8 bits per channel, rows from top to bottom, on every
+// backend. Waits up to `timeoutMs` for that frame. False on timeout, when the
+// hook is stopped, and when the back buffer is neither 8 nor 10 bits per
+// channel, such as the floating-point one of HDR output. Any thread but the
+// render callback's.
+bool CaptureFrame(std::vector<uint8_t>& pixels, uint32_t& width, uint32_t& height, uint32_t timeoutMs = 1000);
 
 } // namespace uih

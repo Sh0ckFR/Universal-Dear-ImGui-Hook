@@ -198,6 +198,23 @@ bool StoresLinear(DXGI_FORMAT format) {
     }
 }
 
+TexelLayout DxgiTexelLayout(DXGI_FORMAT format) {
+    switch (format) {
+    case DXGI_FORMAT_R8G8B8A8_UNORM:
+    case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+        return TexelLayout::RGBA8;
+    case DXGI_FORMAT_B8G8R8A8_UNORM:
+    case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+    case DXGI_FORMAT_B8G8R8X8_UNORM:
+    case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:
+        return TexelLayout::BGRA8;
+    case DXGI_FORMAT_R10G10B10A2_UNORM:
+        return TexelLayout::RGB10A2;
+    default:
+        return TexelLayout::Unsupported;
+    }
+}
+
 HWND CreateHiddenWindow() {
     return CreateWindowExW(0, L"STATIC", L"", WS_POPUP, 0, 0, 64, 64, nullptr, nullptr, nullptr, nullptr);
 }

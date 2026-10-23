@@ -70,9 +70,60 @@ ID3D11RenderTargetView* CreateTarget(bool& linear) {
     return target;
 }
 
+// The frame of the game, before the overlay is drawn on it.
+void Capture() {
+    std::vector<uint8_t> rgba;
+    ID3D11Texture2D* buffer = nullptr;
+    if (FAILED(g_swapChain->GetBuffer(0, IID_PPV_ARGS(&buffer)))) {
+        CompleteCapture({}, 0, 0);
+        return;
+    }
+    D3D11_TEXTURE2D_DESC desc{};
+    buffer->GetDesc(&desc);
+    DXGI_FORMAT format = RenderTargetFormat(desc.Format);
+    TexelLayout layout = DxgiTexelLayout(format);
+    ID3D11Texture2D* source = buffer;
+    ID3D11Texture2D* resolved = nullptr;
+    ID3D11Texture2D* staging = nullptr;
+    D3D11_TEXTURE2D_DESC copyDesc = desc;
+    copyDesc.Format = format;
+    copyDesc.MipLevels = 1;
+    copyDesc.ArraySize = 1;
+    copyDesc.SampleDesc = {1, 0};
+    copyDesc.MiscFlags = 0;
+    bool ok = layout != TexelLayout::Unsupported;
+    if (ok && desc.SampleDesc.Count > 1) {
+        copyDesc.Usage = D3D11_USAGE_DEFAULT;
+        copyDesc.BindFlags = 0;
+        copyDesc.CPUAccessFlags = 0;
+        ok = SUCCEEDED(g_device->CreateTexture2D(&copyDesc, nullptr, &resolved));
+        if (ok) {
+            g_context->ResolveSubresource(resolved, 0, buffer, 0, format);
+            source = resolved;
+        }
+    }
+    copyDesc.Usage = D3D11_USAGE_STAGING;
+    copyDesc.BindFlags = 0;
+    copyDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    if (ok && SUCCEEDED(g_device->CreateTexture2D(&copyDesc, nullptr, &staging))) {
+        g_context->CopySubresourceRegion(staging, 0, 0, 0, 0, source, 0, nullptr);
+        if (SUCCEEDED(g_context->Map(staging, 0, D3D11_MAP_READ, 0, &mapped))) {
+            rgba = ToRgba(mapped.pData, mapped.RowPitch, desc.Width, desc.Height, layout);
+            g_context->Unmap(staging, 0);
+        }
+    }
+    Release(staging);
+    Release(resolved);
+    buffer->Release();
+    CompleteCapture(std::move(rgba), desc.Width, desc.Height);
+}
+
 void Render(IDXGISwapChain* swapChain) {
     if (swapChain != g_swapChain && !Init(swapChain))
         return;
+    if (CaptureWanted())
+        Capture();
     // Before any reference to the back buffer, which an exception in the frame would leak.
     ImGui_ImplDX11_NewFrame();
     ImDrawData* drawData = Frame();

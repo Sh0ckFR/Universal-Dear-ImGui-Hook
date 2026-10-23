@@ -1970,6 +1970,7 @@ int main(int argc, char** argv) {
         else if (arg == "--fault" && i + 1 < argc) options.fault = argv[++i];
         else if (arg == "--second-window") options.secondWindow = true;
         else if (arg == "--shared-device") options.sharedDevice = true;
+        else if (arg == "--capture-frame") options.captureFrame = true;
         else if (arg == "--textures" && i + 1 < argc) options.textures = atoi(argv[++i]);
         else if (arg == "--remove-device") options.removeDevice = true;
         else if (arg == "--transfer-only") options.transferOnly = true;
@@ -1994,7 +1995,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception|draw] [--second-window [--shared-device]] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception|draw] [--second-window [--shared-device]] [--capture-frame] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -2160,6 +2161,42 @@ int main(int argc, char** argv) {
                     result = Fail("a texture was not uploaded");
             if (result)
                 break;
+            if (options.captureFrame) {
+                std::vector<uint8_t> pixels;
+                uint32_t width = 0;
+                uint32_t height = 0;
+                bool captured = false;
+                std::atomic<bool> finished{false};
+                std::thread capture([&] {
+                    captured = uih::CaptureFrame(pixels, width, height, 5000);
+                    finished = true;
+                });
+                while (!finished) {
+                    PumpMessages();
+                    host->Frame();
+                }
+                capture.join();
+                if (!captured) {
+                    result = Fail("the frame could not be captured");
+                    break;
+                }
+                // The menu covers the probe, and the capture is taken before the overlay.
+                const uint8_t* probe = pixels.data() + (static_cast<size_t>(kProbeY) * width + kProbeX) * 4;
+                printf("captured %ux%u, probe color %d %d %d\n", width, height, probe[0], probe[1], probe[2]);
+                if (width != static_cast<uint32_t>(kWidth) || height != static_cast<uint32_t>(kHeight)) {
+                    result = Fail("the capture does not have the size of the back buffer");
+                    break;
+                }
+                const float* clear = kClear;
+                for (int i = 0; i < 3; ++i) {
+                    if (abs(probe[i] - static_cast<int>(clear[i] * 255.0f + 0.5f)) > 3) {
+                        result = Fail("the capture does not show the frame of the game alone");
+                        break;
+                    }
+                }
+                if (result)
+                    break;
+            }
             if (options.removeDevice) {
                 if (!host->RemoveDevice()) {
                     result = Skip("the host cannot remove its device");

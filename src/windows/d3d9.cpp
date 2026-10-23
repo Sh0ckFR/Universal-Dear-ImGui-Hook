@@ -71,6 +71,49 @@ bool Init(IDirect3DDevice9* device) {
     return true;
 }
 
+TexelLayout D3D9TexelLayout(D3DFORMAT format) {
+    switch (format) {
+    case D3DFMT_A8R8G8B8:
+    case D3DFMT_X8R8G8B8:
+        return TexelLayout::BGRA8;
+    case D3DFMT_A8B8G8R8:
+    case D3DFMT_X8B8G8R8:
+        return TexelLayout::RGBA8;
+    case D3DFMT_A2R10G10B10:
+        return TexelLayout::BGR10A2;
+    case D3DFMT_A2B10G10R10:
+        return TexelLayout::RGB10A2;
+    default:
+        return TexelLayout::Unsupported;
+    }
+}
+
+// The frame of the game, before the overlay is drawn on it.
+void Capture(IDirect3DDevice9* device, IDirect3DSurface9* backBuffer) {
+    std::vector<uint8_t> rgba;
+    D3DSURFACE_DESC desc{};
+    backBuffer->GetDesc(&desc);
+    TexelLayout layout = D3D9TexelLayout(desc.Format);
+    IDirect3DSurface9* source = backBuffer;
+    IDirect3DSurface9* resolved = nullptr;
+    IDirect3DSurface9* memory = nullptr;
+    bool ok = layout != TexelLayout::Unsupported;
+    if (ok && desc.MultiSampleType != D3DMULTISAMPLE_NONE) {
+        ok = SUCCEEDED(device->CreateRenderTarget(desc.Width, desc.Height, desc.Format, D3DMULTISAMPLE_NONE, 0, FALSE, &resolved, nullptr)) &&
+             SUCCEEDED(device->StretchRect(backBuffer, nullptr, resolved, nullptr, D3DTEXF_NONE));
+        source = resolved;
+    }
+    D3DLOCKED_RECT locked{};
+    if (ok && SUCCEEDED(device->CreateOffscreenPlainSurface(desc.Width, desc.Height, desc.Format, D3DPOOL_SYSTEMMEM, &memory, nullptr)) &&
+        SUCCEEDED(device->GetRenderTargetData(source, memory)) && SUCCEEDED(memory->LockRect(&locked, nullptr, D3DLOCK_READONLY))) {
+        rgba = ToRgba(locked.pBits, static_cast<size_t>(locked.Pitch), desc.Width, desc.Height, layout);
+        memory->UnlockRect();
+    }
+    Release(memory);
+    Release(resolved);
+    CompleteCapture(std::move(rgba), desc.Width, desc.Height);
+}
+
 // Draws on the back buffer of the implicit swap chain, outside of the
 // application's scenes, whatever render target is bound.
 void Render(IDirect3DDevice9* device) {
@@ -84,6 +127,8 @@ void Render(IDirect3DDevice9* device) {
     IDirect3DSurface9* backBuffer = nullptr;
     if (FAILED(device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &backBuffer)))
         return;
+    if (CaptureWanted())
+        Capture(device, backBuffer);
     IDirect3DSurface9* previous = nullptr;
     device->GetRenderTarget(0, &previous);
     D3DVIEWPORT9 viewport{};

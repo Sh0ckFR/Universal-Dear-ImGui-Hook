@@ -1,5 +1,9 @@
 #pragma once
 
+#include "internal.h"
+
+#include <vector>
+
 #include "imgui_impl_opengl3_loader.h"
 
 namespace uih::detail {
@@ -45,5 +49,51 @@ private:
     GLint unpackBuffer_ = 0;
     GLboolean srgb_ = GL_FALSE;
 };
+
+// Copies the back buffer of the window, before the overlay is drawn on it,
+// for CaptureFrame(), and sets back the state the read changes.
+inline void CaptureBackBuffer(uint32_t width, uint32_t height) {
+    constexpr GLenum kReadFramebuffer = 0x8CA8;
+    constexpr GLenum kReadFramebufferBinding = 0x8CAA;
+    constexpr GLenum kReadBuffer = 0x0C02;
+    constexpr GLenum kPixelPackBuffer = 0x88EB;
+    constexpr GLenum kPixelPackBufferBinding = 0x88ED;
+    constexpr GLenum kPack[] = {GL_PACK_ALIGNMENT, 0x0D02 /* row length */, 0x0D03 /* skip rows */, 0x0D04 /* skip pixels */};
+    if (width == 0 || height == 0) {
+        CompleteCapture({}, 0, 0);
+        return;
+    }
+    auto bindFramebuffer = reinterpret_cast<void(APIENTRYP)(GLenum, GLuint)>(imgl3wGetProcAddress("glBindFramebuffer"));
+    auto readBuffer = reinterpret_cast<void(APIENTRYP)(GLenum)>(imgl3wGetProcAddress("glReadBuffer"));
+    GLint readFramebuffer = 0;
+    GLint readMode = 0;
+    GLint packBuffer = 0;
+    GLint pack[4] = {};
+    if (bindFramebuffer) {
+        glGetIntegerv(kReadFramebufferBinding, &readFramebuffer);
+        bindFramebuffer(kReadFramebuffer, 0);
+    }
+    if (readBuffer) {
+        glGetIntegerv(kReadBuffer, &readMode);
+        readBuffer(GL_BACK);
+    }
+    glGetIntegerv(kPixelPackBufferBinding, &packBuffer);
+    glBindBuffer(kPixelPackBuffer, 0);
+    for (int i = 0; i < 4; ++i) {
+        glGetIntegerv(kPack[i], &pack[i]);
+        glPixelStorei(kPack[i], i == 0 ? 4 : 0);
+    }
+    std::vector<uint8_t> texels(static_cast<size_t>(width) * height * 4);
+    glReadPixels(0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height), GL_RGBA, GL_UNSIGNED_BYTE, texels.data());
+    for (int i = 0; i < 4; ++i)
+        glPixelStorei(kPack[i], pack[i]);
+    glBindBuffer(kPixelPackBuffer, static_cast<GLuint>(packBuffer));
+    if (readBuffer)
+        readBuffer(static_cast<GLenum>(readMode));
+    if (bindFramebuffer)
+        bindFramebuffer(kReadFramebuffer, static_cast<GLuint>(readFramebuffer));
+    // Rows from the bottom.
+    CompleteCapture(ToRgba(texels.data(), static_cast<size_t>(width) * 4, width, height, TexelLayout::RGBA8, true), width, height);
+}
 
 } // namespace uih::detail

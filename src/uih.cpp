@@ -46,6 +46,16 @@ std::vector<UserTexture> g_textures;
 // is registered at once instead of before the next frame.
 thread_local bool t_inRenderCallback = false;
 
+// One CaptureFrame() at a time waits for the rendering thread.
+std::mutex g_captureCall;
+std::mutex g_captureMutex;
+std::condition_variable g_captureSignal;
+std::atomic<bool> g_captureWanted{false};
+bool g_captureDone = false;
+std::vector<uint8_t> g_capturePixels;
+uint32_t g_captureWidth = 0;
+uint32_t g_captureHeight = 0;
+
 bool g_menuButtonsDown = false;
 bool g_menuKeyDown = false;
 // Cleared by Start() and Stop() to end a wait for the menu input.
@@ -384,6 +394,44 @@ void OnFault(unsigned long code) {
     std::thread(StopUntilMenuInput).detach();
 }
 
+bool CaptureWanted() { return g_captureWanted; }
+
+void CompleteCapture(std::vector<uint8_t>&& rgba, uint32_t width, uint32_t height) {
+    std::lock_guard<std::mutex> lock(g_captureMutex);
+    if (!g_captureWanted.exchange(false))
+        return;
+    g_capturePixels = std::move(rgba);
+    g_captureWidth = width;
+    g_captureHeight = height;
+    g_captureDone = true;
+    g_captureSignal.notify_all();
+}
+
+std::vector<uint8_t> ToRgba(const void* texels, size_t pitch, uint32_t width, uint32_t height, TexelLayout layout, bool bottomUp) {
+    std::vector<uint8_t> rgba;
+    if (layout == TexelLayout::Unsupported)
+        return rgba;
+    rgba.resize(static_cast<size_t>(width) * height * 4);
+    bool swap = layout == TexelLayout::BGRA8 || layout == TexelLayout::BGR10A2;
+    bool wide = layout == TexelLayout::RGB10A2 || layout == TexelLayout::BGR10A2;
+    for (uint32_t y = 0; y < height; ++y) {
+        const uint8_t* row = static_cast<const uint8_t*>(texels) + (bottomUp ? height - 1 - y : y) * pitch;
+        uint8_t* out = rgba.data() + static_cast<size_t>(y) * width * 4;
+        for (uint32_t x = 0; x < width; ++x, out += 4) {
+            uint32_t texel;
+            memcpy(&texel, row + static_cast<size_t>(x) * 4, sizeof(texel));
+            uint8_t channels[3];
+            for (int c = 0; c < 3; ++c)
+                channels[c] = static_cast<uint8_t>(wide ? (texel >> (c * 10) & 0x3ff) >> 2 : texel >> (c * 8));
+            out[0] = channels[swap ? 2 : 0];
+            out[1] = channels[1];
+            out[2] = channels[swap ? 0 : 2];
+            out[3] = 255;
+        }
+    }
+    return rgba;
+}
+
 ImDrawData* Frame() {
     UpdateTextures();
     {
@@ -473,6 +521,11 @@ void Stop() {
         return;
     g_state = State::Stopping;
     Log("Stopping");
+    {
+        // No frame comes for a CaptureFrame() call that waits.
+        std::lock_guard<std::mutex> capture(g_captureMutex);
+        g_captureSignal.notify_all();
+    }
     // The application gets its input and its cursor back.
     SetMenuOpen(false);
 
@@ -527,6 +580,24 @@ void DestroyTexture(ImTextureData* texture) {
         }
         return;
     }
+}
+
+bool CaptureFrame(std::vector<uint8_t>& pixels, uint32_t& width, uint32_t& height, uint32_t timeoutMs) {
+    if (t_inRenderCallback)
+        return false;
+    std::lock_guard<std::mutex> call(g_captureCall);
+    std::unique_lock<std::mutex> lock(g_captureMutex);
+    g_captureDone = false;
+    g_capturePixels.clear();
+    g_captureWanted = true;
+    g_captureSignal.wait_for(lock, std::chrono::milliseconds(timeoutMs), [] { return g_captureDone || g_state != State::Running; });
+    g_captureWanted = false;
+    if (!g_captureDone || g_capturePixels.empty())
+        return false;
+    pixels.swap(g_capturePixels);
+    width = g_captureWidth;
+    height = g_captureHeight;
+    return true;
 }
 
 const char* BackendName(Backend backend) {
