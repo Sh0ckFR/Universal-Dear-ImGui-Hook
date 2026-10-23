@@ -91,6 +91,8 @@ void Render(GetCurrentContextFn getCurrentContext, NativeWindow window, uint32_t
     if (!BindWindow(window))
         return;
     input::SetSurfaceSize(width, height);
+    if (CaptureWanted())
+        CaptureBackBuffer(width, height);
     ImGui_ImplOpenGL3_NewFrame();
     ImDrawData* drawData = Frame();
     drawn = drawData && drawData->TotalVtxCount > 0;

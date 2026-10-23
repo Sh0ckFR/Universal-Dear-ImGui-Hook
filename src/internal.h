@@ -107,6 +107,16 @@ bool CreateContext();
 bool BindWindow(NativeWindow window);
 // Platform NewFrame, key polling, user callback and ImGui::Render().
 ImDrawData* Frame();
+// True while CaptureFrame() waits: the backend copies the frame of the game,
+// before it draws the overlay, and hands it to CompleteCapture().
+bool CaptureWanted();
+// Empty `rgba` when the backend could not copy the frame.
+void CompleteCapture(std::vector<uint8_t>&& rgba, uint32_t width, uint32_t height);
+// Layout of the 32-bit texels of a copied frame, from the lowest bits.
+enum class TexelLayout { Unsupported, RGBA8, BGRA8, RGB10A2, BGR10A2 };
+// Opaque RGBA pixels, top row first, from rows of texels `pitch` bytes apart.
+// Empty for an unsupported layout.
+std::vector<uint8_t> ToRgba(const void* texels, size_t pitch, uint32_t width, uint32_t height, TexelLayout layout, bool bottomUp = false);
 // Dear ImGui produces sRGB vertex colors. Render targets that store linear
 // values (sRGB and floating-point formats) need them converted.
 void LinearizeColors(ImDrawData* drawData);

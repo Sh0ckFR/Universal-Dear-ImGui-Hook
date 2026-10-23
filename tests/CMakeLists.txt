@@ -44,6 +44,7 @@ if(WIN32)
         uih_add_host_test(${api}_resize --api ${api} --resize --capture)
         uih_add_host_test(${api}_reload --api ${api} --reload --capture)
         uih_add_host_test(${api}_second_window --api ${api} --second-window)
+        uih_add_host_test(${api}_capture_frame --api ${api} --capture-frame)
         # More textures than CreateTexture() accepts, all drawn.
         uih_add_host_test(${api}_textures --api ${api} --textures 300 --capture)
         # Skipped unless UIH_TEST_FULLSCREEN is set: it changes the display mode.

@@ -71,6 +71,8 @@ void ReleaseRemovedQueues();
 DXGI_FORMAT RenderTargetFormat(DXGI_FORMAT format);
 // True for render target formats that store linear values.
 bool StoresLinear(DXGI_FORMAT format);
+// Layout of the texels of a render target format, for CaptureFrame().
+TexelLayout DxgiTexelLayout(DXGI_FORMAT format);
 // Hidden window for dummy swap chains.
 HWND CreateHiddenWindow();
 

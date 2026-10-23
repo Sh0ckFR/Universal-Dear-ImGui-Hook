@@ -30,6 +30,7 @@ namespace {
     X(vkEnumeratePhysicalDevices)                 \
     X(vkGetPhysicalDeviceQueueFamilyProperties)   \
     X(vkEnumerateDeviceExtensionProperties)       \
+    X(vkGetPhysicalDeviceMemoryProperties)        \
     X(vkCreateDevice)
 
 #define UIH_VK_DEVICE_FUNCTIONS(X)   \
@@ -56,6 +57,16 @@ namespace {
     X(vkResetCommandBuffer)          \
     X(vkCmdBeginRenderPass)          \
     X(vkCmdEndRenderPass)            \
+    X(vkCmdPipelineBarrier)          \
+    X(vkCmdCopyImageToBuffer)        \
+    X(vkCreateBuffer)                \
+    X(vkDestroyBuffer)               \
+    X(vkGetBufferMemoryRequirements) \
+    X(vkAllocateMemory)              \
+    X(vkFreeMemory)                  \
+    X(vkBindBufferMemory)            \
+    X(vkMapMemory)                   \
+    X(vkUnmapMemory)                 \
     X(vkQueueSubmit)                 \
     X(vkGetSwapchainImagesKHR)
 
@@ -114,6 +125,8 @@ struct SwapchainInfo {
     VkFormat format = VK_FORMAT_UNDEFINED;
     VkExtent2D extent{};
     NativeWindow window{};
+    // The images can be copied, for CaptureFrame().
+    bool copyable = false;
 };
 
 struct QueueInfo {
@@ -129,6 +142,7 @@ struct FrameRing {
 
 struct VulkanState {
     VkDevice device = VK_NULL_HANDLE;
+    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
     DeviceFunctions fn;
     VkQueue queue = VK_NULL_HANDLE;
     uint32_t family = 0;
@@ -143,6 +157,8 @@ struct VulkanState {
 
     VkSwapchainKHR swapchain = VK_NULL_HANDLE;
     VkExtent2D extent{};
+    bool copyable = false;
+    std::vector<VkImage> images;
     std::vector<VkImageView> views;
     std::vector<VkFramebuffer> framebuffers;
     std::vector<VkSemaphore> semaphores;
@@ -282,6 +298,7 @@ void ReleaseSwapchainResources() {
         r.fn.vkDestroyImageView(r.device, view, nullptr);
     r.framebuffers.clear();
     r.views.clear();
+    r.images.clear();
     r.swapchain = VK_NULL_HANDLE;
 }
 
@@ -378,6 +395,7 @@ uint32_t FindQueueFamily(VkDevice device, VkQueue queue, VkPhysicalDevice physic
 bool CreateDeviceResources(VkDevice device, VkQueue queue, uint32_t family, VkPhysicalDevice physicalDevice, VkFormat format, uint32_t imageCount, NativeWindow window) {
     VulkanState& r = g_renderer;
     r.device = device;
+    r.physicalDevice = physicalDevice;
     r.fn = DeviceFunctionsFor(device);
     r.queue = queue;
     r.family = family;
@@ -470,7 +488,7 @@ bool CreateDeviceResources(VkDevice device, VkQueue queue, uint32_t family, VkPh
     return r.imguiReady;
 }
 
-bool CreateSwapchainResources(VkSwapchainKHR swapchain, VkExtent2D extent) {
+bool CreateSwapchainResources(VkSwapchainKHR swapchain, VkExtent2D extent, bool copyable) {
     VulkanState& r = g_renderer;
     uint32_t count = 0;
     if (r.fn.vkGetSwapchainImagesKHR(r.device, swapchain, &count, nullptr) != VK_SUCCESS || count == 0)
@@ -481,6 +499,8 @@ bool CreateSwapchainResources(VkSwapchainKHR swapchain, VkExtent2D extent) {
 
     r.swapchain = swapchain;
     r.extent = extent;
+    r.copyable = copyable;
+    r.images = images;
 #ifndef _WIN32
     input::SetSurfaceSize(extent.width, extent.height);
 #endif
@@ -608,7 +628,7 @@ bool Setup(VkDevice device, VkQueue queue, VkSwapchainKHR swapchain) {
         ++g_setupFailures;
         return false;
     }
-    if (!CreateSwapchainResources(swapchain, swapchainInfo.extent)) {
+    if (!CreateSwapchainResources(swapchain, swapchainInfo.extent, swapchainInfo.copyable)) {
         Log("Vulkan swap chain resource creation failed");
         ReleaseSwapchainResources();
         ++g_setupFailures;
@@ -616,6 +636,116 @@ bool Setup(VkDevice device, VkQueue queue, VkSwapchainKHR swapchain) {
     }
     g_setupFailures = 0;
     return true;
+}
+
+TexelLayout VulkanTexelLayout(VkFormat format) {
+    switch (format) {
+    case VK_FORMAT_R8G8B8A8_UNORM:
+    case VK_FORMAT_R8G8B8A8_SRGB:
+    case VK_FORMAT_A8B8G8R8_UNORM_PACK32:
+    case VK_FORMAT_A8B8G8R8_SRGB_PACK32:
+        return TexelLayout::RGBA8;
+    case VK_FORMAT_B8G8R8A8_UNORM:
+    case VK_FORMAT_B8G8R8A8_SRGB:
+        return TexelLayout::BGRA8;
+    case VK_FORMAT_A2B10G10R10_UNORM_PACK32:
+        return TexelLayout::RGB10A2;
+    case VK_FORMAT_A2R10G10B10_UNORM_PACK32:
+        return TexelLayout::BGR10A2;
+    default:
+        return TexelLayout::Unsupported;
+    }
+}
+
+struct Readback {
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    TexelLayout layout = TexelLayout::Unsupported;
+};
+
+void DestroyReadback(Readback& readback) {
+    VulkanState& r = g_renderer;
+    if (readback.buffer)
+        r.fn.vkDestroyBuffer(r.device, readback.buffer, nullptr);
+    if (readback.memory)
+        r.fn.vkFreeMemory(r.device, readback.memory, nullptr);
+    readback = Readback{};
+}
+
+// Records the copy of the swap chain image, before the overlay is drawn on
+// it, to a buffer the CPU reads.
+bool RecordCapture(VkCommandBuffer commandBuffer, uint32_t imageIndex, Readback& readback) {
+    VulkanState& r = g_renderer;
+    readback.layout = VulkanTexelLayout(r.format);
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = static_cast<VkDeviceSize>(r.extent.width) * r.extent.height * 4;
+    bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    VkMemoryAllocateInfo allocateInfo{};
+    allocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocateInfo.memoryTypeIndex = UINT32_MAX;
+    if (r.copyable && imageIndex < r.images.size() && readback.layout != TexelLayout::Unsupported &&
+        r.fn.vkCreateBuffer(r.device, &bufferInfo, nullptr, &readback.buffer) == VK_SUCCESS) {
+        VkMemoryRequirements requirements{};
+        r.fn.vkGetBufferMemoryRequirements(r.device, readback.buffer, &requirements);
+        VkPhysicalDeviceMemoryProperties properties{};
+        g_vk.vkGetPhysicalDeviceMemoryProperties(r.physicalDevice, &properties);
+        constexpr VkMemoryPropertyFlags kHostVisible = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        for (uint32_t type = 0; type < properties.memoryTypeCount && allocateInfo.memoryTypeIndex == UINT32_MAX; ++type)
+            if ((requirements.memoryTypeBits >> type & 1) && (properties.memoryTypes[type].propertyFlags & kHostVisible) == kHostVisible)
+                allocateInfo.memoryTypeIndex = type;
+        allocateInfo.allocationSize = requirements.size;
+    }
+    if (allocateInfo.memoryTypeIndex == UINT32_MAX || r.fn.vkAllocateMemory(r.device, &allocateInfo, nullptr, &readback.memory) != VK_SUCCESS ||
+        r.fn.vkBindBufferMemory(r.device, readback.buffer, readback.memory, 0) != VK_SUCCESS) {
+        DestroyReadback(readback);
+        CompleteCapture({}, 0, 0);
+        return false;
+    }
+
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = r.images[imageIndex];
+    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    r.fn.vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    VkBufferImageCopy region{};
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.imageExtent = {r.extent.width, r.extent.height, 1};
+    r.fn.vkCmdCopyImageToBuffer(commandBuffer, barrier.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback.buffer, 1, &region);
+    // The image goes back to the layout the render pass of the overlay expects.
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    VkBufferMemoryBarrier hostRead{};
+    hostRead.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    hostRead.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    hostRead.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    hostRead.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    hostRead.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    hostRead.buffer = readback.buffer;
+    hostRead.size = VK_WHOLE_SIZE;
+    r.fn.vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_HOST_BIT, 0, 0,
+                              nullptr, 1, &hostRead, 1, &barrier);
+    return true;
+}
+
+std::vector<uint8_t> ReadCapture(Readback& readback) {
+    VulkanState& r = g_renderer;
+    std::vector<uint8_t> rgba;
+    void* texels = nullptr;
+    if (r.fn.vkMapMemory(r.device, readback.memory, 0, VK_WHOLE_SIZE, 0, &texels) == VK_SUCCESS) {
+        rgba = ToRgba(texels, static_cast<size_t>(r.extent.width) * 4, r.extent.width, r.extent.height, readback.layout);
+        r.fn.vkUnmapMemory(r.device, readback.memory);
+    }
+    DestroyReadback(readback);
+    return rgba;
 }
 
 const VkPresentInfoKHR* Render(VkQueue queue, VkDevice device, const VkPresentInfoKHR* info, VkPresentInfoKHR& patched) {
@@ -647,6 +777,8 @@ const VkPresentInfoKHR* Render(VkQueue queue, VkDevice device, const VkPresentIn
     r.fn.vkResetCommandBuffer(frame.commandBuffer, 0);
     if (r.fn.vkBeginCommandBuffer(frame.commandBuffer, &beginInfo) != VK_SUCCESS)
         return info;
+    Readback readback;
+    bool capture = CaptureWanted() && RecordCapture(frame.commandBuffer, imageIndex, readback);
     VkRenderPassBeginInfo renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     renderPassInfo.renderPass = r.renderPass;
@@ -655,8 +787,10 @@ const VkPresentInfoKHR* Render(VkQueue queue, VkDevice device, const VkPresentIn
     r.fn.vkCmdBeginRenderPass(frame.commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
     ImGui_ImplVulkan_RenderDrawData(drawData, frame.commandBuffer);
     r.fn.vkCmdEndRenderPass(frame.commandBuffer);
-    if (r.fn.vkEndCommandBuffer(frame.commandBuffer) != VK_SUCCESS)
+    if (r.fn.vkEndCommandBuffer(frame.commandBuffer) != VK_SUCCESS) {
+        DestroyReadback(readback);
         return info;
+    }
 
     std::vector<VkPipelineStageFlags> waitStages(info->waitSemaphoreCount, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
     VkSubmitInfo submit{};
@@ -670,9 +804,15 @@ const VkPresentInfoKHR* Render(VkQueue queue, VkDevice device, const VkPresentIn
     submit.pSignalSemaphores = &r.semaphores[imageIndex];
     if (r.fn.vkQueueSubmit(queue, 1, &submit, frame.fence) != VK_SUCCESS) {
         Log("vkQueueSubmit failed");
+        DestroyReadback(readback);
         return info;
     }
     frame.pending = true;
+    if (capture) {
+        r.fn.vkWaitForFences(device, 1, &frame.fence, VK_TRUE, UINT64_MAX);
+        frame.pending = false;
+        CompleteCapture(ReadCapture(readback), r.extent.width, r.extent.height);
+    }
     r.frameIndex = (r.frameIndex + 1) % r.frames.size();
 
     patched = *info;
@@ -709,7 +849,7 @@ void OnSwapchainCreated(VkDevice device, const VkSwapchainCreateInfoKHR& info, V
     if (!known)
         window = input::FindProcessWindow(info.imageExtent.width, info.imageExtent.height);
     std::lock_guard<std::mutex> lock(g_mutex);
-    g_swapchains[swapchain] = {device, info.imageFormat, info.imageExtent, window};
+    g_swapchains[swapchain] = {device, info.imageFormat, info.imageExtent, window, (info.imageUsage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0};
     g_setupFailures = 0;
 }
 
@@ -815,14 +955,20 @@ struct IcdHooks {
         ScopedCall call;
         // The overlay renders into the images, which a game may only copy or
         // compute into. Every surface supports color attachment images.
+        // CaptureFrame() copies them, which nearly every surface supports.
+        auto create = Original<PFN_vkCreateSwapchainKHR>(N, kCreateSwapchainKHR);
         VkSwapchainCreateInfoKHR drawable{};
         if (info) {
             drawable = *info;
-            drawable.imageUsage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+            drawable.imageUsage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         }
-        VkResult result = Original<PFN_vkCreateSwapchainKHR>(N, kCreateSwapchainKHR)(device, info ? &drawable : nullptr, allocator, swapchain);
+        VkResult result = create(device, info ? &drawable : nullptr, allocator, swapchain);
+        if (result != VK_SUCCESS && info && !(info->imageUsage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT)) {
+            drawable.imageUsage &= ~VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+            result = create(device, &drawable, allocator, swapchain);
+        }
         if (result == VK_SUCCESS && info && swapchain)
-            OnSwapchainCreated(device, *info, *swapchain);
+            OnSwapchainCreated(device, drawable, *swapchain);
         return result;
     }
 

@@ -1,5 +1,7 @@
 #include "internal.h"
 
+#include <algorithm>
+
 #include "gl_state.h"
 #include "imgui_impl_opengl3.h"
 
@@ -118,6 +120,11 @@ void Render(HDC hdc) {
     g_contextMisses = 0;
     if (!BindWindow(window))
         return;
+    if (CaptureWanted()) {
+        RECT client{};
+        GetClientRect(window, &client);
+        CaptureBackBuffer(static_cast<uint32_t>(std::max<LONG>(client.right, 0)), static_cast<uint32_t>(std::max<LONG>(client.bottom, 0)));
+    }
     ImGui_ImplOpenGL3_NewFrame();
     ImDrawData* drawData = Frame();
     OverlayGlState state;
