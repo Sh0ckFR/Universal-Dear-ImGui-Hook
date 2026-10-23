@@ -88,6 +88,10 @@ struct Options {
     // with this API in a new window, as games that draw their splash screen
     // with another API do.
     std::string switchApi;
+    // D3D12: the GPU runs each frame of the host this long after it was
+    // submitted, as a busy GPU does, so the frames of the overlay are still in
+    // flight when the next one starts. 0 without it.
+    int gpuLatencyMs = 0;
     // Duration of a frame of the overlay that outlasts the wait of
     // uih::Stop() for the thread that presents, as a slow render callback or
     // a stalled GPU make it. 0 without it.

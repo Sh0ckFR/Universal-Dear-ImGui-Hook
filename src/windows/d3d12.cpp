@@ -276,6 +276,9 @@ void Teardown() {
 }
 
 bool CreateFrames(IDXGISwapChain* swapChain, const DXGI_SWAP_CHAIN_DESC& desc) {
+    // The overlay may move from another swap chain whose frames are still in flight.
+    if (!g_frames.empty())
+        WaitForGpu();
     ReleaseFrames();
 
     D3D12_DESCRIPTOR_HEAP_DESC heapDesc{};
