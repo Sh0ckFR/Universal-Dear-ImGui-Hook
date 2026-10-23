@@ -21,6 +21,60 @@ HGLRC g_context = nullptr;
 int g_contextMisses = 0;
 bool g_ready = false;
 
+// State the Dear ImGui backend changes while it draws and restores
+// afterwards, set back here when a fault interrupts it, as in a draw
+// callback of the application.
+class BackendGlState {
+public:
+    BackendGlState() {
+        glGetIntegerv(GL_ACTIVE_TEXTURE, &activeTexture_);
+        glActiveTexture(GL_TEXTURE0);
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture_);
+        glActiveTexture(static_cast<GLenum>(activeTexture_));
+        glGetIntegerv(GL_CURRENT_PROGRAM, &program_);
+        glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &arrayBuffer_);
+        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vertexArray_);
+        glGetIntegerv(GL_VIEWPORT, viewport_);
+        glGetIntegerv(GL_SCISSOR_BOX, scissorBox_);
+        for (size_t i = 0; i < kBlendCount; ++i)
+            glGetIntegerv(kBlend[i], &blend_[i]);
+        for (size_t i = 0; i < kCapabilityCount; ++i)
+            enabled_[i] = glIsEnabled(kCapabilities[i]);
+    }
+
+    void Restore() const {
+        glUseProgram(static_cast<GLuint>(program_));
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(texture_));
+        glActiveTexture(static_cast<GLenum>(activeTexture_));
+        glBindVertexArray(static_cast<GLuint>(vertexArray_));
+        glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(arrayBuffer_));
+        glBlendEquationSeparate(static_cast<GLenum>(blend_[0]), static_cast<GLenum>(blend_[1]));
+        glBlendFuncSeparate(static_cast<GLenum>(blend_[2]), static_cast<GLenum>(blend_[3]), static_cast<GLenum>(blend_[4]),
+                            static_cast<GLenum>(blend_[5]));
+        for (size_t i = 0; i < kCapabilityCount; ++i)
+            enabled_[i] ? glEnable(kCapabilities[i]) : glDisable(kCapabilities[i]);
+        glViewport(viewport_[0], viewport_[1], viewport_[2], viewport_[3]);
+        glScissor(scissorBox_[0], scissorBox_[1], scissorBox_[2], scissorBox_[3]);
+    }
+
+private:
+    static constexpr GLenum kBlend[] = {GL_BLEND_EQUATION_RGB, GL_BLEND_EQUATION_ALPHA, GL_BLEND_SRC_RGB,
+                                        GL_BLEND_DST_RGB,      GL_BLEND_SRC_ALPHA,      GL_BLEND_DST_ALPHA};
+    static constexpr size_t kBlendCount = sizeof(kBlend) / sizeof(kBlend[0]);
+    static constexpr GLenum kCapabilities[] = {GL_BLEND, GL_CULL_FACE, GL_DEPTH_TEST, GL_STENCIL_TEST, GL_SCISSOR_TEST};
+    static constexpr size_t kCapabilityCount = sizeof(kCapabilities) / sizeof(kCapabilities[0]);
+    GLint activeTexture_ = 0;
+    GLint texture_ = 0;
+    GLint program_ = 0;
+    GLint arrayBuffer_ = 0;
+    GLint vertexArray_ = 0;
+    GLint viewport_[4] = {};
+    GLint scissorBox_[4] = {};
+    GLint blend_[kBlendCount] = {};
+    GLboolean enabled_[kCapabilityCount] = {};
+};
+
 void Teardown() {
     if (!g_ready)
         return;
@@ -67,7 +121,9 @@ void Render(HDC hdc) {
     ImGui_ImplOpenGL3_NewFrame();
     ImDrawData* drawData = Frame();
     OverlayGlState state;
-    ImGui_ImplOpenGL3_RenderDrawData(drawData);
+    BackendGlState backend;
+    if (!Guarded([&] { ImGui_ImplOpenGL3_RenderDrawData(drawData); }))
+        backend.Restore();
 }
 
 BOOL WINAPI HookSwapBuffers(HDC hdc) {

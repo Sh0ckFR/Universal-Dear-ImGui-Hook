@@ -675,6 +675,11 @@ const char* g_fault = nullptr;
 // Set by the slow frame scenario: the next frame of the menu lasts that long.
 std::atomic<DWORD> g_slowFrameMs{0};
 
+void FaultWhileDrawing(const ImDrawList*, const ImDrawCmd*) {
+    volatile int* volatile address = nullptr;
+    *address = 1;
+}
+
 void DrawTestMenu() {
     if (DWORD ms = g_slowFrameMs.exchange(0))
         Sleep(ms);
@@ -682,7 +687,10 @@ void DrawTestMenu() {
         return;
     if (g_fault && strcmp(g_fault, "exception") == 0)
         throw std::runtime_error("menu");
-    if (g_fault) {
+    // In the backend, while it draws the overlay.
+    if (g_fault && strcmp(g_fault, "draw") == 0)
+        ImGui::GetForegroundDrawList()->AddCallback(FaultWhileDrawing, nullptr);
+    else if (g_fault) {
         volatile int* volatile address = nullptr;
         *address = 1;
     }
@@ -1240,6 +1248,12 @@ int RunFaultMode(HWND window, Host& host, const Options& options) {
         printf("after the fault: %d overlay pixels, the host still renders\n", pixels);
         if (pixels >= visible)
             result = Fail("overlay is still visible after the fault");
+        // A reference to a back buffer, or render state, left behind by the overlay makes it fail.
+        RECT client{};
+        GetClientRect(window, &client);
+        if (result == 0 && !host.Resize(client.right, client.bottom))
+            result = Fail("the host cannot resize its back buffers after the fault");
+        run(5);
     }
     uih::Stop();
     if (result == 0)
@@ -1835,7 +1849,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception] [--second-window [--shared-device]] [--textures N] [--remove-device] [--transfer-only] [--render-thread] [--resubclass] [--recreate-context] [--slow-frame ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception|draw] [--second-window [--shared-device]] [--textures N] [--remove-device] [--transfer-only] [--render-thread] [--resubclass] [--recreate-context] [--slow-frame ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 

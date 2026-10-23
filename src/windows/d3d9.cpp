@@ -94,7 +94,9 @@ void Render(IDirect3DDevice9* device) {
     device->GetRenderState(D3DRS_SRGBWRITEENABLE, &srgbWrite);
     device->SetRenderState(D3DRS_SRGBWRITEENABLE, FALSE);
     if (SUCCEEDED(device->BeginScene())) {
-        ImGui_ImplDX9_RenderDrawData(drawData);
+        // A fault in the backend, as in a draw callback of the application, must
+        // not leave the back buffer bound or referenced.
+        Guarded([&] { ImGui_ImplDX9_RenderDrawData(drawData); });
         device->EndScene();
     }
     device->SetRenderState(D3DRS_SRGBWRITEENABLE, srgbWrite);
