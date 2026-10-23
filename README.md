@@ -18,6 +18,7 @@ Windows games running under Wine or Proton use the Windows DLL.
 - [Features](#features)
 - [Quick start](#quick-start)
 - [Usage](#usage)
+- [Remote control by an AI assistant](#remote-control-by-an-ai-assistant)
 - [API](#api)
 - [How it works](#how-it-works)
 - [Building](#building)
@@ -36,6 +37,7 @@ Windows games running under Wine or Proton use the Windows DLL.
 - **No crash from the overlay** (Windows, MSVC builds): an exception in the overlay, from a renderer backend or the menu code, removes it instead of taking the game down; the menu key brings it back.
 - **Images**: `uih::CreateTexture()` turns RGBA pixels into an image for `ImGui::Image()`, on every backend.
 - **Frame capture**: `uih::CaptureFrame()` copies what the game draws, without the overlay, on every backend.
+- **Remote control by an AI assistant** (Windows): through [MCP](#remote-control-by-an-ai-assistant), an assistant such as Claude Code sees the game, writes to the player over it and presses its keys.
 - **No injector needed**: the DLL can be loaded as `dinput8.dll`, and the Linux library with `LD_PRELOAD`.
 - **No dependencies**: Dear ImGui, MinHook and the Vulkan headers are vendored; the C and C++ runtimes are linked statically.
 
@@ -98,6 +100,8 @@ void ApplySettings(uih::Config& config) {
     config.menuButtons = uih::GamepadL3 | uih::GamepadR3;    // controller buttons held together, 0 to disable
     config.backend = uih::Backend::None;                     // graphics API to hook, None detects it
     config.scale = 0.0f;                                     // interface size, 0 follows the DPI
+    config.remoteControl = false;                            // remote control by an AI assistant
+    config.remotePipe = "universal-imgui-hook";              // its pipe: \\.\pipe\universal-imgui-hook
 }
 ```
 
@@ -107,6 +111,7 @@ void ApplySettings(uih::Config& config) {
 | `menuButtons` | `uih::GamepadA`, `B`, `X`, `Y`, `L1`, `R1`, `L3`, `R3`, `Start`, `Back`, `DpadUp`, `DpadDown`, `DpadLeft`, `DpadRight`, combined with `\|`; first XInput controller, Windows only. |
 | `backend` | `uih::Backend::None` detects the API from the first one that presents a frame, which is right for nearly every game. `D3D9`, `D3D10`, `D3D11`, `D3D12`, `Vulkan` or `OpenGL` forces one, for a game that uses several. |
 | `scale` | `0` follows the DPI of the game window; `1.5` draws the interface at 150%. |
+| `remoteControl`, `remotePipe` | `true` serves the [remote control](#remote-control-by-an-ai-assistant) on the named pipe `\\.\pipe\<remotePipe>`; Windows only. |
 
 ### Writing your menu
 
@@ -143,6 +148,82 @@ target_link_libraries(my_overlay PRIVATE uih::uih)
 
 `tests/consumer/` is a complete example, built by the CI. On Linux, linking `uih::uih` into a shared library applies `src/linux/exports.map`, which only exports the hooked functions.
 
+## Remote control by an AI assistant
+
+The DLL can let an AI assistant, such as [Claude Code](https://claude.com/claude-code), see the game, write to the player over it and press its keys, through the [Model Context Protocol](https://modelcontextprotocol.io) (MCP). Windows games, every graphics API.
+
+```mermaid
+flowchart LR
+    A["Assistant, such as Claude Code"] -- "MCP on stdin and stdout" --> B["remote/uih_mcp.py"]
+    B -- "local named pipe" --> C["The DLL in the game"]
+```
+
+**1. Turn it on** in `example/config.cpp`, then build the DLL:
+
+```cpp
+config.remoteControl = true;
+config.remotePipe = "universal-imgui-hook";   // the pipe \\.\pipe\universal-imgui-hook
+```
+
+**2. Load it into the game**, with any injector, as `dinput8.dll`, or with the script, which needs [Python](https://www.python.org) 3.8 or newer and nothing else:
+
+```sh
+python remote/uih_mcp.py inject game.exe build/vs/x64/Release/Universal-ImGui-Hook.dll
+```
+
+**3. Give the assistant the MCP server**, once. With Claude Code:
+
+```sh
+claude mcp add game -- python C:/path/to/Universal-Dear-ImGui-Hook/remote/uih_mcp.py
+```
+
+With another `remotePipe`, add `--pipe <name>` after the script. Other MCP clients, such as Claude Desktop, take the same command in their configuration:
+
+```json
+{
+  "mcpServers": {
+    "game": { "command": "python", "args": ["C:/path/to/Universal-Dear-ImGui-Hook/remote/uih_mcp.py"] }
+  }
+}
+```
+
+**4. Ask.** Start a new session of the assistant, or run `/mcp` in Claude Code, and talk about the game:
+
+- *Look at the game and tell me what you see.*
+- *Write "Well done!" in the game for 5 seconds.*
+- *Walk right to the edge of the platform, then jump.*
+- *Open the overlay menu and describe it.*
+
+The assistant gets these tools:
+
+| Tool | Does |
+| --- | --- |
+| `screenshot` | The current frame, without the overlay, at most 1280 pixels wide or high by default |
+| `show_text` | A message to the player at the top of the screen, drawn by the overlay, for 10 seconds by default |
+| `press_key` | Holds keys for a duration, 150 ms by default; `right+space` holds them together |
+| `game_info` | Graphics API, window size, keyboard focus, menu state |
+
+`remote/uih_mcp.py` speaks MCP with the assistant on its standard input and output, and forwards each tool call as one line to the DLL, which serves the pipe on a thread of its own (`src/windows/remote.cpp`):
+
+| Command | Answer |
+| --- | --- |
+| `info` | `ok <API> <width>x<height> focused=0\|1 menu=0\|1` |
+| `screenshot <max size>` | `ok <width> <height>`, then the RGB pixels, rows from the top |
+| `text <seconds> <message>` | `ok`; `\n` in the message starts a new line, `0` seconds removes it |
+| `key <keys> <milliseconds>` | `ok <how the keys were sent>` once they are released |
+
+Failures answer `error <reason>`. The screenshots come from `uih::CaptureFrame()`; the keys go through `SendInput` when the game has the focus.
+
+Good to know:
+
+- **Any program you run can use the pipe**, so the remote control is off by default; other machines cannot. Turn it on for single-player games only: anti-cheat software watches injected DLLs.
+- **While you type to the assistant, the game does not have the focus**: the keys then reach it as window messages, which games that read the keyboard state directly (DirectInput, raw input) do not see. Click the game window after sending your request, or let the assistant play on a second screen.
+- While the overlay menu is open, the game sees no keys: the assistant can close it with `insert`.
+- The assistant plays turn by turn, a screenshot and a few keys at a time: fine for menus, puzzles and slow games, not for reflexes.
+- One game per pipe name: a second game started with the same name logs that the remote control is unavailable.
+- `unloadKey` stops the remote control with the overlay.
+- Screenshots of HDR back buffers, with more than 10 bits per channel, fail.
+
 ## API
 
 Everything is in `include/uih.h`, namespace `uih`.
@@ -167,6 +248,8 @@ Everything is in `include/uih.h`, namespace `uih`.
 | `scale` | `0` | Interface size; `0` follows the DPI of the game window |
 | `module` | `nullptr` | Windows: module freed by `unloadKey`. With `nullptr`, `unloadKey` removes the overlay and the menu key or buttons bring it back, as on Linux |
 | `debugLog` | `false` | `OutputDebugString` on Windows, stderr on Linux |
+| `remoteControl` | `false` | Windows: serves the [remote control](#remote-control-by-an-ai-assistant) on a named pipe, for local processes |
+| `remotePipe` | `"universal-imgui-hook"` | Windows: name of that pipe, `\\.\pipe\<remotePipe>`; copied by `Start()` |
 
 ## How it works
 
@@ -279,6 +362,7 @@ Without a GPU, as on the CI runners, Direct3D uses WARP, and Mesa's software dri
 | `--second-window` | A second window with its own device presents too: the overlay must stay on one window, follow the focus, and come back when the second window stops presenting. With `--shared-device` (Vulkan, D3D12), the second window renders with the device of the first |
 | `--gpu-latency ms` | The D3D12 GPU runs each frame `ms` after it was submitted, as a busy GPU does: the frames of the overlay are still in flight when it moves to another swap chain |
 | `--capture-frame` | Another thread copies a frame with `uih::CaptureFrame()` while the menu is open: the copy must have the size of the back buffer and show the game where the menu covers it |
+| `--remote` | Drives the remote control as `remote/uih_mcp.py` does: game description, screenshot without the overlay, message drawn, keys received by the window; then `uih::Stop()` must end it while a client stays connected |
 | `--fault access\|exception\|draw` | The render callback writes to a null pointer or throws, or a draw callback writes to a null pointer while the backend draws: the overlay must be removed while the host keeps rendering and can resize its back buffers, then start again (MSVC) |
 | `--slow-frame ms` | One frame of the menu lasts `ms` while `Stop()` is called from another thread: nothing that frame uses may be released under it. `_slow_frame` tests last 2.5 s, within the waits of `Stop()`; `_stuck_frame` tests last 6 s, beyond them. The hook must then start again |
 | `--bound-framebuffer` | The OpenGL host leaves a framebuffer object and a pixel unpack buffer bound at every swap: the overlay must still show on the window |

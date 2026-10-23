@@ -34,6 +34,7 @@
 #include <vector>
 
 #include "imgui.h"
+#include "imgui_internal.h"
 
 namespace {
 
@@ -934,13 +935,157 @@ void PumpMessages() {
     }
 }
 
+// Unique to the process: tests run in parallel.
+std::string RemotePipe() { return "uih-host-" + std::to_string(GetCurrentProcessId()); }
+
+std::wstring RemotePipePath() { return L"\\\\.\\pipe\\uih-host-" + std::to_wstring(GetCurrentProcessId()); }
+
 void StartHook(const Options& options) {
     uih::Config config;
     config.scale = options.scale;
+    std::string pipe = RemotePipe();
+    config.remoteControl = options.remote;
+    config.remotePipe = pipe.c_str();
     config.render = DrawTestMenu;
     config.setup = [] { g_setupCalled = true; };
     config.debugLog = true;
     uih::Start(config);
+}
+
+// A client of the remote control, as remote/uih_mcp.py is.
+class RemoteClient {
+public:
+    ~RemoteClient() {
+        if (pipe_ != INVALID_HANDLE_VALUE)
+            CloseHandle(pipe_);
+    }
+
+    // Waits for the server, which opens the pipe again after each client.
+    bool Open() {
+        for (int attempt = 0; attempt < 40 && pipe_ == INVALID_HANDLE_VALUE; ++attempt) {
+            pipe_ = CreateFileW(RemotePipePath().c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+            if (pipe_ == INVALID_HANDLE_VALUE)
+                Sleep(50);
+        }
+        return pipe_ != INVALID_HANDLE_VALUE;
+    }
+
+    // Sends one command and returns the line that answers it.
+    std::string Request(const std::string& command) {
+        std::string line = command + "\n";
+        DWORD written = 0;
+        if (!WriteFile(pipe_, line.data(), static_cast<DWORD>(line.size()), &written, nullptr))
+            return "";
+        std::string answer;
+        char c = 0;
+        DWORD read = 0;
+        while (ReadFile(pipe_, &c, 1, &read, nullptr) && read == 1 && c != '\n')
+            answer += c;
+        return answer;
+    }
+
+    bool Read(uint8_t* data, size_t size) {
+        while (size > 0) {
+            DWORD read = 0;
+            if (!ReadFile(pipe_, data, static_cast<DWORD>(size), &read, nullptr) || read == 0)
+                return false;
+            data += read;
+            size -= read;
+        }
+        return true;
+    }
+
+private:
+    HANDLE pipe_ = INVALID_HANDLE_VALUE;
+};
+
+// Keys the remote control pressed in the host window.
+std::atomic<int> g_remoteKeyDowns{0};
+std::atomic<int> g_remoteKeyUps{0};
+WNDPROC g_remoteHostProc = nullptr;
+
+LRESULT CALLBACK CountRemoteKeys(HWND window, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (wParam == 'U' && msg == WM_KEYDOWN)
+        ++g_remoteKeyDowns;
+    else if (wParam == 'U' && msg == WM_KEYUP)
+        ++g_remoteKeyUps;
+    return CallWindowProcW(g_remoteHostProc, window, msg, wParam, lParam);
+}
+
+// Runs `work` on another thread while `frame` renders.
+template <typename Work, typename Frame>
+void WhileRendering(Work&& work, Frame&& frame) {
+    std::atomic<bool> finished{false};
+    std::thread thread([&] {
+        work();
+        finished = true;
+    });
+    while (!finished)
+        frame();
+    thread.join();
+}
+
+// The commands of remote/uih_mcp.py while the menu is open: the screenshot
+// shows the game without the overlay, the message is drawn, and the keys reach
+// the window once the menu is closed.
+template <typename Frame>
+int RemoteScenario(Frame&& frame) {
+    std::string info;
+    std::string screenshot;
+    std::string text;
+    std::string unknownKey;
+    std::vector<uint8_t> rgb;
+    WhileRendering(
+        [&] {
+            RemoteClient client;
+            if (!client.Open())
+                return;
+            info = client.Request("info");
+            screenshot = client.Request("screenshot 400");
+            if (screenshot == "ok 400 300") {
+                rgb.resize(400 * 300 * 3);
+                if (!client.Read(rgb.data(), rgb.size()))
+                    rgb.clear();
+            }
+            text = client.Request("text 5 hello\\nworld");
+            unknownKey = client.Request("key nokey 50");
+        },
+        frame);
+    printf("info: %s\nscreenshot: %s\ntext: %s\nunknown key: %s\n", info.c_str(), screenshot.c_str(), text.c_str(), unknownKey.c_str());
+    if (info.rfind("ok ", 0) != 0 || info.find(" 800x600 ") == std::string::npos || info.find("menu=1") == std::string::npos)
+        return Fail("the remote control does not describe the game");
+    if (rgb.empty())
+        return Fail("the remote control did not send the screenshot");
+    // The menu covers the probe in the frame of the game.
+    const uint8_t* probe = rgb.data() + (static_cast<size_t>(kProbeY / 2) * 400 + kProbeX / 2) * 3;
+    for (int i = 0; i < 3; ++i)
+        if (abs(probe[i] - static_cast<int>(kClear[i] * 255.0f + 0.5f)) > 3)
+            return Fail("the screenshot does not show the frame of the game alone");
+    if (text != "ok" || unknownKey.rfind("error unknown key nokey", 0) != 0)
+        return Fail("the remote control does not answer its commands");
+    for (int i = 0; i < 3; ++i)
+        frame();
+    ImGuiWindow* message = ImGui::FindWindowByName("##uih_remote_message");
+    if (!message || !message->Active)
+        return Fail("the message of the assistant is not drawn");
+
+    uih::SetMenuOpen(false);
+    std::string key;
+    WhileRendering(
+        [&] {
+            RemoteClient client;
+            if (client.Open())
+                key = client.Request("key u 100");
+        },
+        frame);
+    for (int i = 0; i < 10; ++i)
+        frame();
+    printf("key: %s, %d down, %d up\n", key.c_str(), g_remoteKeyDowns.load(), g_remoteKeyUps.load());
+    uih::SetMenuOpen(true);
+    frame();
+    if (key.rfind("ok ", 0) != 0 || g_remoteKeyDowns == 0 || g_remoteKeyUps == 0)
+        return Fail("the keys of the remote control did not reach the window");
+    return 0;
 }
 
 // The hooks are installed on a worker thread, which software drivers make
@@ -1971,6 +2116,7 @@ int main(int argc, char** argv) {
         else if (arg == "--second-window") options.secondWindow = true;
         else if (arg == "--shared-device") options.sharedDevice = true;
         else if (arg == "--capture-frame") options.captureFrame = true;
+        else if (arg == "--remote") options.remote = true;
         else if (arg == "--textures" && i + 1 < argc) options.textures = atoi(argv[++i]);
         else if (arg == "--remove-device") options.removeDevice = true;
         else if (arg == "--transfer-only") options.transferOnly = true;
@@ -1995,7 +2141,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception|draw] [--second-window [--shared-device]] [--capture-frame] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception|draw] [--second-window [--shared-device]] [--capture-frame] [--remote] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -2010,6 +2156,8 @@ int main(int argc, char** argv) {
     DWORD exStyle = options.capture || !options.dll.empty() || !options.fault.empty() ? WS_EX_TOPMOST : 0;
     HWND window = CreateWindowExW(exStyle, L"uih_host", L"uih host", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 100, 100,
                                   rect.right - rect.left, rect.bottom - rect.top, nullptr, nullptr, windowClass.hInstance, nullptr);
+    if (options.remote)
+        g_remoteHostProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(CountRemoteKeys)));
     PumpMessages();
 
     // Created before the hook starts, registered with its context on the first frame.
@@ -2197,6 +2345,14 @@ int main(int argc, char** argv) {
                 if (result)
                     break;
             }
+            if (options.remote) {
+                result = RemoteScenario([&] {
+                    PumpMessages();
+                    host->Frame();
+                });
+                if (result)
+                    break;
+            }
             if (options.removeDevice) {
                 if (!host->RemoveDevice()) {
                     result = Skip("the host cannot remove its device");
@@ -2328,8 +2484,22 @@ int main(int argc, char** argv) {
                     break;
                 }
             }
+            // A client stays connected and silent: Stop() must not wait for it.
+            RemoteClient idle;
+            if (options.remote && !idle.Open()) {
+                result = Fail("the remote control does not accept a second client");
+                break;
+            }
+            ULONGLONG stopStart = GetTickCount64();
             uih::Stop();
             stopFrame = frame;
+            if (options.remote) {
+                ULONGLONG stopMs = GetTickCount64() - stopStart;
+                bool served = WaitNamedPipeW(RemotePipePath().c_str(), 0) || GetLastError() != ERROR_FILE_NOT_FOUND;
+                printf("Stop() took %llu ms with a remote client connected\n", stopMs);
+                if (stopMs > 3000 || served)
+                    result = Fail("uih::Stop() did not end the remote control");
+            }
             if (ImGui::GetCurrentContext() || uih::ActiveBackend() != uih::Backend::None)
                 result = Fail("hook did not release its resources");
             else if (g_texture->GetTexID() != ImTextureID_Invalid)

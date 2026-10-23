@@ -86,6 +86,7 @@ if(WIN32)
         src/windows/platform.cpp
         src/windows/input.cpp
         src/windows/dinput.cpp
+        src/windows/remote.cpp
         src/windows/xinput.cpp
         src/windows/d3d9.cpp
         src/windows/dxgi.cpp
