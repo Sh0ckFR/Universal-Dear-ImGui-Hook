@@ -1,0 +1,25 @@
+name: Install Ubuntu packages
+description: apt-get install from the Ubuntu archive rather than its Azure mirror, which at times serves packages at a few kB/s
+inputs:
+  packages:
+    description: Packages to install, separated by spaces
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+      run: |
+        sudo sed -i 's|http://azure\.archive\.ubuntu\.com|http://archive.ubuntu.com|g' /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true
+        printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' | sudo tee /etc/apt/apt.conf.d/99ci > /dev/null
+        # The man page index is rebuilt after every install otherwise.
+        sudo rm -f /var/lib/man-db/auto-update
+        for attempt in 1 2 3; do
+          if timeout 300 sudo apt-get update && timeout 600 sudo apt-get install -y $PACKAGES; then
+            exit 0
+          fi
+          echo "::warning::apt-get failed, attempt $attempt of 3"
+          sleep 15
+        done
+        exit 1
