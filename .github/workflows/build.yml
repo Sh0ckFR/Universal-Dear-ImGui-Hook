@@ -297,7 +297,8 @@ jobs:
         shell: bash
         run: |
           xvfb-run -a -s "-screen 0 1280x720x24" ctest --test-dir build/linux --output-on-failure | tee ctest.log
-          if grep -E 'preload_(glx|egl).*Skipped' ctest.log; then exit 1; fi
+          # The EGL of these distributions has no swap_buffers_with_damage.
+          if grep -E 'preload_(glx|egl).*Skipped' ctest.log | grep -v swap_with_damage; then exit 1; fi
       - uses: actions/upload-artifact@v4
         with:
           name: Universal-ImGui-Hook-linux-${{ matrix.arch }}

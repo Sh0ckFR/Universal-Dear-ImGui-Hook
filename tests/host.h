@@ -73,11 +73,10 @@ struct Options {
     // The Vulkan swap chain images are only written by transfers, as by
     // engines that copy their frame into them.
     bool transferOnly = false;
-    // Linux: the host presents with glXSwapBuffersMscOML, or with
-    // eglSwapBuffersWithDamage, and redraws and reports a single pixel once
-    // the buffer holds the rest of the window: extensions that applications
-    // look up by name.
-    bool swapExtension = false;
+    // Linux: the EGL host presents with eglSwapBuffersWithDamage, which
+    // applications look up by name, and redraws and reports a single pixel
+    // once the buffer holds the rest of the window.
+    bool swapWithDamage = false;
     // Linux: path the host opens the Vulkan loader from instead of
     // libvulkan.so.1, as applications that open libvulkan.so do.
     std::string vulkanLibrary;

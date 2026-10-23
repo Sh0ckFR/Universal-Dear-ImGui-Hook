@@ -118,23 +118,6 @@ NativeWindow WindowOf(GlxDrawable drawable) {
     return it != g_glxWindows.end() ? it->second : static_cast<NativeWindow>(drawable);
 }
 
-// Draws the overlay on `drawable` before it is swapped.
-void BeforeGlxSwap(GlxDrawable drawable) {
-    static const auto getCurrentContext = Next<void* (*)()>(interpose::kGlx, "glXGetCurrentContext");
-    static const auto getCurrentDrawable = Next<GlxDrawable (*)()>(interpose::kGlx, "glXGetCurrentDrawable");
-
-    ReleaseAbandoned();
-    if (ShouldRender(Backend::OpenGL) && getCurrentContext && getCurrentDrawable && getCurrentDrawable() == drawable) {
-        NativeWindow window = WindowOf(drawable);
-        uint32_t width = 0;
-        uint32_t height = 0;
-        bool drawn = false;
-        if (input::WindowSize(window, width, height))
-            DrawOverlay(drawable, window, [&] { Render(getCurrentContext, window, width, height, drawn); });
-    }
-    ServiceTeardown(Backend::OpenGL, Teardown);
-}
-
 // Applications that only redraw and post what changed must not cut the
 // overlay, nor keep it once it is gone: while the overlay is on `surface`,
 // and for kRedrawSwaps swaps after, the surface is posted whole and its
@@ -182,24 +165,9 @@ bool BeforeEglSwap(void* display, void* surface) {
 }
 
 // Functions of extensions, which applications look up by name.
-ProcAddress GlxExtension(const char* name) {
-    static const auto getProcAddress = Next<ProcAddress (*)(const unsigned char*)>(interpose::kGlx, "glXGetProcAddressARB");
-    return getProcAddress ? getProcAddress(reinterpret_cast<const unsigned char*>(name)) : nullptr;
-}
-
 ProcAddress EglExtension(const char* name) {
     static const auto getProcAddress = Next<ProcAddress (*)(const char*)>(interpose::kEgl, "eglGetProcAddress");
     return getProcAddress ? getProcAddress(name) : nullptr;
-}
-
-int64_t SwapBuffersMscOML(void* display, GlxDrawable drawable, int64_t targetMsc, int64_t divisor, int64_t remainder) {
-    static const auto swapBuffers = reinterpret_cast<int64_t (*)(void*, GlxDrawable, int64_t, int64_t, int64_t)>(GlxExtension("glXSwapBuffersMscOML"));
-    if (!swapBuffers)
-        return 0;
-    ScopedCall call;
-    ForeignPresentScope presentScope;
-    BeforeGlxSwap(drawable);
-    return swapBuffers(display, drawable, targetMsc, divisor, remainder);
 }
 
 using SwapBuffersWithDamageFn = unsigned int (*)(void*, void*, const int*, int);
@@ -229,9 +197,21 @@ unsigned int SwapBuffersWithDamageEXT(void* display, void* surface, const int* r
 
 UIH_EXPORT void glXSwapBuffers(void* display, GlxDrawable drawable) {
     static const auto swapBuffers = Next<void (*)(void*, GlxDrawable)>(interpose::kGlx, "glXSwapBuffers");
+    static const auto getCurrentContext = Next<void* (*)()>(interpose::kGlx, "glXGetCurrentContext");
+    static const auto getCurrentDrawable = Next<GlxDrawable (*)()>(interpose::kGlx, "glXGetCurrentDrawable");
+
     ScopedCall call;
     ForeignPresentScope presentScope;
-    BeforeGlxSwap(drawable);
+    ReleaseAbandoned();
+    if (ShouldRender(Backend::OpenGL) && getCurrentContext && getCurrentDrawable && getCurrentDrawable() == drawable) {
+        NativeWindow window = WindowOf(drawable);
+        uint32_t width = 0;
+        uint32_t height = 0;
+        bool drawn = false;
+        if (input::WindowSize(window, width, height))
+            DrawOverlay(drawable, window, [&] { Render(getCurrentContext, window, width, height, drawn); });
+    }
+    ServiceTeardown(Backend::OpenGL, Teardown);
     swapBuffers(display, drawable);
 }
 
@@ -312,8 +292,6 @@ const interpose::Function kGlxExports[] = {
     UIH_GL_EXPORT(glXDestroyContext),
     UIH_GL_EXPORT(glXGetProcAddress),
     UIH_GL_EXPORT(glXGetProcAddressARB),
-    // Not exported: only found through glXGetProcAddress().
-    {"glXSwapBuffersMscOML", reinterpret_cast<void*>(&SwapBuffersMscOML)},
 };
 const interpose::Function kEglExports[] = {
     UIH_GL_EXPORT(eglSwapBuffers),

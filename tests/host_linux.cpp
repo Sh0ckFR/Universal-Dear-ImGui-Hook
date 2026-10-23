@@ -139,7 +139,6 @@ struct GlxHost : OpenGLHost {
     GLXDrawable drawable = 0;
     GLXContext context = nullptr;
     void (*swapBuffers)(Display*, GLXDrawable) = glXSwapBuffers;
-    int64_t (*swapBuffersMsc)(Display*, GLXDrawable, int64_t, int64_t, int64_t) = nullptr;
 
     VisualID ChooseVisual(Display* dpy) override {
         const int attributes[] = {GLX_RENDER_TYPE, GLX_RGBA_BIT, GLX_DRAWABLE_TYPE, GLX_WINDOW_BIT, GLX_DOUBLEBUFFER, True,
@@ -169,15 +168,8 @@ struct GlxHost : OpenGLHost {
             swapBuffers = reinterpret_cast<void (*)(Display*, GLXDrawable)>(getProcAddress(reinterpret_cast<const GLubyte*>("glXSwapBuffers")));
             drawable = glXCreateWindow(display, config, window.window, nullptr);
         }
-        if (options.swapExtension) {
-            const char* extensions = glXQueryExtensionsString(display, DefaultScreen(display));
-            if (!extensions || !strstr(extensions, "GLX_OML_sync_control"))
-                return false;
-            swapBuffersMsc = reinterpret_cast<int64_t (*)(Display*, GLXDrawable, int64_t, int64_t, int64_t)>(
-                glXGetProcAddressARB(reinterpret_cast<const GLubyte*>("glXSwapBuffersMscOML")));
-        }
         context = glXCreateNewContext(display, config, GLX_RGBA_TYPE, nullptr, True);
-        if (!swapBuffers || (options.swapExtension && !swapBuffersMsc) || !context || !glXMakeCurrent(display, drawable, context) || !IsVersion3())
+        if (!swapBuffers || !context || !glXMakeCurrent(display, drawable, context) || !IsVersion3())
             return false;
         return !options.boundFramebuffer ||
                CreateOffscreenTarget([](const char* name) { return reinterpret_cast<void*>(glXGetProcAddressARB(reinterpret_cast<const GLubyte*>(name))); });
@@ -189,10 +181,7 @@ struct GlxHost : OpenGLHost {
         BindForSwap(false);
         Clear();
         BindForSwap(true);
-        if (swapBuffersMsc)
-            swapBuffersMsc(display, drawable, 0, 0, 0);
-        else
-            swapBuffers(display, drawable);
+        swapBuffers(display, drawable);
     }
 
     bool RecreateContext() override {
@@ -239,7 +228,7 @@ struct EglHost : OpenGLHost {
             void* library = dlopen("libEGL.so.1", RTLD_NOW);
             swapBuffers = library ? reinterpret_cast<EGLBoolean (*)(EGLDisplay, EGLSurface)>(dlsym(library, "eglSwapBuffers")) : nullptr;
         }
-        if (options.swapExtension) {
+        if (options.swapWithDamage) {
             const char* extensions = eglQueryString(display, EGL_EXTENSIONS);
             for (const char* name : {"EGL_KHR_swap_buffers_with_damage", "EGL_EXT_swap_buffers_with_damage"}) {
                 if (extensions && strstr(extensions, name)) {
@@ -557,10 +546,10 @@ int main(int argc, char** argv) {
         else if (arg == "--second-window") options.secondWindow = true;
         else if (arg == "--recreate-context") options.recreateContext = true;
         else if (arg == "--bound-framebuffer") options.boundFramebuffer = true;
-        else if (arg == "--swap-extension") options.swapExtension = true;
+        else if (arg == "--swap-with-damage") options.swapWithDamage = true;
     }
     if (options.api != "opengl" && options.api != "vulkan") {
-        printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--transfer-only] [--vulkan-library path] [--menu-key keysym] [--unload-key keysym] [--resize] [--reload] [--second-window] [--recreate-context] [--bound-framebuffer] [--swap-extension]\n");
+        printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--transfer-only] [--vulkan-library path] [--menu-key keysym] [--unload-key keysym] [--resize] [--reload] [--second-window] [--recreate-context] [--bound-framebuffer] [--swap-with-damage]\n");
         return 2;
     }
     setvbuf(stdout, nullptr, _IOLBF, 0);
@@ -585,7 +574,7 @@ int main(int argc, char** argv) {
     };
     std::unique_ptr<Host> host = createHost();
     std::string name = options.api + (options.egl ? " egl" : "") + (options.lookup ? " lookup" : "") + (options.deviceProcAddr ? " device-proc-addr" : "") +
-                       (options.transferOnly ? " transfer-only" : "") + (options.swapExtension ? " swap-extension" : "") + (options.vulkanLibrary.empty() ? "" : " " + options.vulkanLibrary);
+                       (options.transferOnly ? " transfer-only" : "") + (options.swapWithDamage ? " swap-with-damage" : "") + (options.vulkanLibrary.empty() ? "" : " " + options.vulkanLibrary);
 
     Window window = visual ? CreateHostWindow(display, visual) : 0;
     if (!window || !host->Init({display, window}, options))
