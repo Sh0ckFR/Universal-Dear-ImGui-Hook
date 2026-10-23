@@ -56,6 +56,12 @@ std::vector<uint8_t> g_capturePixels;
 uint32_t g_captureWidth = 0;
 uint32_t g_captureHeight = 0;
 
+#ifdef _WIN32
+// Config::remotePipe points here: the caller's string may be gone when
+// StopUntilMenuInput() starts the hook again.
+std::string g_remotePipe;
+#endif
+
 bool g_menuButtonsDown = false;
 bool g_menuKeyDown = false;
 // Cleared by Start() and Stop() to end a wait for the menu input.
@@ -453,6 +459,9 @@ ImDrawData* Frame() {
     if (g_config.render)
         g_config.render();
     t_inRenderCallback = false;
+#ifdef _WIN32
+    remote::Draw();
+#endif
     ImGui::Render();
     return ImGui::GetDrawData();
 }
@@ -503,6 +512,11 @@ void Start(const Config& config) {
         return;
 
     g_config = config;
+#ifdef _WIN32
+    std::string pipe = config.remotePipe ? config.remotePipe : "";
+    g_remotePipe.swap(pipe);
+    g_config.remotePipe = g_remotePipe.c_str();
+#endif
     g_activeBackend = Backend::None;
     g_menuOpen = false;
     g_teardownPending = false;
@@ -510,8 +524,14 @@ void Start(const Config& config) {
     g_target = {};
     g_renderThread = std::thread::id();
     g_state = State::Running;
-    if (!platform::Start())
+    if (!platform::Start()) {
         g_state = State::Stopped;
+        return;
+    }
+#ifdef _WIN32
+    if (g_config.remoteControl)
+        remote::Start(g_config.remotePipe);
+#endif
 }
 
 void Stop() {
@@ -528,6 +548,9 @@ void Stop() {
     }
     // The application gets its input and its cursor back.
     SetMenuOpen(false);
+#ifdef _WIN32
+    remote::Stop();
+#endif
 
     platform::Stop();
 

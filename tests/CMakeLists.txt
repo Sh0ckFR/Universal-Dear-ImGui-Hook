@@ -51,6 +51,7 @@ if(WIN32)
         uih_add_host_test(${api}_fullscreen --api ${api} --fullscreen)
     endforeach()
     uih_add_host_test(remove --api d3d11 --remove)
+    uih_add_host_test(remote --api d3d11 --remote)
     # Recovery from a crash of the overlay needs structured exception handling.
     if(MSVC)
         foreach(api d3d9 d3d10 d3d11 d3d12 vulkan opengl)
