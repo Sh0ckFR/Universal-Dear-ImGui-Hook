@@ -19,13 +19,18 @@
 
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
+#include <thread>
+#include <utility>
 #include <vector>
 
 #include "imgui.h"
@@ -330,6 +335,56 @@ struct D3D11Host : Host {
 
 // D3D12 ------------------------------------------------------------------
 
+// Holds the work submitted to a queue for a while: the queue waits for a
+// fence that a thread signals once the time is up.
+struct GpuGate {
+    ID3D12Fence* fence = nullptr;
+    std::chrono::milliseconds latency;
+    std::mutex mutex;
+    std::condition_variable wake;
+    std::deque<std::pair<UINT64, std::chrono::steady_clock::time_point>> pending;
+    UINT64 value = 0;
+    bool stop = false;
+    std::thread thread;
+
+    GpuGate(ID3D12Device* device, int latencyMs) : latency(latencyMs) {
+        device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence));
+        thread = std::thread([this] { Run(); });
+    }
+
+    void Hold(ID3D12CommandQueue* queue) {
+        std::lock_guard<std::mutex> lock(mutex);
+        queue->Wait(fence, ++value);
+        pending.emplace_back(value, std::chrono::steady_clock::now() + latency);
+        wake.notify_one();
+    }
+
+    void Run() {
+        std::unique_lock<std::mutex> lock(mutex);
+        while (!stop) {
+            if (pending.empty())
+                wake.wait(lock);
+            else if (std::chrono::steady_clock::now() < pending.front().second)
+                wake.wait_until(lock, pending.front().second);
+            else {
+                fence->Signal(pending.front().first);
+                pending.pop_front();
+            }
+        }
+    }
+
+    ~GpuGate() {
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            stop = true;
+        }
+        wake.notify_one();
+        thread.join();
+        fence->Signal(value);
+        fence->Release();
+    }
+};
+
 struct D3D12Host : Host {
     static constexpr UINT kBuffers = 2;
     ID3D12Device* device = nullptr;
@@ -343,6 +398,7 @@ struct D3D12Host : Host {
     ID3D12Fence* fence = nullptr;
     HANDLE fenceEvent = nullptr;
     UINT64 fenceValue = 0;
+    std::shared_ptr<GpuGate> gate;
     // Direct queue of a second device, executing work after the presenting
     // queue every frame, like a video decoder or a tool would.
     ID3D12Device* decoyDevice = nullptr;
@@ -385,15 +441,35 @@ struct D3D12Host : Host {
 
         D3D12_COMMAND_QUEUE_DESC queueDesc{};
         device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&queue));
+        if (options.gpuLatencyMs > 0)
+            gate = std::make_shared<GpuGate>(device, options.gpuLatencyMs);
+        // WARP is the decoy's device, which has to differ from the presenting one.
+        bool decoyReady = !options.decoyQueue || (!options.warp && CreateDecoy(factory));
+        factory->Release();
+        return decoyReady && CreateSwapChain(window, options);
+    }
 
+    // A host presenting on `window` with the device and the queue of this one.
+    std::unique_ptr<Host> ShareDevice(HWND window, const Options& options) override {
+        auto shared = std::make_unique<D3D12Host>();
+        shared->device = device;
+        device->AddRef();
+        shared->queue = queue;
+        queue->AddRef();
+        shared->gate = gate;
+        if (!shared->CreateSwapChain(window, options))
+            return nullptr;
+        return shared;
+    }
+
+    bool CreateSwapChain(HWND window, const Options& options) {
+        // Flip model swap chains cannot use sRGB formats.
+        IDXGIFactory2* factory = nullptr;
+        if (options.format == "srgb" || FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
+            return false;
         DXGI_SWAP_CHAIN_DESC1 desc{};
         desc.Width = kWidth;
         desc.Height = kHeight;
-        // Flip model swap chains cannot use sRGB formats.
-        if (options.format == "srgb") {
-            factory->Release();
-            return false;
-        }
         desc.Format = BackBufferFormat(options);
         desc.SampleDesc.Count = 1;
         desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
@@ -401,11 +477,9 @@ struct D3D12Host : Host {
         desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
         IDXGISwapChain1* swapChain1 = nullptr;
         Settle(options);
-        hr = factory->CreateSwapChainForHwnd(queue, window, &desc, nullptr, nullptr, &swapChain1);
-        // WARP is the decoy's device, which has to differ from the presenting one.
-        bool decoyReady = !options.decoyQueue || (!options.warp && CreateDecoy(factory));
+        HRESULT hr = factory->CreateSwapChainForHwnd(queue, window, &desc, nullptr, nullptr, &swapChain1);
         factory->Release();
-        if (FAILED(hr) || !decoyReady)
+        if (FAILED(hr))
             return false;
         swapChain1->QueryInterface(IID_PPV_ARGS(&swapChain));
         swapChain1->Release();
@@ -434,8 +508,15 @@ struct D3D12Host : Host {
         }
     }
 
+    void WaitForGpu() {
+        if (fence->GetCompletedValue() < fenceValue) {
+            fence->SetEventOnCompletion(fenceValue, fenceEvent);
+            WaitForSingleObject(fenceEvent, INFINITE);
+        }
+    }
+
     bool Resize(int width, int height) override {
-        // Frame() waits for the GPU, so no buffer is in use here.
+        WaitForGpu();
         for (ID3D12Resource*& buffer : buffers)
             Release(buffer);
         if (FAILED(swapChain->ResizeBuffers(kBuffers, width, height, DXGI_FORMAT_UNKNOWN, 0)))
@@ -461,6 +542,9 @@ struct D3D12Host : Host {
     }
 
     void Frame() override {
+        // With a latency, the previous frame may still be in flight.
+        if (gate)
+            WaitForGpu();
         UINT index = swapChain->GetCurrentBackBufferIndex();
         allocator->Reset();
         commandList->Reset(allocator, nullptr);
@@ -477,6 +561,8 @@ struct D3D12Host : Host {
         commandList->ResourceBarrier(1, &barrier);
         commandList->Close();
         ID3D12CommandList* lists[] = {commandList};
+        if (gate)
+            gate->Hold(queue);
         queue->ExecuteCommandLists(1, lists);
         if (decoyQueue) {
             ID3D12CommandList* decoyLists[] = {decoyList};
@@ -484,15 +570,15 @@ struct D3D12Host : Host {
         }
         swapChain->Present(1, 0);
         queue->Signal(fence, ++fenceValue);
-        if (fence->GetCompletedValue() < fenceValue) {
-            fence->SetEventOnCompletion(fenceValue, fenceEvent);
-            WaitForSingleObject(fenceEvent, INFINITE);
-        }
+        if (!gate)
+            WaitForGpu();
     }
 
     int ValidationErrors() const override { return DebugErrors<ID3D12InfoQueue, D3D12_MESSAGE>(device); }
 
     ~D3D12Host() override {
+        if (fence && fenceEvent)
+            WaitForGpu();
         Release(decoyList);
         Release(decoyAllocator);
         Release(decoyQueue);
@@ -1892,6 +1978,7 @@ int main(int argc, char** argv) {
         else if (arg == "--recreate-context") options.recreateContext = true;
         else if (arg == "--switch-api" && i + 1 < argc) options.switchApi = argv[++i];
         else if (arg == "--slow-frame" && i + 1 < argc) options.slowFrameMs = atoi(argv[++i]);
+        else if (arg == "--gpu-latency" && i + 1 < argc) options.gpuLatencyMs = atoi(argv[++i]);
         else if (arg == "--bound-framebuffer") options.boundFramebuffer = true;
         else if (arg == "--warp") options.warp = true;
         else if (arg == "--capture") options.capture = true;
@@ -1906,7 +1993,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception|draw] [--second-window [--shared-device]] [--textures N] [--remove-device] [--transfer-only] [--render-thread] [--resubclass] [--recreate-context] [--switch-api api] [--slow-frame ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception|draw] [--second-window [--shared-device]] [--textures N] [--remove-device] [--transfer-only] [--render-thread] [--resubclass] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 
