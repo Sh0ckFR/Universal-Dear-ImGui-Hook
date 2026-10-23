@@ -2,6 +2,7 @@
 #include "host.h"
 
 #include <EGL/egl.h>
+#include <EGL/eglext.h>
 #include <GL/gl.h>
 #include <GL/glx.h>
 #include <X11/Xatom.h>
@@ -202,6 +203,9 @@ struct EglHost : OpenGLHost {
     EGLSurface surface = EGL_NO_SURFACE;
     EGLContext context = EGL_NO_CONTEXT;
     EGLBoolean (*swapBuffers)(EGLDisplay, EGLSurface) = eglSwapBuffers;
+    EGLBoolean (*swapBuffersWithDamage)(EGLDisplay, EGLSurface, const EGLint*, EGLint) = nullptr;
+    bool bufferAge = false;
+    int frame = 0;
     static constexpr EGLint kContextAttributes[] = {EGL_CONTEXT_MAJOR_VERSION, 3, EGL_CONTEXT_MINOR_VERSION, 3, EGL_NONE};
 
     VisualID ChooseVisual(Display* dpy) override {
@@ -224,6 +228,19 @@ struct EglHost : OpenGLHost {
             void* library = dlopen("libEGL.so.1", RTLD_NOW);
             swapBuffers = library ? reinterpret_cast<EGLBoolean (*)(EGLDisplay, EGLSurface)>(dlsym(library, "eglSwapBuffers")) : nullptr;
         }
+        if (options.swapWithDamage) {
+            const char* extensions = eglQueryString(display, EGL_EXTENSIONS);
+            for (const char* name : {"EGL_KHR_swap_buffers_with_damage", "EGL_EXT_swap_buffers_with_damage"}) {
+                if (extensions && strstr(extensions, name)) {
+                    const char* function = name[4] == 'K' ? "eglSwapBuffersWithDamageKHR" : "eglSwapBuffersWithDamageEXT";
+                    swapBuffersWithDamage = reinterpret_cast<EGLBoolean (*)(EGLDisplay, EGLSurface, const EGLint*, EGLint)>(eglGetProcAddress(function));
+                    break;
+                }
+            }
+            if (!swapBuffersWithDamage)
+                return false;
+            bufferAge = extensions && strstr(extensions, "EGL_EXT_buffer_age");
+        }
         surface = eglCreateWindowSurface(display, config, window.window, nullptr);
         context = eglCreateContext(display, config, EGL_NO_CONTEXT, kContextAttributes);
         if (!swapBuffers || surface == EGL_NO_SURFACE || context == EGL_NO_CONTEXT || !eglMakeCurrent(display, surface, surface, context) ||
@@ -234,10 +251,27 @@ struct EglHost : OpenGLHost {
 
     void Frame() override {
         eglMakeCurrent(display, surface, surface, context);
-        BindForSwap(false);
+        if (!swapBuffersWithDamage) {
+            BindForSwap(false);
+            Clear();
+            BindForSwap(true);
+            swapBuffers(display, surface);
+            return;
+        }
+        // As an application that only redraws and posts what changed: one
+        // pixel in a corner, once the buffer holds the rest of the window.
+        EGLint age = 0;
+        if (bufferAge)
+            eglQuerySurface(display, surface, EGL_BUFFER_AGE_EXT, &age);
+        bool whole = bufferAge ? age == 0 : ++frame <= 10;
+        const EGLint corner[4] = {0, 0, 1, 1};
+        if (!whole) {
+            glEnable(GL_SCISSOR_TEST);
+            glScissor(corner[0], corner[1], corner[2], corner[3]);
+        }
         Clear();
-        BindForSwap(true);
-        swapBuffers(display, surface);
+        glDisable(GL_SCISSOR_TEST);
+        swapBuffersWithDamage(display, surface, corner, whole ? 0 : 1);
     }
 
     bool RecreateContext() override {
@@ -512,9 +546,10 @@ int main(int argc, char** argv) {
         else if (arg == "--second-window") options.secondWindow = true;
         else if (arg == "--recreate-context") options.recreateContext = true;
         else if (arg == "--bound-framebuffer") options.boundFramebuffer = true;
+        else if (arg == "--swap-with-damage") options.swapWithDamage = true;
     }
     if (options.api != "opengl" && options.api != "vulkan") {
-        printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--transfer-only] [--vulkan-library path] [--menu-key keysym] [--unload-key keysym] [--resize] [--reload] [--second-window] [--recreate-context] [--bound-framebuffer]\n");
+        printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--transfer-only] [--vulkan-library path] [--menu-key keysym] [--unload-key keysym] [--resize] [--reload] [--second-window] [--recreate-context] [--bound-framebuffer] [--swap-with-damage]\n");
         return 2;
     }
     setvbuf(stdout, nullptr, _IOLBF, 0);
@@ -539,7 +574,7 @@ int main(int argc, char** argv) {
     };
     std::unique_ptr<Host> host = createHost();
     std::string name = options.api + (options.egl ? " egl" : "") + (options.lookup ? " lookup" : "") + (options.deviceProcAddr ? " device-proc-addr" : "") +
-                       (options.transferOnly ? " transfer-only" : "") + (options.vulkanLibrary.empty() ? "" : " " + options.vulkanLibrary);
+                       (options.transferOnly ? " transfer-only" : "") + (options.swapWithDamage ? " swap-with-damage" : "") + (options.vulkanLibrary.empty() ? "" : " " + options.vulkanLibrary);
 
     Window window = visual ? CreateHostWindow(display, visual) : 0;
     if (!window || !host->Init({display, window}, options))

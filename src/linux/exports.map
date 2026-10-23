@@ -10,6 +10,7 @@
         glXGetProcAddressARB;
 
         eglSwapBuffers;
+        eglQuerySurface;
         eglDestroyContext;
         eglGetProcAddress;
 

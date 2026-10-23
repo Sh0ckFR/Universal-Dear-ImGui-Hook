@@ -15,6 +15,10 @@ constexpr int kEglHeight = 0x3056;
 constexpr int kEglWidth = 0x3057;
 constexpr int kEglDraw = 0x3059;
 constexpr unsigned int kEglOpenGLApi = 0x30A2;
+constexpr int kEglBufferAge = 0x313D;
+// Swaps after the overlay left an EGL surface during which its buffers may
+// still hold the overlay: more than any swap chain has buffers.
+constexpr int kRedrawSwaps = 8;
 
 // Presents to wait before following an application that renders with another context.
 constexpr int kContextSwitchFrames = 60;
@@ -29,6 +33,9 @@ bool g_ready = false;
 
 std::mutex g_mutex;
 std::unordered_map<GlxDrawable, NativeWindow> g_glxWindows;
+// EGL surfaces the overlay was drawn on, with the swaps left before their
+// buffers are free of it.
+std::unordered_map<void*, int> g_redrawSwaps;
 
 template <typename Fn>
 Fn Next(const interpose::Library& library, const char* name) {
@@ -68,7 +75,8 @@ bool Init(NativeWindow window, void* context, GetCurrentContextFn getCurrentCont
     return true;
 }
 
-void Render(GetCurrentContextFn getCurrentContext, NativeWindow window, uint32_t width, uint32_t height) {
+// `drawn` is set when the overlay draws anything.
+void Render(GetCurrentContextFn getCurrentContext, NativeWindow window, uint32_t width, uint32_t height, bool& drawn) {
     void* context = getCurrentContext();
     if (!context || width == 0 || height == 0)
         return;
@@ -85,6 +93,7 @@ void Render(GetCurrentContextFn getCurrentContext, NativeWindow window, uint32_t
     input::SetSurfaceSize(width, height);
     ImGui_ImplOpenGL3_NewFrame();
     ImDrawData* drawData = Frame();
+    drawn = drawData && drawData->TotalVtxCount > 0;
     OverlayGlState state;
     ImGui_ImplOpenGL3_RenderDrawData(drawData);
 }
@@ -109,6 +118,81 @@ NativeWindow WindowOf(GlxDrawable drawable) {
     return it != g_glxWindows.end() ? it->second : static_cast<NativeWindow>(drawable);
 }
 
+// Applications that only redraw and post what changed must not cut the
+// overlay, nor keep it once it is gone: while the overlay is on `surface`,
+// and for kRedrawSwaps swaps after, the surface is posted whole and its
+// buffers are reported without content. True when it is.
+bool RedrawWhole(void* surface, bool drawn) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    auto it = g_redrawSwaps.find(surface);
+    if (drawn) {
+        g_redrawSwaps[surface] = kRedrawSwaps;
+        return true;
+    }
+    if (it == g_redrawSwaps.end())
+        return false;
+    if (--it->second == 0)
+        g_redrawSwaps.erase(it);
+    return true;
+}
+
+bool MustRedraw(void* surface) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    return g_redrawSwaps.count(surface) != 0;
+}
+
+// Draws the overlay on `surface` before it is posted. True when the whole surface must be posted.
+bool BeforeEglSwap(void* display, void* surface) {
+    static const auto getCurrentContext = Next<void* (*)()>(interpose::kEgl, "eglGetCurrentContext");
+    static const auto getCurrentSurface = Next<void* (*)(int)>(interpose::kEgl, "eglGetCurrentSurface");
+    static const auto queryApi = Next<unsigned int (*)()>(interpose::kEgl, "eglQueryAPI");
+    static const auto querySurface = Next<unsigned int (*)(void*, void*, int, int*)>(interpose::kEgl, "eglQuerySurface");
+
+    bool drawn = false;
+    ReleaseAbandoned();
+    // OpenGL ES is not supported.
+    if (ShouldRender(Backend::OpenGL) && getCurrentContext && getCurrentSurface && queryApi && querySurface &&
+        queryApi() == kEglOpenGLApi && getCurrentSurface(kEglDraw) == surface) {
+        int width = 0;
+        int height = 0;
+        querySurface(display, surface, kEglWidth, &width);
+        querySurface(display, surface, kEglHeight, &height);
+        if (width > 0 && height > 0)
+            DrawOverlay(SwapchainKey(surface), 0, [&] { Render(getCurrentContext, 0, static_cast<uint32_t>(width), static_cast<uint32_t>(height), drawn); });
+    }
+    ServiceTeardown(Backend::OpenGL, Teardown);
+    return RedrawWhole(surface, drawn);
+}
+
+// Functions of extensions, which applications look up by name.
+ProcAddress EglExtension(const char* name) {
+    static const auto getProcAddress = Next<ProcAddress (*)(const char*)>(interpose::kEgl, "eglGetProcAddress");
+    return getProcAddress ? getProcAddress(name) : nullptr;
+}
+
+using SwapBuffersWithDamageFn = unsigned int (*)(void*, void*, const int*, int);
+
+unsigned int SwapWithDamage(SwapBuffersWithDamageFn swapBuffers, void* display, void* surface, const int* rects, int count) {
+    if (!swapBuffers)
+        return 0;
+    ScopedCall call;
+    ForeignPresentScope presentScope;
+    // No rectangle: the whole surface.
+    if (BeforeEglSwap(display, surface))
+        count = 0;
+    return swapBuffers(display, surface, rects, count);
+}
+
+unsigned int SwapBuffersWithDamageKHR(void* display, void* surface, const int* rects, int count) {
+    static const auto swapBuffers = reinterpret_cast<SwapBuffersWithDamageFn>(EglExtension("eglSwapBuffersWithDamageKHR"));
+    return SwapWithDamage(swapBuffers, display, surface, rects, count);
+}
+
+unsigned int SwapBuffersWithDamageEXT(void* display, void* surface, const int* rects, int count) {
+    static const auto swapBuffers = reinterpret_cast<SwapBuffersWithDamageFn>(EglExtension("eglSwapBuffersWithDamageEXT"));
+    return SwapWithDamage(swapBuffers, display, surface, rects, count);
+}
+
 } // namespace
 
 UIH_EXPORT void glXSwapBuffers(void* display, GlxDrawable drawable) {
@@ -123,8 +207,9 @@ UIH_EXPORT void glXSwapBuffers(void* display, GlxDrawable drawable) {
         NativeWindow window = WindowOf(drawable);
         uint32_t width = 0;
         uint32_t height = 0;
+        bool drawn = false;
         if (input::WindowSize(window, width, height))
-            DrawOverlay(drawable, window, [&] { Render(getCurrentContext, window, width, height); });
+            DrawOverlay(drawable, window, [&] { Render(getCurrentContext, window, width, height, drawn); });
     }
     ServiceTeardown(Backend::OpenGL, Teardown);
     swapBuffers(display, drawable);
@@ -168,26 +253,18 @@ UIH_EXPORT ProcAddress glXGetProcAddressARB(const unsigned char* name) {
 
 UIH_EXPORT unsigned int eglSwapBuffers(void* display, void* surface) {
     static const auto swapBuffers = Next<unsigned int (*)(void*, void*)>(interpose::kEgl, "eglSwapBuffers");
-    static const auto getCurrentContext = Next<void* (*)()>(interpose::kEgl, "eglGetCurrentContext");
-    static const auto getCurrentSurface = Next<void* (*)(int)>(interpose::kEgl, "eglGetCurrentSurface");
-    static const auto queryApi = Next<unsigned int (*)()>(interpose::kEgl, "eglQueryAPI");
-    static const auto querySurface = Next<unsigned int (*)(void*, void*, int, int*)>(interpose::kEgl, "eglQuerySurface");
-
     ScopedCall call;
     ForeignPresentScope presentScope;
-    ReleaseAbandoned();
-    // OpenGL ES is not supported.
-    if (ShouldRender(Backend::OpenGL) && getCurrentContext && getCurrentSurface && queryApi && querySurface &&
-        queryApi() == kEglOpenGLApi && getCurrentSurface(kEglDraw) == surface) {
-        int width = 0;
-        int height = 0;
-        querySurface(display, surface, kEglWidth, &width);
-        querySurface(display, surface, kEglHeight, &height);
-        if (width > 0 && height > 0)
-            DrawOverlay(SwapchainKey(surface), 0, [&] { Render(getCurrentContext, 0, static_cast<uint32_t>(width), static_cast<uint32_t>(height)); });
-    }
-    ServiceTeardown(Backend::OpenGL, Teardown);
+    BeforeEglSwap(display, surface);
     return swapBuffers(display, surface);
+}
+
+UIH_EXPORT unsigned int eglQuerySurface(void* display, void* surface, int attribute, int* value) {
+    static const auto querySurface = Next<unsigned int (*)(void*, void*, int, int*)>(interpose::kEgl, "eglQuerySurface");
+    unsigned int result = querySurface(display, surface, attribute, value);
+    if (result && value && attribute == kEglBufferAge && MustRedraw(surface))
+        *value = 0;
+    return result;
 }
 
 UIH_EXPORT unsigned int eglDestroyContext(void* display, void* context) {
@@ -218,8 +295,12 @@ const interpose::Function kGlxExports[] = {
 };
 const interpose::Function kEglExports[] = {
     UIH_GL_EXPORT(eglSwapBuffers),
+    UIH_GL_EXPORT(eglQuerySurface),
     UIH_GL_EXPORT(eglDestroyContext),
     UIH_GL_EXPORT(eglGetProcAddress),
+    // Not exported: only found through eglGetProcAddress().
+    {"eglSwapBuffersWithDamageKHR", reinterpret_cast<void*>(&SwapBuffersWithDamageKHR)},
+    {"eglSwapBuffersWithDamageEXT", reinterpret_cast<void*>(&SwapBuffersWithDamageEXT)},
 };
 #undef UIH_GL_EXPORT
 
