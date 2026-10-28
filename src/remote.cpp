@@ -78,6 +78,9 @@ std::string Screenshot(uint32_t maxSide, std::vector<uint8_t>& payload) {
 std::string Text(const std::string& rest) {
     char* end = nullptr;
     double seconds = strtod(rest.c_str(), &end);
+    // NaN would turn into an undefined duration.
+    if (!(seconds > 0.0))
+        seconds = 0.0;
     std::string text = *end == ' ' ? end + 1 : "";
     for (size_t at = text.find("\\n"); at != std::string::npos; at = text.find("\\n", at + 1))
         text.replace(at, 2, "\n");
