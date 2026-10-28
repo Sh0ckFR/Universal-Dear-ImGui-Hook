@@ -10,8 +10,11 @@
 #include <X11/extensions/XTest.h>
 #include <X11/keysym.h>
 #include <dlfcn.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -527,6 +530,174 @@ int RunSecondWindow(Display* display, Window window, Host& host, Window second, 
     return 0;
 }
 
+// Socket of tests/remote_preload.cpp, named as src/linux/remote.cpp does.
+std::string RemoteSocketPath() {
+    std::string name = "uih-host-" + std::to_string(getpid());
+    const char* runtime = getenv("XDG_RUNTIME_DIR");
+    return runtime && *runtime ? std::string(runtime) + "/" + name : "/tmp/" + name + "-" + std::to_string(getuid());
+}
+
+// A client of the remote control, as remote/uih_mcp.py is.
+class RemoteClient {
+public:
+    ~RemoteClient() {
+        if (socket_ >= 0)
+            close(socket_);
+    }
+
+    // Waits for the socket, opened at the first frame of the overlay.
+    bool Open() {
+        sockaddr_un address{};
+        address.sun_family = AF_UNIX;
+        std::string path = RemoteSocketPath();
+        memcpy(address.sun_path, path.c_str(), path.size() + 1);
+        for (int attempt = 0; attempt < 200; ++attempt) {
+            socket_ = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+            if (connect(socket_, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) == 0)
+                return true;
+            close(socket_);
+            socket_ = -1;
+            usleep(50000);
+        }
+        return false;
+    }
+
+    // Sends one command and returns the line that answers it.
+    std::string Request(const std::string& command) {
+        std::string line = command + "\n";
+        if (send(socket_, line.data(), line.size(), MSG_NOSIGNAL) != static_cast<ssize_t>(line.size()))
+            return "";
+        std::string answer;
+        char c = 0;
+        while (recv(socket_, &c, 1, 0) == 1 && c != '\n')
+            answer += c;
+        return answer;
+    }
+
+    bool Read(uint8_t* data, size_t size) {
+        while (size > 0) {
+            ssize_t received = recv(socket_, data, size, 0);
+            if (received <= 0)
+                return false;
+            data += received;
+            size -= static_cast<size_t>(received);
+        }
+        return true;
+    }
+
+private:
+    int socket_ = -1;
+};
+
+// Runs `work` on another thread while `frame` renders.
+template <typename Work, typename Frame>
+void WhileRendering(Work&& work, Frame&& frame) {
+    std::atomic<bool> finished{false};
+    std::thread thread([&] {
+        work();
+        finished = true;
+    });
+    while (!finished)
+        frame();
+    thread.join();
+}
+
+// The commands of remote/uih_mcp.py: the screenshot shows the game without
+// the message of the assistant, which the overlay draws, and the keys reach
+// the window through XTEST when it has the focus, as events otherwise.
+int RunRemote(Display* display, Window window, Host& host, const std::string& name) {
+    int presses = 0;
+    int releases = 0;
+    XSelectInput(display, window, StructureNotifyMask | KeyPressMask | KeyReleaseMask);
+    auto frame = [&] {
+        while (XPending(display)) {
+            XEvent event;
+            XNextEvent(display, &event);
+            if ((event.type == KeyPress || event.type == KeyRelease) && XLookupKeysym(&event.xkey, 0) == XK_u)
+                ++(event.type == KeyPress ? presses : releases);
+        }
+        host.Frame();
+        usleep(5000);
+    };
+    for (int i = 0; i < 30; ++i)
+        frame();
+    int before = CountOverlayPixels(display, window);
+
+    std::string info;
+    std::string text;
+    std::string screenshot;
+    std::string unknownKey;
+    std::vector<uint8_t> rgb;
+    WhileRendering(
+        [&] {
+            RemoteClient client;
+            if (!client.Open())
+                return;
+            info = client.Request("info");
+            text = client.Request("text 5 hello\\nworld");
+            screenshot = client.Request("screenshot 400");
+            if (screenshot == "ok 400 300") {
+                rgb.resize(400 * 300 * 3);
+                if (!client.Read(rgb.data(), rgb.size()))
+                    rgb.clear();
+            }
+            unknownKey = client.Request("key nokey 50");
+        },
+        frame);
+    for (int i = 0; i < 10; ++i)
+        frame();
+    int after = CountOverlayPixels(display, window);
+    printf("info: %s\ntext: %s\nscreenshot: %s\nunknown key: %s\noverlay pixels: %d without the message, %d with it\n", info.c_str(), text.c_str(),
+           screenshot.c_str(), unknownKey.c_str(), before, after);
+    if (info.rfind("ok ", 0) != 0 || info.find(" 800x600 focused=1 menu=0") == std::string::npos)
+        return Fail("the remote control does not describe the game");
+    if (rgb.empty())
+        return Fail("the remote control did not send the screenshot");
+    for (size_t i = 0; i < rgb.size(); ++i)
+        if (abs(rgb[i] - static_cast<int>(kClear[i % 3] * 255.0f + 0.5f)) > 3)
+            return Fail("the screenshot does not show the frame of the game alone");
+    if (text != "ok" || unknownKey.rfind("error unknown key nokey", 0) != 0)
+        return Fail("the remote control does not answer its commands");
+    if (after < before + 1000)
+        return Fail("the message of the assistant is not drawn");
+
+    std::string focusedKey;
+    WhileRendering(
+        [&] {
+            RemoteClient client;
+            if (client.Open())
+                focusedKey = client.Request("key u 100");
+        },
+        frame);
+    for (int i = 0; i < 10; ++i)
+        frame();
+    int focusedPresses = presses;
+    int focusedReleases = releases;
+    XSetInputFocus(display, None, RevertToNone, CurrentTime);
+    XSync(display, False);
+    std::string unfocusedKey;
+    WhileRendering(
+        [&] {
+            RemoteClient client;
+            if (client.Open())
+                unfocusedKey = client.Request("key u 100");
+        },
+        frame);
+    for (int i = 0; i < 10; ++i)
+        frame();
+    XSetInputFocus(display, window, RevertToParent, CurrentTime);
+    XSync(display, False);
+    unlink(RemoteSocketPath().c_str());
+    printf("focused: %s, %d down, %d up\nwithout the focus: %s, %d down, %d up\n", focusedKey.c_str(), focusedPresses, focusedReleases,
+           unfocusedKey.c_str(), presses - focusedPresses, releases - focusedReleases);
+    if (focusedKey.rfind("ok sent as keyboard input", 0) != 0 || focusedPresses == 0 || focusedReleases == 0)
+        return Fail("the keys of the remote control did not reach the focused window");
+    if (unfocusedKey.rfind("ok sent as window events", 0) != 0 || presses == focusedPresses || releases == focusedReleases)
+        return Fail("the keys of the remote control did not reach the window without the focus");
+    printf("PASS: %s remote control\n", name.c_str());
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -547,9 +718,10 @@ int main(int argc, char** argv) {
         else if (arg == "--recreate-context") options.recreateContext = true;
         else if (arg == "--bound-framebuffer") options.boundFramebuffer = true;
         else if (arg == "--swap-with-damage") options.swapWithDamage = true;
+        else if (arg == "--remote") options.remote = true;
     }
     if (options.api != "opengl" && options.api != "vulkan") {
-        printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--transfer-only] [--vulkan-library path] [--menu-key keysym] [--unload-key keysym] [--resize] [--reload] [--second-window] [--recreate-context] [--bound-framebuffer] [--swap-with-damage]\n");
+        printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--transfer-only] [--vulkan-library path] [--menu-key keysym] [--unload-key keysym] [--resize] [--reload] [--second-window] [--recreate-context] [--bound-framebuffer] [--swap-with-damage] [--remote]\n");
         return 2;
     }
     setvbuf(stdout, nullptr, _IOLBF, 0);
@@ -586,5 +758,7 @@ int main(int argc, char** argv) {
             return Fail("the second window could not render");
         return RunSecondWindow(display, window, *host, second, *secondHost, name);
     }
+    if (options.remote)
+        return RunRemote(display, window, *host, name);
     return Run(display, window, *host, name, options);
 }

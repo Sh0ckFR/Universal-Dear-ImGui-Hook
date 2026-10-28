@@ -6,7 +6,7 @@
 namespace uih::detail {
 namespace {
 
-NativeWindow g_window = 0;
+std::atomic<NativeWindow> g_window{0};
 std::atomic<bool> g_unloadRequested{false};
 
 } // namespace
@@ -24,6 +24,8 @@ bool BindWindow(NativeWindow window) {
     Log("Bound to window 0x%x", window);
     return true;
 }
+
+NativeWindow BoundWindow() { return g_window; }
 
 void UnbindWindow() {
     if (!ImGui::GetCurrentContext())
@@ -51,7 +53,10 @@ void Stop() {
     }
 }
 
-void NewFrame() { input::NewFrame(); }
+void NewFrame() {
+    input::NewFrame();
+    remote::Listen();
+}
 
 bool IsKeyDown(int key) { return input::IsKeyDown(key); }
 

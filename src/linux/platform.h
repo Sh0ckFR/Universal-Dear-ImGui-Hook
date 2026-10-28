@@ -6,6 +6,13 @@
 namespace uih::detail {
 
 void TeardownVulkan();
+// X11 window the overlay draws on, 0 before its first frame.
+NativeWindow BoundWindow();
+
+namespace remote {
+// Opens the socket of the remote control once this process draws the overlay.
+void Listen();
+} // namespace remote
 
 namespace input {
 void SetSurfaceSize(uint32_t width, uint32_t height);

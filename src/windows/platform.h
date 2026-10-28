@@ -64,16 +64,6 @@ extern const DxgiPresenter kD3D10Presenter;
 extern const DxgiPresenter kD3D11Presenter;
 extern const DxgiPresenter kD3D12Presenter;
 
-// Remote control for Config::remoteControl, in remote.cpp.
-namespace remote {
-// Serves the pipe named `pipe` on a thread of its own.
-void Start(const char* pipe);
-// Ends the connection and the command in progress, and waits for the thread.
-void Stop();
-// The last message of the assistant, drawn in the frame of the overlay.
-void Draw();
-} // namespace remote
-
 // Drops the references the D3D12 hooks keep to queues of removed devices.
 void ReleaseRemovedQueues();
 

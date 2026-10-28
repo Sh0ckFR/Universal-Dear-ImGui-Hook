@@ -69,14 +69,14 @@ struct Config {
     // Size of the interface, 1.5 for 150%. 0 follows the DPI of the target window.
     float scale = 0.0f;
     bool debugLog = false;
-#ifdef _WIN32
     // Remote control by an AI assistant through remote/uih_mcp.py: screenshots,
     // messages over the game and key presses, served to local processes on the
-    // named pipe \\.\pipe\<remotePipe>. Any program the user runs can then
-    // see the game and press its keys. Start() copies the name.
+    // named pipe \\.\pipe\<remotePipe> on Windows, and to the processes of the
+    // user on the Unix socket $XDG_RUNTIME_DIR/<remotePipe> on Linux. Any
+    // program the user runs can then see the game and press its keys. Start()
+    // copies the name.
     bool remoteControl = false;
     const char* remotePipe = "universal-imgui-hook";
-#endif
     // Called every frame between ImGui::NewFrame() and ImGui::Render().
     void (*render)() = nullptr;
     // Called when the ImGui context is created, before its first frame: load

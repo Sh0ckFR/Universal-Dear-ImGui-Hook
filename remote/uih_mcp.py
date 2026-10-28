@@ -1,18 +1,21 @@
 """MCP server that lets an AI assistant, such as Claude Code, see and play a game.
 
-The game runs the DLL with config.remoteControl set in example/config.cpp,
-which serves the commands of src/windows/remote.cpp on a local named pipe.
-This script speaks MCP on stdin/stdout and forwards each tool call to that
-pipe. Windows, Python 3.8+, standard library only.
+The game runs the library with config.remoteControl set in example/config.cpp,
+which serves the commands of src/remote.cpp on a local named pipe on Windows,
+and on a Unix socket in $XDG_RUNTIME_DIR on Linux. This script speaks MCP on
+stdin/stdout and forwards each tool call there. Python 3.8+, standard library
+only.
 
     python uih_mcp.py [--pipe NAME]         MCP server, started by the assistant
-    python uih_mcp.py inject <exe|pid> DLL  loads the DLL into a running game
+    python uih_mcp.py inject <exe|pid> DLL  loads the DLL into a running game (Windows)
 
 NAME is config.remotePipe, universal-imgui-hook by default.
 """
 import base64
 import ctypes
 import json
+import os
+import socket
 import struct
 import subprocess
 import sys
@@ -77,13 +80,28 @@ class GameError(Exception):
     pass
 
 
-def request(line, payload=None):
-    """Sends one command to the game; returns its answer, and the bytes that follow when `payload` gives their count."""
+def connect():
+    """Opens the pipe or the socket the game serves, as a binary file."""
+    if sys.platform != "win32":
+        # As src/linux/remote.cpp names it.
+        runtime = os.environ.get("XDG_RUNTIME_DIR")
+        path = os.path.join(runtime, PIPE_NAME) if runtime else f"/tmp/{PIPE_NAME}-{os.getuid()}"
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            client.connect(path)
+        except (FileNotFoundError, ConnectionRefusedError):
+            client.close()
+            raise GameError(f"No game is under remote control on {path}: start the game with LD_PRELOAD set to the library "
+                            "built with config.remoteControl = true in example/config.cpp. The socket opens with the first "
+                            "frame of the overlay. The unload key stops the remote control: press the menu key in the game "
+                            "to bring it back.")
+        pipe = client.makefile("rwb", buffering=0)
+        client.close()  # The file keeps the connection.
+        return pipe
     path = "\\\\.\\pipe\\" + PIPE_NAME
     for attempt in range(20):
         try:
-            pipe = open(path, "r+b", buffering=0)
-            break
+            return open(path, "r+b", buffering=0)
         except FileNotFoundError:
             raise GameError(f"No game is under remote control on {path}: start the game, then load the DLL built with "
                             "config.remoteControl = true in example/config.cpp (python uih_mcp.py inject <game.exe> <dll>). "
@@ -92,9 +110,12 @@ def request(line, payload=None):
         except OSError:
             # The previous client is still disconnecting.
             time.sleep(0.1)
-    else:
-        raise GameError("The game does not accept the connection.")
-    with pipe:
+    raise GameError("The game does not accept the connection.")
+
+
+def request(line, payload=None):
+    """Sends one command to the game; returns its answer, and the bytes that follow when `payload` gives their count."""
+    with connect() as pipe:
         pipe.write(line.encode("utf-8") + b"\n")
         answer = bytearray()
         while not answer.endswith(b"\n"):
@@ -250,10 +271,12 @@ def inject(target, dll):
 
 if __name__ == "__main__":
     if len(sys.argv) == 4 and sys.argv[1] == "inject":
+        if sys.platform != "win32":
+            sys.exit("On Linux, start the game with LD_PRELOAD=/path/to/Universal-ImGui-Hook.so instead")
         inject(sys.argv[2], sys.argv[3])
     elif len(sys.argv) == 1:
         serve()
-    elif len(sys.argv) == 3 and sys.argv[1] == "--pipe" and sys.argv[2] and "\\" not in sys.argv[2]:
+    elif len(sys.argv) == 3 and sys.argv[1] == "--pipe" and sys.argv[2] and not any(c in sys.argv[2] for c in "\\/"):
         PIPE_NAME = sys.argv[2]
         serve()
     else:
