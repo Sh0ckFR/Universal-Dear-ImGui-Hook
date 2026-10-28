@@ -58,8 +58,10 @@ uint32_t g_captureWidth = 0;
 uint32_t g_captureHeight = 0;
 
 // Config::remotePipe points here: the caller's string may be gone when
-// StopUntilMenuInput() starts the hook again.
-std::string g_remotePipe;
+// StopUntilMenuInput() starts the hook again. An array, not a string: Start()
+// may run from a library constructor, before the dynamic initialization of
+// this file. Longer names are refused by the remote control anyway.
+char g_remotePipe[256] = {};
 
 bool g_menuButtonsDown = false;
 bool g_menuKeyDown = false;
@@ -509,9 +511,11 @@ void Start(const Config& config) {
         return;
 
     g_config = config;
-    std::string pipe = config.remotePipe ? config.remotePipe : "";
-    g_remotePipe.swap(pipe);
-    g_config.remotePipe = g_remotePipe.c_str();
+    // `config` may be g_config itself.
+    char pipe[sizeof(g_remotePipe)] = {};
+    snprintf(pipe, sizeof(pipe), "%s", config.remotePipe ? config.remotePipe : "");
+    memcpy(g_remotePipe, pipe, sizeof(pipe));
+    g_config.remotePipe = g_remotePipe;
     g_activeBackend = Backend::None;
     g_menuOpen = false;
     g_teardownPending = false;

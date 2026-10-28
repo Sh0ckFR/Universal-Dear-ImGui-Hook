@@ -16,6 +16,7 @@
 
 #include <cctype>
 #include <cerrno>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -40,7 +41,9 @@ using Reply = std::unique_ptr<T, FreeDeleter>;
 // Listen() on the rendering thread.
 std::mutex g_lifecycle;
 std::atomic<bool> g_wanted{false};
-std::string g_path;
+// An array, not a string: Start() may run from a constructor of the library
+// that preloads it, before the dynamic initialization of this file.
+char g_path[sizeof(sockaddr_un::sun_path)] = {};
 int g_listener = -1;
 // Readable once Stop() was called: every wait of the server thread ends on it.
 int g_stopEvent = -1;
@@ -117,6 +120,9 @@ xcb_window_t g_root = XCB_NONE;
 uint8_t g_minKeycode = 0;
 uint8_t g_keysymsPerKeycode = 0;
 std::vector<xcb_keysym_t> g_keysyms;
+xcb_atom_t g_pidAtom = XCB_NONE;
+// Window of this process found by ProcessWindow().
+xcb_window_t g_processWindow = XCB_NONE;
 // xcb_test_fake_input from libxcb-xtest, when the server has XTEST.
 FakeInputFn g_fakeInput = nullptr;
 
@@ -125,6 +131,7 @@ void DisconnectX() {
         xcb_disconnect(g_x);
     g_x = nullptr;
     g_keysyms.clear();
+    g_processWindow = XCB_NONE;
 }
 
 bool ConnectX() {
@@ -152,6 +159,10 @@ bool ConnectX() {
         g_minKeycode = setup->min_keycode;
         g_keysymsPerKeycode = mapping->keysyms_per_keycode;
     }
+
+    static const char kPid[] = "_NET_WM_PID";
+    Reply<xcb_intern_atom_reply_t> atom(xcb_intern_atom_reply(connection, xcb_intern_atom(connection, 0, sizeof(kPid) - 1, kPid), nullptr));
+    g_pidAtom = atom ? atom->atom : XCB_NONE;
 
     static const char kXTest[] = "XTEST";
     Reply<xcb_query_extension_reply_t> xtest(
@@ -185,17 +196,63 @@ bool Encloses(xcb_window_t outer, xcb_window_t inner) {
     return false;
 }
 
-// The X11 window the overlay draws on, with its size.
+bool Viewable(xcb_window_t window) {
+    Reply<xcb_get_window_attributes_reply_t> attributes(xcb_get_window_attributes_reply(g_x, xcb_get_window_attributes(g_x, window), nullptr));
+    return attributes && attributes->map_state == XCB_MAP_STATE_VIEWABLE;
+}
+
+// The first viewable window of this process with _NET_WM_PID, up to three
+// levels under the root, as under the frames of a window manager.
+xcb_window_t ProcessWindow() {
+    if (g_processWindow != XCB_NONE && Viewable(g_processWindow))
+        return g_processWindow;
+    g_processWindow = XCB_NONE;
+    std::vector<xcb_window_t> level{g_root};
+    for (int depth = 0; depth < 3 && g_pidAtom != XCB_NONE && !level.empty(); ++depth) {
+        std::vector<xcb_window_t> children;
+        for (xcb_window_t parent : level) {
+            Reply<xcb_query_tree_reply_t> tree(xcb_query_tree_reply(g_x, xcb_query_tree(g_x, parent), nullptr));
+            if (tree)
+                children.insert(children.end(), xcb_query_tree_children(tree.get()),
+                                xcb_query_tree_children(tree.get()) + xcb_query_tree_children_length(tree.get()));
+        }
+        // One round trip for the properties of the whole level.
+        std::vector<xcb_get_property_cookie_t> cookies;
+        for (xcb_window_t window : children)
+            cookies.push_back(xcb_get_property(g_x, 0, window, g_pidAtom, XCB_ATOM_CARDINAL, 0, 1));
+        for (size_t i = 0; i < children.size(); ++i) {
+            Reply<xcb_get_property_reply_t> property(xcb_get_property_reply(g_x, cookies[i], nullptr));
+            uint32_t pid = 0;
+            if (g_processWindow == XCB_NONE && property && property->format == 32 && xcb_get_property_value_length(property.get()) == sizeof(pid)) {
+                memcpy(&pid, xcb_get_property_value(property.get()), sizeof(pid));
+                if (pid == static_cast<uint32_t>(getpid()) && Viewable(children[i]))
+                    g_processWindow = children[i];
+            }
+        }
+        if (g_processWindow != XCB_NONE)
+            return g_processWindow;
+        level.swap(children);
+    }
+    return XCB_NONE;
+}
+
+// The X11 window the overlay draws on, with its size. The overlay does not
+// know the window of an EGL surface: the window of this process then.
 bool FindWindow(xcb_window_t& window, uint32_t& width, uint32_t& height) {
-    window = BoundWindow();
-    if (window == XCB_NONE || !ConnectX())
+    if (!ConnectX())
         return false;
-    Reply<xcb_get_geometry_reply_t> geometry(xcb_get_geometry_reply(g_x, xcb_get_geometry(g_x, window), nullptr));
-    if (!geometry)
-        return false;
-    width = geometry->width;
-    height = geometry->height;
-    return true;
+    for (xcb_window_t candidate : {static_cast<xcb_window_t>(BoundWindow()), ProcessWindow()}) {
+        if (candidate == XCB_NONE)
+            continue;
+        Reply<xcb_get_geometry_reply_t> geometry(xcb_get_geometry_reply(g_x, xcb_get_geometry(g_x, candidate), nullptr));
+        if (!geometry)
+            continue;
+        window = candidate;
+        width = geometry->width;
+        height = geometry->height;
+        return true;
+    }
+    return false;
 }
 
 // Keys typed now reach `window`: it has the focus, or without a window
@@ -347,11 +404,12 @@ void Start(const char* name) {
     std::lock_guard<std::mutex> lock(g_lifecycle);
     if (g_wanted || g_thread.joinable())
         return;
-    std::string file = name ? name : "";
+    const char* file = name ? name : "";
     const char* runtime = getenv("XDG_RUNTIME_DIR");
-    sockaddr_un address{};
-    g_path = runtime && *runtime ? std::string(runtime) + "/" + file : "/tmp/" + file + "-" + std::to_string(getuid());
-    if (file.empty() || file.find('/') != std::string::npos || g_path.size() >= sizeof(address.sun_path)) {
+    int length = runtime && *runtime ? snprintf(g_path, sizeof(g_path), "%s/%s", runtime, file)
+                                     : snprintf(g_path, sizeof(g_path), "/tmp/%s-%u", file, static_cast<unsigned>(getuid()));
+    if (!*file || strchr(file, '/') || length < 0 || static_cast<size_t>(length) >= sizeof(g_path)) {
+        g_path[0] = '\0';
         Log("Remote control off: the socket name must be short and without slashes");
         return;
     }
@@ -367,17 +425,17 @@ void Listen() {
     g_wanted = false;
     sockaddr_un address{};
     address.sun_family = AF_UNIX;
-    memcpy(address.sun_path, g_path.c_str(), g_path.size() + 1);
+    memcpy(address.sun_path, g_path, sizeof(g_path));
     if (Served(address)) {
-        Log("Remote control unavailable: another process serves %s", g_path.c_str());
+        Log("Remote control unavailable: another process serves %s", g_path);
         return;
     }
     // Left by a game that ended without Stop().
-    unlink(g_path.c_str());
+    unlink(g_path);
     g_listener = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-    if (g_listener < 0 || bind(g_listener, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) != 0 || chmod(g_path.c_str(), 0600) != 0 ||
+    if (g_listener < 0 || bind(g_listener, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) != 0 || chmod(g_path, 0600) != 0 ||
         listen(g_listener, 1) != 0) {
-        Log("Remote control unavailable: socket %s cannot be created (%s)", g_path.c_str(), strerror(errno));
+        Log("Remote control unavailable: socket %s cannot be created (%s)", g_path, strerror(errno));
         if (g_listener >= 0)
             close(g_listener);
         g_listener = -1;
@@ -395,11 +453,11 @@ void Listen() {
     if (!g_thread.joinable()) {
         Log("Remote control off: its thread cannot start");
         close(g_listener);
-        unlink(g_path.c_str());
+        unlink(g_path);
         g_listener = -1;
         return;
     }
-    Log("Remote control on %s", g_path.c_str());
+    Log("Remote control on %s", g_path);
 }
 
 void Stop() {
@@ -413,7 +471,7 @@ void Stop() {
     g_thread.join();
     close(g_listener);
     close(g_stopEvent);
-    unlink(g_path.c_str());
+    unlink(g_path);
     g_listener = -1;
     g_stopEvent = -1;
     ClearText();

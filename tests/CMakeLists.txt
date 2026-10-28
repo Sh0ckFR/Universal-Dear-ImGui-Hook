@@ -111,7 +111,7 @@ else()
     add_executable(uih_host host_linux.cpp host_vulkan.cpp)
     target_include_directories(uih_host PRIVATE ${UIH_THIRD_PARTY}/vulkan/include)
     target_compile_definitions(uih_host PRIVATE VK_NO_PROTOTYPES)
-    target_link_libraries(uih_host PRIVATE PkgConfig::UIH_HOST ${CMAKE_DL_LIBS})
+    target_link_libraries(uih_host PRIVATE PkgConfig::UIH_HOST Threads::Threads ${CMAKE_DL_LIBS})
 
     if(TARGET uih_example)
         set(UIH_PRELOAD $<TARGET_FILE:uih_example>)
