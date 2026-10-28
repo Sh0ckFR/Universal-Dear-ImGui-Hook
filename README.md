@@ -1,6 +1,6 @@
 # Universal-Dear-ImGui-Hook
 
-A [Dear ImGui](https://github.com/ocornut/imgui) overlay that draws your interface inside another application, whatever graphics API it uses, and lets an AI assistant such as Claude Code see and play the game through [MCP over a local named pipe](#remote-control-by-an-ai-assistant) (Windows). The API is detected at runtime: build once, inject anywhere.
+A [Dear ImGui](https://github.com/ocornut/imgui) overlay that draws your interface inside another application, whatever graphics API it uses, and lets an AI assistant such as Claude Code see and play the game through [MCP over a local named pipe or Unix socket](#remote-control-by-an-ai-assistant). The API is detected at runtime: build once, inject anywhere.
 
 | API | Windows (x86, x64) | Linux (x86-64, ARM64) |
 | --- | --- | --- |
@@ -32,7 +32,7 @@ Sections marked with ▶ unfold on click.
 ## Features
 
 - **One library for every API**: the backend is picked from the first API that presents a frame. Inject before or after the game initializes its graphics.
-- **Remote control by an AI assistant** (Windows): through [MCP](#remote-control-by-an-ai-assistant) and a local named pipe, an assistant such as Claude Code sees the game, writes to the player over it and presses its keys.
+- **Remote control by an AI assistant**: through [MCP](#remote-control-by-an-ai-assistant) and a local named pipe (Windows) or Unix socket (Linux), an assistant such as Claude Code sees the game, writes to the player over it and presses its keys.
 - **Menu input**: `INSERT`, or L3 + R3 on a controller, opens the menu; `F11` removes the overlay and unloads the DLL. The keys are [settings](#settings) in `example/config.cpp`. While the menu is open the game sees no keyboard, mouse or controller input (Windows), and an XInput controller navigates the menu.
 - **No crash from the overlay** (Windows, MSVC builds): an exception in the overlay, from a renderer backend or the menu code, removes it instead of taking the game down; the menu key brings it back.
 - **Images and frame capture**: `uih::CreateTexture()` turns RGBA pixels into an image for `ImGui::Image()`, and `uih::CaptureFrame()` copies what the game draws, without the overlay, on every backend.
@@ -65,7 +65,7 @@ LD_PRELOAD=$PWD/build/linux/Universal-ImGui-Hook.so ./game
 | --- | --- |
 | The menu | `example/menu.cpp`, plain Dear ImGui code run every frame |
 | Hotkeys, controller buttons, graphics API, interface scale | `example/config.cpp` |
-| Remote control by an AI assistant, its pipe name | `example/config.cpp`, see [Remote control by an AI assistant](#remote-control-by-an-ai-assistant) |
+| Remote control by an AI assistant, its pipe or socket name | `example/config.cpp`, see [Remote control by an AI assistant](#remote-control-by-an-ai-assistant) |
 | Fonts and style | a `config.setup` callback, run when the ImGui context is created, set next to `config.render` in `example/dllmain.cpp` (Windows) or `example/preload.cpp` (Linux) |
 
 ## Usage
@@ -98,7 +98,7 @@ void ApplySettings(uih::Config& config) {
     config.backend = uih::Backend::None;                     // graphics API to hook, None detects it
     config.scale = 0.0f;                                     // interface size, 0 follows the DPI
     config.remoteControl = false;                            // remote control by an AI assistant
-    config.remotePipe = "universal-imgui-hook";              // its pipe: \\.\pipe\universal-imgui-hook
+    config.remotePipe = "universal-imgui-hook";              // name of its pipe (Windows) or socket (Linux)
 }
 ```
 
@@ -111,7 +111,7 @@ void ApplySettings(uih::Config& config) {
 | `menuButtons` | `uih::GamepadA`, `B`, `X`, `Y`, `L1`, `R1`, `L3`, `R3`, `Start`, `Back`, `DpadUp`, `DpadDown`, `DpadLeft`, `DpadRight`, combined with `\|`; first XInput controller, Windows only. |
 | `backend` | `uih::Backend::None` detects the API from the first one that presents a frame, which is right for nearly every game. `D3D9`, `D3D10`, `D3D11`, `D3D12`, `Vulkan` or `OpenGL` forces one, for a game that uses several. |
 | `scale` | `0` follows the DPI of the game window; `1.5` draws the interface at 150%. |
-| `remoteControl`, `remotePipe` | `true` serves the [remote control](#remote-control-by-an-ai-assistant) on the named pipe `\\.\pipe\<remotePipe>`; Windows only. |
+| `remoteControl`, `remotePipe` | `true` serves the [remote control](#remote-control-by-an-ai-assistant) on the named pipe `\\.\pipe\<remotePipe>` on Windows, on the Unix socket `$XDG_RUNTIME_DIR/<remotePipe>` on Linux. |
 
 </details>
 
@@ -152,19 +152,19 @@ target_link_libraries(my_overlay PRIVATE uih::uih)
 
 ## Remote control by an AI assistant
 
-The DLL can let an AI assistant, such as [Claude Code](https://claude.com/claude-code), see the game, write to the player over it and press its keys, through the [Model Context Protocol](https://modelcontextprotocol.io) (MCP) and a local named pipe. Windows games, every graphics API.
+The library can let an AI assistant, such as [Claude Code](https://claude.com/claude-code), see the game, write to the player over it and press its keys, through the [Model Context Protocol](https://modelcontextprotocol.io) (MCP) and a local named pipe on Windows, or a Unix socket on Linux. Every graphics API; on Linux, X11 and XWayland games.
 
 ```mermaid
 flowchart LR
     A["Assistant, such as Claude Code"] -- "MCP on stdin and stdout" --> B["remote/uih_mcp.py"]
-    B -- "local named pipe" --> C["The DLL in the game"]
+    B -- "local named pipe or Unix socket" --> C["The library in the game"]
 ```
 
-**1. Turn it on** in `example/config.cpp`, then build the DLL:
+**1. Turn it on** in `example/config.cpp`, then build the DLL or the `.so`:
 
 ```cpp
 config.remoteControl = true;
-config.remotePipe = "universal-imgui-hook";   // the pipe \\.\pipe\universal-imgui-hook
+config.remotePipe = "universal-imgui-hook";   // \\.\pipe\universal-imgui-hook, or $XDG_RUNTIME_DIR/universal-imgui-hook on Linux
 ```
 
 **2. Load it into the game**, with any injector, as `dinput8.dll`, or with the script, which needs [Python](https://www.python.org) 3.8 or newer and nothing else:
@@ -173,13 +173,15 @@ config.remotePipe = "universal-imgui-hook";   // the pipe \\.\pipe\universal-img
 python remote/uih_mcp.py inject game.exe build/vs/x64/Release/Universal-ImGui-Hook.dll
 ```
 
+On Linux, preload it: `LD_PRELOAD=/path/to/Universal-ImGui-Hook.so ./game`. The socket opens with the first frame of the overlay, in the process that draws it, not in the launch scripts that preload the library too.
+
 **3. Give the assistant the MCP server**, once. With Claude Code:
 
 ```sh
 claude mcp add game -- python C:/path/to/Universal-Dear-ImGui-Hook/remote/uih_mcp.py
 ```
 
-With another `remotePipe`, add `--pipe <name>` after the script. Other MCP clients, such as Claude Desktop, take the same command in their configuration:
+On Linux, the same with `python3 /path/to/Universal-Dear-ImGui-Hook/remote/uih_mcp.py`. With another `remotePipe`, add `--pipe <name>` after the script. Other MCP clients, such as Claude Desktop, take the same command in their configuration:
 
 ```json
 {
@@ -208,20 +210,21 @@ The assistant gets these tools:
 <details>
 <summary>Good to know: security, focus, limits</summary>
 
-- **Any program you run can use the pipe**, so the remote control is off by default; other machines cannot. Turn it on for single-player games only: anti-cheat software watches injected DLLs.
-- **While you type to the assistant, the game does not have the focus**: the keys then reach it as window messages, which games that read the keyboard state directly (DirectInput, raw input) do not see. Click the game window after sending your request, or let the assistant play on a second screen.
+- **Any program you run can use the pipe or the socket**, so the remote control is off by default; other machines cannot, nor, on Linux, other users. Turn it on for single-player games only: anti-cheat software watches injected DLLs.
+- **While you type to the assistant, the game does not have the focus**: the keys then reach it as window messages, or X11 events on Linux, which games that read the keyboard state directly (DirectInput, raw input) do not see. Click the game window after sending your request, or let the assistant play on a second screen.
 - While the overlay menu is open, the game sees no keys: the assistant can close it with `insert`.
 - The assistant plays turn by turn, a screenshot and a few keys at a time: fine for menus, puzzles and slow games, not for reflexes.
-- One game per pipe name: a second game started with the same name logs that the remote control is unavailable.
+- On Linux, keys go through the XTEST extension of the X server, with `libxcb-xtest.so.0`; without them, they are sent as events to the window. Native Wayland games get no keys.
+- One game per pipe or socket name: a second game started with the same name logs that the remote control is unavailable.
 - `unloadKey` stops the remote control with the overlay.
 - Screenshots of HDR back buffers, with more than 10 bits per channel, fail.
 
 </details>
 
 <details>
-<summary>The pipe protocol, to write your own client</summary>
+<summary>The protocol, to write your own client</summary>
 
-`remote/uih_mcp.py` speaks MCP with the assistant on its standard input and output, and forwards each tool call as one line to the DLL, which serves the pipe on a thread of its own (`src/windows/remote.cpp`):
+`remote/uih_mcp.py` speaks MCP with the assistant on its standard input and output, and forwards each tool call as one line to the library, which serves the pipe or the socket on a thread of its own (`src/remote.cpp`; the transport and the keys in `src/windows/remote.cpp` and `src/linux/remote.cpp`):
 
 | Command | Answer |
 | --- | --- |
@@ -230,7 +233,7 @@ The assistant gets these tools:
 | `text <seconds> <message>` | `ok`; `\n` in the message starts a new line, `0` seconds removes it |
 | `key <keys> <milliseconds>` | `ok <how the keys were sent>` once they are released |
 
-Failures answer `error <reason>`. The screenshots come from `uih::CaptureFrame()`; the keys go through `SendInput` when the game has the focus.
+Failures answer `error <reason>`. The screenshots come from `uih::CaptureFrame()`; the keys go through `SendInput` on Windows and XTEST on Linux when the game has the focus.
 
 </details>
 
@@ -261,8 +264,8 @@ Everything is in `include/uih.h`, namespace `uih`.
 | `scale` | `0` | Interface size; `0` follows the DPI of the game window |
 | `module` | `nullptr` | Windows: module freed by `unloadKey`. With `nullptr`, `unloadKey` removes the overlay and the menu key or buttons bring it back, as on Linux |
 | `debugLog` | `false` | `OutputDebugString` on Windows, stderr on Linux |
-| `remoteControl` | `false` | Windows: serves the [remote control](#remote-control-by-an-ai-assistant) on a named pipe, for local processes |
-| `remotePipe` | `"universal-imgui-hook"` | Windows: name of that pipe, `\\.\pipe\<remotePipe>`; copied by `Start()` |
+| `remoteControl` | `false` | Serves the [remote control](#remote-control-by-an-ai-assistant) on a named pipe for local processes (Windows), or a Unix socket for the user's processes (Linux) |
+| `remotePipe` | `"universal-imgui-hook"` | Name of that pipe, `\\.\pipe\<remotePipe>`, or socket, `$XDG_RUNTIME_DIR/<remotePipe>` (`/tmp/<remotePipe>-<uid>` without that variable); copied by `Start()` |
 
 </details>
 
@@ -335,9 +338,11 @@ When `CaptureFrame()` waits, the backend copies its back buffer at the next pres
 </details>
 
 <details>
-<summary><b>Remote control</b> (Windows): the named pipe thread</summary>
+<summary><b>Remote control</b>: the server thread</summary>
 
-With `remoteControl` set, a thread of the library serves the named pipe with overlapped I/O, so that `Stop()` ends a connection or a command at once. Messages are drawn after the `render` callback, in the frame of the overlay; keys go through `SendInput` when the game has the focus and as window messages otherwise.
+With `remoteControl` set, a thread of the library serves the named pipe with overlapped I/O on Windows, or the Unix socket with `poll()` and an `eventfd` on Linux, so that `Stop()` ends a connection or a command at once. Messages are drawn after the `render` callback, in the frame of the overlay; keys go through `SendInput` (Windows) or XTEST on a connection of its own to the X server (Linux) when the game has the focus, and as window messages or X11 events otherwise.
+
+On Linux, every process the game starts preloads the library, so the socket is opened at the first frame of the overlay by the process that draws it. The socket file is only open to its owner (`0600`), and the server also checks the user of each client (`SO_PEERCRED`), for the `/tmp` fallback. A file left by a game that crashed is replaced when nobody answers on it.
 
 </details>
 
@@ -485,10 +490,11 @@ On Linux, `uih_host` does not link the hook: each test preloads the `.so`, opens
 
 - GLX, EGL, `dlsym()` lookups and Vulkan;
 - `--resize`, `--reload`, `--second-window`, `--recreate-context` and `--bound-framebuffer` variants;
+- the remote control (`--remote`), with `tests/remote_preload.cpp`, the hook built with it on: game description, screenshot without the message of the assistant, message on screen, keys through XTEST with the focus and as X11 events without it;
 - presents through `eglSwapBuffersWithDamage` that redraw and post a single pixel once `EGL_EXT_buffer_age` allows it (`--swap-with-damage`);
 - the Vulkan loader opened as `libvulkan.so` (`--vulkan-library`).
 
-They need `libx11-dev libxtst-dev libgl-dev libegl-dev`; without a display, run `xvfb-run -a ctest --test-dir build/linux`. With `-DUIH_SANITIZE=ON`, the preload tests load the sanitizer runtime before the library, and any memory error or undefined behavior in the hook fails them.
+They need `libx11-dev libxtst-dev libgl-dev libegl-dev`, and `libxcb-xtest0` for the remote control; without a display, run `xvfb-run -a ctest --test-dir build/linux`. With `-DUIH_SANITIZE=ON`, the preload tests load the sanitizer runtime before the library, and any memory error or undefined behavior in the hook fails them.
 
 </details>
 
@@ -552,7 +558,7 @@ Pushing a `v*` tag publishes the MSVC and Linux portable libraries as a release,
 **Linux**
 - Input is read from the X server: native Wayland windows get no menu input (run SDL games with `SDL_VIDEODRIVER=x11`), and the game still receives the keyboard and the mouse while the menu is open. The mouse wheel and input methods are not handled.
 - 32-bit games, OpenGL ES, and games that link their GL or Vulkan loader statically are not supported.
-- The remote control is Windows only; on Linux, `CaptureFrame()` is available to code that links the library.
+- The remote control sends no keys to native Wayland games.
 
 ## Credits
 
