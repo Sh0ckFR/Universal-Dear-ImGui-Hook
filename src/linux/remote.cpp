@@ -47,7 +47,9 @@ char g_path[sizeof(sockaddr_un::sun_path)] = {};
 int g_listener = -1;
 // Readable once Stop() was called: every wait of the server thread ends on it.
 int g_stopEvent = -1;
-std::thread g_thread;
+// Never destroyed while it runs: a joinable std::thread would call
+// std::terminate() in the static destructors when the game exits.
+std::thread* g_thread = nullptr;
 
 // Waits for `events` on `fd`; false on timeout or once Stop() was called.
 bool WaitFor(int fd, short events, int timeoutMs) {
@@ -402,7 +404,7 @@ bool GameWindow(uint32_t& width, uint32_t& height, bool& focused) {
 // that draws the overlay (Listen()).
 void Start(const char* name) {
     std::lock_guard<std::mutex> lock(g_lifecycle);
-    if (g_wanted || g_thread.joinable())
+    if (g_wanted || g_thread)
         return;
     const char* file = name ? name : "";
     const char* runtime = getenv("XDG_RUNTIME_DIR");
@@ -448,9 +450,9 @@ void Listen() {
     sigfillset(&all);
     pthread_sigmask(SIG_SETMASK, &all, &previous);
     if (g_stopEvent >= 0)
-        g_thread = std::thread(Serve);
+        g_thread = new std::thread(Serve);
     pthread_sigmask(SIG_SETMASK, &previous, nullptr);
-    if (!g_thread.joinable()) {
+    if (!g_thread) {
         Log("Remote control off: its thread cannot start");
         close(g_listener);
         unlink(g_path);
@@ -463,12 +465,14 @@ void Listen() {
 void Stop() {
     std::lock_guard<std::mutex> lock(g_lifecycle);
     g_wanted = false;
-    if (!g_thread.joinable())
+    if (!g_thread)
         return;
     uint64_t one = 1;
     if (write(g_stopEvent, &one, sizeof(one)) != sizeof(one))
         Log("Remote control: the stop event cannot be set");
-    g_thread.join();
+    g_thread->join();
+    delete g_thread;
+    g_thread = nullptr;
     close(g_listener);
     close(g_stopEvent);
     unlink(g_path);
