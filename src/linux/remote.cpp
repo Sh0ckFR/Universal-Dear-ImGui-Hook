@@ -136,6 +136,30 @@ void DisconnectX() {
     g_processWindow = XCB_NONE;
 }
 
+void LoadKeyboardMapping() {
+    const xcb_setup_t* setup = xcb_get_setup(g_x);
+    xcb_get_keyboard_mapping_cookie_t cookie = xcb_get_keyboard_mapping(g_x, setup->min_keycode, setup->max_keycode - setup->min_keycode + 1);
+    Reply<xcb_get_keyboard_mapping_reply_t> mapping(xcb_get_keyboard_mapping_reply(g_x, cookie, nullptr));
+    if (!mapping)
+        return;
+    const xcb_keysym_t* keysyms = xcb_get_keyboard_mapping_keysyms(mapping.get());
+    g_keysyms.assign(keysyms, keysyms + xcb_get_keyboard_mapping_keysyms_length(mapping.get()));
+    g_minKeycode = setup->min_keycode;
+    g_keysymsPerKeycode = mapping->keysyms_per_keycode;
+}
+
+// The X server tells every client when the keyboard layout changes. The
+// events come in with the replies: called after a request was answered.
+void DrainEvents() {
+    bool remapped = false;
+    while (xcb_generic_event_t* event = xcb_poll_for_event(g_x)) {
+        remapped |= (event->response_type & 0x7f) == XCB_MAPPING_NOTIFY;
+        free(event);
+    }
+    if (remapped)
+        LoadKeyboardMapping();
+}
+
 bool ConnectX() {
     if (g_x && !xcb_connection_has_error(g_x))
         return true;
@@ -152,15 +176,7 @@ bool ConnectX() {
         xcb_screen_next(&screen);
     g_x = connection;
     g_root = screen.data->root;
-
-    xcb_get_keyboard_mapping_cookie_t cookie = xcb_get_keyboard_mapping(connection, setup->min_keycode, setup->max_keycode - setup->min_keycode + 1);
-    Reply<xcb_get_keyboard_mapping_reply_t> mapping(xcb_get_keyboard_mapping_reply(connection, cookie, nullptr));
-    if (mapping) {
-        const xcb_keysym_t* keysyms = xcb_get_keyboard_mapping_keysyms(mapping.get());
-        g_keysyms.assign(keysyms, keysyms + xcb_get_keyboard_mapping_keysyms_length(mapping.get()));
-        g_minKeycode = setup->min_keycode;
-        g_keysymsPerKeycode = mapping->keysyms_per_keycode;
-    }
+    LoadKeyboardMapping();
 
     static const char kPid[] = "_NET_WM_PID";
     Reply<xcb_intern_atom_reply_t> atom(xcb_intern_atom_reply(connection, xcb_intern_atom(connection, 0, sizeof(kPid) - 1, kPid), nullptr));
@@ -252,18 +268,20 @@ bool FindWindow(xcb_window_t& window, uint32_t& width, uint32_t& height) {
         window = candidate;
         width = geometry->width;
         height = geometry->height;
+        DrainEvents();
         return true;
     }
     return false;
 }
 
-// Keys typed now reach `window`: it has the focus, or without a window
-// manager, the pointer is over it.
+// Keys typed now reach `window`: it has the focus, or the pointer is over it
+// while the focus is PointerRoot, as without a window manager, or the root
+// window, as some window managers leave it when no window is active.
 bool HasKeyboard(xcb_window_t window, uint32_t width, uint32_t height) {
     Reply<xcb_get_input_focus_reply_t> focus(xcb_get_input_focus_reply(g_x, xcb_get_input_focus(g_x), nullptr));
     if (!focus || focus->focus == XCB_NONE)
         return false;
-    if (focus->focus != XCB_INPUT_FOCUS_POINTER_ROOT)
+    if (focus->focus != XCB_INPUT_FOCUS_POINTER_ROOT && focus->focus != g_root)
         return Encloses(window, focus->focus) || Encloses(focus->focus, window);
     Reply<xcb_query_pointer_reply_t> pointer(xcb_query_pointer_reply(g_x, xcb_query_pointer(g_x, window), nullptr));
     return pointer && pointer->same_screen && pointer->win_x >= 0 && pointer->win_y >= 0 && static_cast<uint32_t>(pointer->win_x) < width &&
@@ -290,7 +308,9 @@ void SendKeys(xcb_window_t window, const std::vector<uint8_t>& keycodes, bool up
         event.event = window;
         event.child = XCB_NONE;
         event.same_screen = 1;
-        xcb_send_event(g_x, 0, window, up ? XCB_EVENT_MASK_KEY_RELEASE : XCB_EVENT_MASK_KEY_PRESS, reinterpret_cast<const char*>(&event));
+        // Propagated to the closest ancestor that reads the keyboard, when the
+        // overlay draws on a child of the game window.
+        xcb_send_event(g_x, 1, window, up ? XCB_EVENT_MASK_KEY_RELEASE : XCB_EVENT_MASK_KEY_PRESS, reinterpret_cast<const char*>(&event));
     }
     xcb_flush(g_x);
 }
@@ -449,11 +469,18 @@ void Listen() {
     sigset_t previous;
     sigfillset(&all);
     pthread_sigmask(SIG_SETMASK, &all, &previous);
-    if (g_stopEvent >= 0)
-        g_thread = new std::thread(Serve);
+    try {
+        if (g_stopEvent >= 0)
+            g_thread = new std::thread(Serve);
+    } catch (const std::exception&) {
+        // Thrown into the present of the game, it would end the game.
+    }
     pthread_sigmask(SIG_SETMASK, &previous, nullptr);
     if (!g_thread) {
         Log("Remote control off: its thread cannot start");
+        if (g_stopEvent >= 0)
+            close(g_stopEvent);
+        g_stopEvent = -1;
         close(g_listener);
         unlink(g_path);
         g_listener = -1;

@@ -95,6 +95,9 @@ def connect():
                             "built with config.remoteControl = true in example/config.cpp. The socket opens with the first "
                             "frame of the overlay. The unload key stops the remote control: press the menu key in the game "
                             "to bring it back.")
+        except OSError as error:
+            client.close()
+            raise GameError(f"Cannot connect to {path}: {error.strerror or error}. The game must run as the same user.")
         pipe = client.makefile("rwb", buffering=0)
         client.close()  # The file keeps the connection.
         return pipe

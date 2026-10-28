@@ -615,6 +615,8 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
             XNextEvent(display, &event);
             if ((event.type == KeyPress || event.type == KeyRelease) && XLookupKeysym(&event.xkey, 0) == XK_u)
                 ++(event.type == KeyPress ? presses : releases);
+            if (event.type == MappingNotify)
+                XRefreshKeyboardMapping(&event.xmapping);
         }
         host.Frame();
         usleep(5000);
@@ -661,39 +663,89 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
     if (after < before + 1000)
         return Fail("the message of the assistant is not drawn");
 
-    std::string focusedKey;
-    WhileRendering(
-        [&] {
-            RemoteClient client;
-            if (client.Open())
-                focusedKey = client.Request("key u 100");
-        },
-        frame);
+    // Holds u through the remote control: the answer, and whether the window
+    // received the press and the release.
+    auto pressU = [&](bool& received) {
+        int pressesBefore = presses;
+        int releasesBefore = releases;
+        std::string answer;
+        WhileRendering(
+            [&] {
+                RemoteClient client;
+                if (client.Open())
+                    answer = client.Request("key u 100");
+            },
+            frame);
+        for (int i = 0; i < 10; ++i)
+            frame();
+        received = presses > pressesBefore && releases > releasesBefore;
+        return answer;
+    };
+    auto setFocus = [&](Window focus, int pointerX, int pointerY) {
+        XWarpPointer(display, None, DefaultRootWindow(display), 0, 0, 0, 0, pointerX, pointerY);
+        XSetInputFocus(display, focus, RevertToNone, CurrentTime);
+        XSync(display, False);
+    };
+
+    bool focusedReceived = false;
+    std::string focusedKey = pressU(focusedReceived);
+    setFocus(None, 400, 300);
+    bool unfocusedReceived = false;
+    std::string unfocusedKey = pressU(unfocusedReceived);
+    // With the root window as the focus, keys go to the window under the
+    // pointer, here beside the game window on the 1280x720 screen.
+    setFocus(DefaultRootWindow(display), 1200, 700);
+    bool rootReceived = false;
+    std::string rootKey = pressU(rootReceived);
+
+    // The layout changes while the game runs: u moves to a free keycode.
+    setFocus(window, 400, 300);
+    int minKeycode = 0;
+    int maxKeycode = 0;
+    XDisplayKeycodes(display, &minKeycode, &maxKeycode);
+    int perKeycode = 0;
+    KeySym* keysyms = XGetKeyboardMapping(display, static_cast<KeyCode>(minKeycode), maxKeycode - minKeycode + 1, &perKeycode);
+    KeyCode oldKeycode = XKeysymToKeycode(display, XK_u);
+    int freeKeycode = 0;
+    for (int keycode = maxKeycode; keycode >= minKeycode && !freeKeycode; --keycode) {
+        bool empty = true;
+        for (int i = 0; i < perKeycode; ++i)
+            empty = empty && keysyms[(keycode - minKeycode) * perKeycode + i] == NoSymbol;
+        if (empty)
+            freeKeycode = keycode;
+    }
+    std::vector<KeySym> oldSymbols(keysyms + (oldKeycode - minKeycode) * perKeycode, keysyms + (oldKeycode - minKeycode + 1) * perKeycode);
+    XFree(keysyms);
+    if (!freeKeycode || !oldKeycode)
+        return Fail("the X server has no free keycode to move u to");
+    std::vector<KeySym> none(perKeycode, NoSymbol);
+    KeySym u[1] = {XK_u};
+    XChangeKeyboardMapping(display, freeKeycode, 1, u, 1);
+    XChangeKeyboardMapping(display, oldKeycode, perKeycode, none.data(), 1);
+    XSync(display, False);
     for (int i = 0; i < 10; ++i)
         frame();
-    int focusedPresses = presses;
-    int focusedReleases = releases;
-    XSetInputFocus(display, None, RevertToNone, CurrentTime);
+    bool remappedReceived = false;
+    std::string remappedKey = pressU(remappedReceived);
+    XChangeKeyboardMapping(display, oldKeycode, perKeycode, oldSymbols.data(), 1);
+    XChangeKeyboardMapping(display, freeKeycode, 1, none.data(), 1);
     XSync(display, False);
-    std::string unfocusedKey;
-    WhileRendering(
-        [&] {
-            RemoteClient client;
-            if (client.Open())
-                unfocusedKey = client.Request("key u 100");
-        },
-        frame);
     for (int i = 0; i < 10; ++i)
         frame();
-    XSetInputFocus(display, window, RevertToParent, CurrentTime);
-    XSync(display, False);
     unlink(RemoteSocketPath().c_str());
-    printf("focused: %s, %d down, %d up\nwithout the focus: %s, %d down, %d up\n", focusedKey.c_str(), focusedPresses, focusedReleases,
-           unfocusedKey.c_str(), presses - focusedPresses, releases - focusedReleases);
-    if (focusedKey.rfind("ok sent as keyboard input", 0) != 0 || focusedPresses == 0 || focusedReleases == 0)
+
+    printf("focused: %s, received %d\nwithout the focus: %s, received %d\nroot window focused, pointer outside: %s, received %d\n"
+           "u moved to keycode %d: %s, received %d\n",
+           focusedKey.c_str(), focusedReceived, unfocusedKey.c_str(), unfocusedReceived, rootKey.c_str(), rootReceived, freeKeycode,
+           remappedKey.c_str(), remappedReceived);
+    if (focusedKey.rfind("ok sent as keyboard input", 0) != 0 || !focusedReceived)
         return Fail("the keys of the remote control did not reach the focused window");
-    if (unfocusedKey.rfind("ok sent as window events", 0) != 0 || presses == focusedPresses || releases == focusedReleases)
+    if (unfocusedKey.rfind("ok sent as window events", 0) != 0 || !unfocusedReceived)
         return Fail("the keys of the remote control did not reach the window without the focus");
+    if (rootKey.rfind("ok sent as window events", 0) != 0 || !rootReceived)
+        return Fail("the keys of the remote control went to the window under the pointer");
+    if (!remappedReceived)
+        return Fail("the remote control pressed u where the previous keyboard layout had it");
     printf("PASS: %s remote control\n", name.c_str());
     return 0;
 }
