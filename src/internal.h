@@ -6,7 +6,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <string>
 #include <type_traits>
+#include <vector>
 
 #include "imgui.h"
 
@@ -166,6 +168,29 @@ void OnMenuToggled(bool open);
 // its window whose client area is `width` x `height` when there is one.
 NativeWindow FindProcessWindow(uint32_t width = 0, uint32_t height = 0);
 } // namespace input
+
+// Remote control for Config::remoteControl --------------------------------
+
+namespace remote {
+// Answers one request of the protocol (src/remote.cpp). The pixels of a
+// screenshot go to `payload`, sent after the answer.
+std::string Handle(const std::string& line, std::vector<uint8_t>& payload);
+// The last message of the assistant, drawn in the frame of the overlay.
+void Draw();
+void ClearText();
+
+// Implemented once per platform, in remote.cpp:
+// serves the pipe or socket named `name` on a thread of its own.
+void Start(const char* name);
+// Ends the connection and the command in progress, and waits for the thread.
+void Stop();
+// Virtual-key code or keysym of a key named in lower case, 0 when unknown.
+int KeyCode(const std::string& name);
+// Holds `keys` for `ms` milliseconds, or until Stop(), and answers the request.
+std::string HoldKeys(const std::vector<int>& keys, unsigned ms);
+// Client area of the game window, and whether it has the keyboard focus.
+bool GameWindow(uint32_t& width, uint32_t& height, bool& focused);
+} // namespace remote
 
 // Runs work of the overlay on a thread of the application. On Windows with
 // MSVC, an exception in it, from a renderer backend or the render callback,

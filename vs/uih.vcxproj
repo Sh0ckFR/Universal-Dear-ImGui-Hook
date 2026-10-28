@@ -36,10 +36,14 @@
   <ItemGroup>
     <ClCompile Include="..\src\uih.cpp" />
     <ClCompile Include="..\src\vulkan.cpp" />
+    <ClCompile Include="..\src\remote.cpp" />
     <ClCompile Include="..\src\windows\platform.cpp" />
     <ClCompile Include="..\src\windows\input.cpp" />
     <ClCompile Include="..\src\windows\dinput.cpp" />
-    <ClCompile Include="..\src\windows\remote.cpp" />
+    <ClCompile Include="..\src\windows\remote.cpp">
+      <!-- src\remote.cpp compiles to remote.obj too. -->
+      <ObjectFileName>$(IntDir)windows_remote.obj</ObjectFileName>
+    </ClCompile>
     <ClCompile Include="..\src\windows\xinput.cpp" />
     <ClCompile Include="..\src\windows\d3d9.cpp" />
     <ClCompile Include="..\src\windows\dxgi.cpp" />

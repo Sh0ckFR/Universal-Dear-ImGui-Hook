@@ -24,12 +24,12 @@ void ApplySettings(uih::Config& config) {
     // Size of the interface: 0 follows the DPI of the game window, 1.5 is 150%.
     config.scale = 0.0f;
 
-#ifdef _WIN32
     // Remote control by an AI assistant such as Claude Code (see the README):
-    // screenshots, messages over the game and key presses, served on the local
-    // named pipe \\.\pipe\<remotePipe> to remote/uih_mcp.py. Any program you
-    // run can then see the game and press its keys: leave it off otherwise.
+    // screenshots, messages over the game and key presses, served to
+    // remote/uih_mcp.py on the local named pipe \\.\pipe\<remotePipe> on
+    // Windows, or the Unix socket $XDG_RUNTIME_DIR/<remotePipe> on Linux. Any
+    // program you run can then see the game and press its keys: leave it off
+    // otherwise.
     config.remoteControl = false;
     config.remotePipe = "universal-imgui-hook";
-#endif
 }
