@@ -214,7 +214,7 @@ The assistant gets these tools:
 - **While you type to the assistant, the game does not have the focus**: the keys then reach it as window messages, or X11 events on Linux, which games that read the keyboard state directly (DirectInput, raw input) do not see. Click the game window after sending your request, or let the assistant play on a second screen.
 - While the overlay menu is open, the game sees no keys: the assistant can close it with `insert`.
 - The assistant plays turn by turn, a screenshot and a few keys at a time: fine for menus, puzzles and slow games, not for reflexes.
-- On Linux, keys go through the XTEST extension of the X server, with `libxcb-xtest.so.0`; without them, they are sent as events to the window. Native Wayland games get no keys.
+- On Linux, keys go through the XTEST extension of the X server; without it, they are sent as events to the window. Native Wayland games get no keys.
 - One game per pipe or socket name: a second game started with the same name logs that the remote control is unavailable.
 - `unloadKey` stops the remote control with the overlay.
 - Screenshots of HDR back buffers, with more than 10 bits per channel, fail.
@@ -481,6 +481,8 @@ Without a GPU, as on the CI runners, Direct3D uses WARP, and Mesa's software dri
 
 `tests/game.sh` runs the same scenario on a Linux game, such as [DDNet](https://ddnet.org/) or a [Godot](https://godotengine.org/) project.
 
+`tests/game_mcp.py libuih_remote_preload.so <backend> mcp.png game [arguments]` plays a Linux game through `remote/uih_mcp.py`, as an assistant does, with the remote control on: game description, screenshot, message, `INSERT` to open the menu and `F11` to remove the overlay, after which the socket must be gone and the game still running.
+
 </details>
 
 <details>
@@ -494,7 +496,7 @@ On Linux, `uih_host` does not link the hook: each test preloads the `.so`, opens
 - presents through `eglSwapBuffersWithDamage` that redraw and post a single pixel once `EGL_EXT_buffer_age` allows it (`--swap-with-damage`);
 - the Vulkan loader opened as `libvulkan.so` (`--vulkan-library`).
 
-They need `libx11-dev libxtst-dev libgl-dev libegl-dev`, and `libxcb-xtest0` for the remote control; without a display, run `xvfb-run -a ctest --test-dir build/linux`. With `-DUIH_SANITIZE=ON`, the preload tests load the sanitizer runtime before the library, and any memory error or undefined behavior in the hook fails them.
+They need `libx11-dev libxtst-dev libgl-dev libegl-dev`; without a display, run `xvfb-run -a ctest --test-dir build/linux`. With `-DUIH_SANITIZE=ON`, the preload tests load the sanitizer runtime before the library, and any memory error or undefined behavior in the hook fails them.
 
 </details>
 
@@ -512,7 +514,7 @@ The [CI](.github/workflows/build.yml) runs on every push and pull request:
 | Linux GCC, Clang x86_64, GCC aarch64 | The preload tests under Xvfb with llvmpipe and lavapipe, including resizes and the overlay brought back after `F11`, then the Vulkan ones under the validation layer |
 | Linux sanitizers | The preload tests with the library built with AddressSanitizer and UndefinedBehaviorSanitizer |
 | Linux portable x86_64, aarch64 | The released libraries, built and tested against glibc 2.28 |
-| DDNet, Godot on Linux | The released library preloaded into [DDNet](https://ddnet.org/) and an empty [Godot](https://godotengine.org/) project (`tests/godot`), with OpenGL and Vulkan |
+| DDNet, Godot on Linux | The released library preloaded into [DDNet](https://ddnet.org/) and an empty [Godot](https://godotengine.org/) project (`tests/godot`), with OpenGL and Vulkan; then the same games played through the MCP server (`tests/game_mcp.py`) |
 | DDNet, Godot on Windows | The DLL injected into the same games once they render: DDNet with OpenGL and Vulkan, Godot with Direct3D 12, Vulkan and Direct3D 11 (its OpenGL renderer through ANGLE), without GPU |
 | FetchContent consumer | The repository as a CMake dependency |
 
@@ -539,7 +541,7 @@ Pushing a `v*` tag publishes the MSVC and Linux portable libraries as a release,
 | `src/linux/` | Symbol interposition, GLX, EGL, X11 input, `exports.map` |
 | `remote/` | `uih_mcp.py`, the MCP server of the remote control, and the DLL injector it includes |
 | `example/` | The built library: `config.cpp` (settings), `menu.cpp` (the widget tour), `image.cpp` and `image.rc` (`imgui.png` embedded), `dllmain.cpp`, `proxy.cpp`, `preload.cpp` |
-| `tests/` | `uih_host`, `uih_game` and `game.sh` for real games, the Godot project they run, the `FetchContent` consumer |
+| `tests/` | `uih_host`, `uih_game`, `game.sh` and `game_mcp.py` for real games, the Godot project they run, the `FetchContent` consumer |
 | `vs/`, `Universal-ImGui-Hook.sln` | Visual Studio projects |
 | `third_party/` | Dear ImGui, MinHook, Vulkan headers, stb_image (example only) |
 

@@ -3,16 +3,17 @@
 // the keys sent to the X server.
 #include "internal.h"
 
-#include <dlfcn.h>
 #include <poll.h>
 #include <pthread.h>
 #include <signal.h>
 #include <sys/eventfd.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
 #include <sys/un.h>
 #include <unistd.h>
 #include <xcb/xcb.h>
+#include <xcb/xcbext.h>
 
 #include <cctype>
 #include <cerrno>
@@ -115,8 +116,6 @@ private:
 // X server ----------------------------------------------------------------
 // A connection of the server thread, apart from the one the overlay polls.
 
-using FakeInputFn = xcb_void_cookie_t (*)(xcb_connection_t*, uint8_t, uint8_t, uint32_t, xcb_window_t, int16_t, int16_t, uint8_t);
-
 xcb_connection_t* g_x = nullptr;
 xcb_window_t g_root = XCB_NONE;
 uint8_t g_minKeycode = 0;
@@ -125,8 +124,10 @@ std::vector<xcb_keysym_t> g_keysyms;
 xcb_atom_t g_pidAtom = XCB_NONE;
 // Window of this process found by ProcessWindow().
 xcb_window_t g_processWindow = XCB_NONE;
-// xcb_test_fake_input from libxcb-xtest, when the server has XTEST.
-FakeInputFn g_fakeInput = nullptr;
+// XTEST, its requests sent without libxcb-xtest, which Debian and Ubuntu
+// package apart and do not always install.
+xcb_extension_t g_xtest = {"XTEST", 0};
+bool g_hasXTest = false;
 
 void DisconnectX() {
     if (g_x)
@@ -182,13 +183,9 @@ bool ConnectX() {
     Reply<xcb_intern_atom_reply_t> atom(xcb_intern_atom_reply(connection, xcb_intern_atom(connection, 0, sizeof(kPid) - 1, kPid), nullptr));
     g_pidAtom = atom ? atom->atom : XCB_NONE;
 
-    static const char kXTest[] = "XTEST";
-    Reply<xcb_query_extension_reply_t> xtest(
-        xcb_query_extension_reply(connection, xcb_query_extension(connection, sizeof(kXTest) - 1, kXTest), nullptr));
-    static void* library = nullptr;
-    if (xtest && xtest->present && !library)
-        library = dlopen("libxcb-xtest.so.0", RTLD_NOW | RTLD_LOCAL);
-    g_fakeInput = xtest && xtest->present && library ? reinterpret_cast<FakeInputFn>(dlsym(library, "xcb_test_fake_input")) : nullptr;
+    // Owned by the connection.
+    const xcb_query_extension_reply_t* xtest = xcb_get_extension_data(connection, &g_xtest);
+    g_hasXTest = xtest && xtest->present;
     return true;
 }
 
@@ -288,11 +285,40 @@ bool HasKeyboard(xcb_window_t window, uint32_t width, uint32_t height) {
            static_cast<uint32_t>(pointer->win_y) < height;
 }
 
+// The FakeInput request of XTEST, as xcb_test_fake_input() sends it.
+void FakeInput(uint8_t type, uint8_t keycode) {
+    struct {
+        uint8_t majorOpcode;
+        uint8_t minorOpcode;
+        uint16_t length;
+        uint8_t type;
+        uint8_t detail;
+        uint8_t pad0[2];
+        uint32_t time;
+        xcb_window_t root;
+        uint8_t pad1[8];
+        int16_t rootX;
+        int16_t rootY;
+        uint8_t pad2[7];
+        uint8_t deviceid;
+    } request{};
+    static_assert(sizeof(request) == 36, "the FakeInput request is 36 bytes");
+    request.type = type;
+    request.detail = keycode;
+    // xcb_send_request() fills the opcodes and the length, and uses the two
+    // entries before the request.
+    iovec parts[3] = {};
+    parts[2].iov_base = &request;
+    parts[2].iov_len = sizeof(request);
+    xcb_protocol_request_t protocol = {1, &g_xtest, 2 /* FakeInput */, 1};
+    xcb_send_request(g_x, 0, parts + 2, &protocol);
+}
+
 void FakeKeys(const std::vector<uint8_t>& keycodes, bool up) {
     for (size_t i = 0; i < keycodes.size(); ++i) {
         // Released in the reverse order.
         uint8_t keycode = up ? keycodes[keycodes.size() - 1 - i] : keycodes[i];
-        g_fakeInput(g_x, up ? XCB_KEY_RELEASE : XCB_KEY_PRESS, keycode, XCB_CURRENT_TIME, XCB_NONE, 0, 0, 0);
+        FakeInput(up ? XCB_KEY_RELEASE : XCB_KEY_PRESS, keycode);
     }
     xcb_flush(g_x);
 }
@@ -397,7 +423,7 @@ std::string HoldKeys(const std::vector<int>& keys, unsigned ms) {
             return "error the keyboard layout of the X server has no key for one of these keys";
         keycodes.push_back(keycode);
     }
-    if (g_fakeInput && HasKeyboard(window, width, height)) {
+    if (g_hasXTest && HasKeyboard(window, width, height)) {
         FakeKeys(keycodes, false);
         Sleep(static_cast<int>(ms));
         FakeKeys(keycodes, true);
@@ -406,9 +432,8 @@ std::string HoldKeys(const std::vector<int>& keys, unsigned ms) {
     SendKeys(window, keycodes, false);
     Sleep(static_cast<int>(ms));
     SendKeys(window, keycodes, true);
-    return g_fakeInput ? "ok sent as window events, the game does not have the focus: games that read the keyboard state directly do not see them"
-                       : "ok sent as window events, the X server lacks XTEST or libxcb-xtest.so.0 is missing: games that read the keyboard state "
-                         "directly do not see them";
+    return g_hasXTest ? "ok sent as window events, the game does not have the focus: games that read the keyboard state directly do not see them"
+                      : "ok sent as window events, the X server lacks XTEST: games that read the keyboard state directly do not see them";
 }
 
 bool GameWindow(uint32_t& width, uint32_t& height, bool& focused) {
