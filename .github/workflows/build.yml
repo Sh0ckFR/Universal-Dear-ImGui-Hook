@@ -221,7 +221,7 @@ jobs:
       - name: Install dependencies
         uses: ./.github/actions/apt-install
         with:
-          packages: ninja-build pkg-config libxcb1-dev libxcb-xtest0 libx11-dev libxtst-dev libgl-dev libegl-dev xvfb libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libvulkan1 mesa-vulkan-drivers vulkan-validationlayers
+          packages: ninja-build pkg-config libxcb1-dev libx11-dev libxtst-dev libgl-dev libegl-dev xvfb libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libvulkan1 mesa-vulkan-drivers vulkan-validationlayers
       - name: Configure
         run: cmake --preset linux -DUIH_BUILD_TESTS=ON
       - name: Build
@@ -260,7 +260,7 @@ jobs:
       - name: Install dependencies
         uses: ./.github/actions/apt-install
         with:
-          packages: ninja-build pkg-config libxcb1-dev libxcb-xtest0 libx11-dev libxtst-dev libgl-dev libegl-dev xvfb libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libvulkan1 mesa-vulkan-drivers
+          packages: ninja-build pkg-config libxcb1-dev libx11-dev libxtst-dev libgl-dev libegl-dev xvfb libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libvulkan1 mesa-vulkan-drivers
       - name: Configure
         run: cmake --preset linux -DUIH_BUILD_TESTS=ON -DUIH_SANITIZE=ON
       - name: Build
