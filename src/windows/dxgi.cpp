@@ -51,7 +51,7 @@ void OnPresent(IDXGISwapChain* swapChain, UINT flags) {
     if (ShouldRender(g_presenter->backend)) {
         DXGI_SWAP_CHAIN_DESC desc{};
         swapChain->GetDesc(&desc);
-        DrawOverlay(SwapchainKey(swapChain), desc.OutputWindow, [&] { g_presenter->Render(swapChain); });
+        DrawOverlay(SwapchainKey(swapChain), SwapChainWindow(swapChain, desc), [&] { g_presenter->Render(swapChain); });
     }
 }
 
@@ -213,6 +213,20 @@ TexelLayout DxgiTexelLayout(DXGI_FORMAT format) {
     default:
         return TexelLayout::Unsupported;
     }
+}
+
+HWND SwapChainWindow(IDXGISwapChain* swapChain, const DXGI_SWAP_CHAIN_DESC& desc) {
+    if (desc.OutputWindow)
+        return desc.OutputWindow;
+    static std::mutex mutex;
+    static IDXGISwapChain* known = nullptr;
+    static HWND window = nullptr;
+    std::lock_guard<std::mutex> lock(mutex);
+    if (known != swapChain || !IsWindow(window)) {
+        known = swapChain;
+        window = input::FindProcessWindow(desc.BufferDesc.Width, desc.BufferDesc.Height);
+    }
+    return window;
 }
 
 HWND CreateHiddenWindow() {

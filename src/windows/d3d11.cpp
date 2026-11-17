@@ -37,7 +37,7 @@ bool Init(IDXGISwapChain* swapChain) {
         return false;
     if (g_device && device != g_device)
         Teardown();
-    if (!BindWindow(desc.OutputWindow)) {
+    if (!BindWindow(SwapChainWindow(swapChain, desc))) {
         device->Release();
         return false;
     }
