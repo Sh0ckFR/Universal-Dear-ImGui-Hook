@@ -1,10 +1,17 @@
 name: build
 
+# Branches are built by their pull request, or by hand from the Actions tab.
 on:
   push:
-    branches: ['**']
+    branches: [master]
     tags: ['v*']
   pull_request:
+  workflow_dispatch:
+
+# A new commit on a pull request replaces the run of the previous one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   msvc:
@@ -125,7 +132,9 @@ jobs:
         if: failure()
         with:
           name: windows-tests-${{ matrix.arch }}
-          path: build/tests/*.bmp
+          path: |
+            build/tests/*.bmp
+            ctest*.log
           if-no-files-found: ignore
 
   solution:
@@ -248,6 +257,12 @@ jobs:
           xvfb-run -a -s "-screen 0 1280x720x24" ctest --test-dir build/linux -V -R vulkan > ctest-validation.log 2>&1 || true
           grep -E "Test +#|VALIDATION ERROR|tests passed" ctest-validation.log
           if grep -qE "Skipped|Failed|VALIDATION ERROR" ctest-validation.log; then exit 1; fi
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: linux-tests-${{ matrix.compiler }}-${{ matrix.arch }}
+          path: ctest*.log
+          if-no-files-found: ignore
 
   # The preload tests with the library built with AddressSanitizer and
   # UndefinedBehaviorSanitizer.
