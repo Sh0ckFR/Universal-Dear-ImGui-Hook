@@ -77,6 +77,9 @@ bool MenuInputDown(const Config& config) { return config.menuKey && input::KeyDo
 
 bool HasFocus(NativeWindow window) { return input::HasFocus(window); }
 
+// An OpenGL context cannot be released from another thread.
+bool TeardownBackends() { return false; }
+
 bool RunGuarded(void (*work)(void*), void* context) {
     work(context);
     return true;

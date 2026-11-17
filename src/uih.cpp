@@ -83,6 +83,8 @@ OverlayTarget g_target;
 std::chrono::steady_clock::time_point g_lastFocusCheck{};
 // The backend of the target is gone: the next swap chain to present takes the overlay.
 std::atomic<bool> g_targetGone{false};
+// Since when another backend presents and the target does not.
+std::chrono::steady_clock::time_point g_otherBackendSince{};
 // Thread that drew the last overlay frame, the one to release its resources.
 std::atomic<std::thread::id> g_renderThread{};
 constexpr auto kStalledTarget = std::chrono::milliseconds(500);
@@ -109,6 +111,25 @@ bool IsOverlayTarget(uint64_t swapchain, NativeWindow window) {
         Log("Overlay moves to swap chain 0x%llx", static_cast<unsigned long long>(swapchain));
     target = {swapchain, window, now};
     return true;
+}
+
+// The application went on with another API without destroying the device of the first.
+void ReleaseStalledBackend(Backend active) {
+    std::unique_lock<std::timed_mutex> lock(g_frameMutex, std::try_to_lock);
+    if (!lock || g_activeBackend != active || g_target.swapchain == 0 || g_targetGone)
+        return;
+    auto now = std::chrono::steady_clock::now();
+    if (g_otherBackendSince <= g_target.lastPresent)
+        g_otherBackendSince = now;
+    if (now - g_otherBackendSince <= kStalledTarget)
+        return;
+    g_otherBackendSince = {};
+    bool released = false;
+    Guarded([&] { released = platform::TeardownBackends(); });
+    if (!released)
+        return;
+    Log("%s backend stopped presenting", BackendName(active));
+    ReleaseBackend(active);
 }
 bool g_unloadKeyDown = false;
 
@@ -258,7 +279,10 @@ bool ShouldRender(Backend backend) {
     if (g_state != State::Running || g_faulted || !WantBackend(backend))
         return false;
     Backend active = g_activeBackend;
-    return active == Backend::None || active == backend;
+    if (active == Backend::None || active == backend)
+        return true;
+    ReleaseStalledBackend(active);
+    return false;
 }
 
 bool ClaimBackend(Backend backend) {
@@ -532,6 +556,7 @@ void Start(const Config& config) {
     g_teardownPending = false;
     g_faulted = false;
     g_target = {};
+    g_otherBackendSince = {};
     g_targetGone = false;
     g_renderThread = std::thread::id();
     g_state = State::Running;

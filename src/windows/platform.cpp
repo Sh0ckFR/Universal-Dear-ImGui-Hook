@@ -334,6 +334,11 @@ void Unload() {
         CloseHandle(thread);
 }
 
+bool TeardownBackends() {
+    TeardownRenderers();
+    return true;
+}
+
 bool HasFocus(HWND window) {
     HWND foreground = GetForegroundWindow();
     return window && foreground && (foreground == window || foreground == GetAncestor(window, GA_ROOT));

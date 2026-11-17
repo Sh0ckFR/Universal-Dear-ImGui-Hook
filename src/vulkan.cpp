@@ -174,6 +174,9 @@ PFN_vkCreateDevice g_createDevice = nullptr;
 PFN_vkDestroySurfaceKHR g_destroySurface = nullptr;
 
 std::mutex g_mutex;
+#ifdef _WIN32
+std::atomic<ULONGLONG> g_lastPresent{0};
+#endif
 std::unordered_map<VkSwapchainKHR, SwapchainInfo> g_swapchains;
 std::unordered_map<VkQueue, QueueInfo> g_queues;
 std::unordered_map<VkDevice, VkPhysicalDevice> g_devices;
@@ -894,6 +897,10 @@ VkResult PresentFrame(size_t icd, VkQueue queue, const VkPresentInfoKHR* info) {
     VkPresentInfoKHR patched;
     bool unknownFormat = false;
     bool outOfDate = false;
+#ifdef _WIN32
+    if (WantBackend(Backend::Vulkan))
+        g_lastPresent = GetTickCount64();
+#endif
     if (info && info->swapchainCount > 0 && info->pSwapchains && info->pImageIndices && ShouldRender(Backend::Vulkan)) {
         VkSwapchainKHR swapchain = info->pSwapchains[0];
         VkDevice device = DeviceForQueue(queue, swapchain);
@@ -1214,6 +1221,8 @@ void Uninstall() {
 } // namespace
 
 const Renderer kVulkanRenderer = {"Vulkan", L"vulkan-1.dll", Install, Uninstall, Teardown};
+
+bool VulkanPresenting() { return GetTickCount64() - g_lastPresent < 500; }
 
 #else
 

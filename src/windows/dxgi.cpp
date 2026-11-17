@@ -35,23 +35,53 @@ void Teardown() {
         g_presenter->Teardown();
 }
 
+// False for the swap chains of a translation layer such as DXVK.
+bool ImplementedByWindows(IDXGISwapChain* swapChain) {
+    HMODULE module = nullptr;
+    wchar_t path[MAX_PATH] = {};
+    wchar_t windows[MAX_PATH] = {};
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            static_cast<LPCWSTR>(VirtualMethod(swapChain, kPresentIndex)), &module))
+        return false;
+    GetModuleFileNameW(module, path, MAX_PATH);
+    UINT length = GetWindowsDirectoryW(windows, MAX_PATH);
+    return length > 0 && length < MAX_PATH && _wcsnicmp(path, windows, length) == 0;
+}
+
+const DxgiPresenter* PresenterFor(IDXGISwapChain* swapChain) {
+    for (const DxgiPresenter* presenter : kPresenters)
+        if (WantBackend(presenter->backend) && presenter->Probe(swapChain))
+            return presenter;
+    return nullptr;
+}
+
 void OnPresent(IDXGISwapChain* swapChain, UINT flags) {
     if ((flags & DXGI_PRESENT_TEST) || InsideForeignPresent())
         return;
+    // Drivers present Vulkan through a DXGI swap chain of their own, some from a thread of their own.
+    if (VulkanPresenting() && ImplementedByWindows(swapChain))
+        return;
+    if (g_presenter && ActiveBackend() != g_presenter->backend)
+        g_presenter = nullptr;
     if (!g_presenter) {
-        for (const DxgiPresenter* presenter : kPresenters) {
-            if (ShouldRender(presenter->backend) && presenter->Probe(swapChain) && ClaimBackend(presenter->backend)) {
-                g_presenter = presenter;
-                break;
-            }
-        }
-        if (!g_presenter)
+        const DxgiPresenter* presenter = PresenterFor(swapChain);
+        if (!presenter || !ShouldRender(presenter->backend) || !ClaimBackend(presenter->backend))
             return;
+        g_presenter = presenter;
     }
     if (ShouldRender(g_presenter->backend)) {
         DXGI_SWAP_CHAIN_DESC desc{};
         swapChain->GetDesc(&desc);
-        DrawOverlay(SwapchainKey(swapChain), SwapChainWindow(swapChain, desc), [&] { g_presenter->Render(swapChain); });
+        DrawOverlay(SwapchainKey(swapChain), SwapChainWindow(swapChain, desc), [&] {
+            if (PresenterFor(swapChain) == g_presenter) {
+                g_presenter->Render(swapChain);
+                return;
+            }
+            // The swap chain that takes the overlay belongs to another version of Direct3D.
+            g_presenter->Teardown();
+            ReleaseBackend(g_presenter->backend);
+            g_presenter = nullptr;
+        });
     }
 }
 
