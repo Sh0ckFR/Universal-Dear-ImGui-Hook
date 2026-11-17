@@ -62,6 +62,9 @@ extern const DxgiPresenter kD3D10Presenter;
 extern const DxgiPresenter kD3D11Presenter;
 extern const DxgiPresenter kD3D12Presenter;
 
+// True while the application presents with Vulkan.
+bool VulkanPresenting();
+
 // Drops the references the D3D12 hooks keep to queues of removed devices.
 void ReleaseRemovedQueues();
 

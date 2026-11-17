@@ -74,7 +74,8 @@ const Config& GetConfig();
 // True when `backend` is allowed by the configuration.
 bool WantBackend(Backend backend);
 // True when hooks are running and `backend` is either active or no backend
-// has claimed the process yet.
+// has claimed the process yet. The active backend is released when it
+// stopped presenting while `backend` does.
 bool ShouldRender(Backend backend);
 // Several windows or swap chains of the application can present, from one
 // thread or more. The overlay is drawn on one of them, its target, by one
@@ -155,6 +156,9 @@ void Unload();
 bool MenuInputDown(const Config& config);
 // True when `window` or the window it belongs to has the focus.
 bool HasFocus(NativeWindow window);
+// Releases the resources of the backends from a thread that does not render
+// with them. False when the platform cannot.
+bool TeardownBackends();
 // Runs `work`; false when it raised an exception, which OnFault() handled.
 bool RunGuarded(void (*work)(void*), void* context);
 } // namespace platform
