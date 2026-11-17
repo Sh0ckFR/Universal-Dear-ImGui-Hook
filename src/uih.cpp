@@ -67,6 +67,7 @@ bool g_menuButtonsDown = false;
 bool g_menuKeyDown = false;
 // Cleared by Start() and Stop() to end a wait for the menu input.
 std::atomic<bool> g_waitingForMenuInput{false};
+std::atomic<bool> g_stoppingToResume{false};
 // Set when the overlay raised an exception, until the next Start().
 std::atomic<bool> g_faulted{false};
 
@@ -371,7 +372,9 @@ void DestroyContext() {
 
 void StopUntilMenuInput() {
     Config config = GetConfig();
+    g_stoppingToResume = true;
     uih::Stop();
+    g_stoppingToResume = false;
     g_waitingForMenuInput = true;
     Log("Overlay removed until the menu input is pressed");
     // Input already held when the wait starts needs a fresh press.
@@ -391,6 +394,8 @@ void StopUntilMenuInput() {
     uih::Start(config);
     SetMenuOpen(true);
 }
+
+bool StoppingToResume() { return g_stoppingToResume; }
 
 void OnFault(unsigned long code) {
     t_inRenderCallback = false;

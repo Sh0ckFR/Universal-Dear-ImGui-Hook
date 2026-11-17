@@ -5,7 +5,7 @@ endfunction()
 
 if(WIN32)
     add_executable(uih_host host.cpp host_vulkan.cpp)
-    target_link_libraries(uih_host PRIVATE uih d3d9 d3d10 d3d11 d3d12 dxgi opengl32 dinput8 dxguid)
+    target_link_libraries(uih_host PRIVATE uih minhook d3d9 d3d10 d3d11 d3d12 dxgi opengl32 dinput8 dxguid)
     target_compile_definitions(uih_host PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 
     # A controller the tests drive, in its own directory so that only the
@@ -51,6 +51,8 @@ if(WIN32)
         uih_add_host_test(${api}_fullscreen --api ${api} --fullscreen)
     endforeach()
     uih_add_host_test(remove --api d3d11 --remove)
+    uih_add_host_test(own_hooks_before --api d3d11 --own-hooks before)
+    uih_add_host_test(own_hooks_after --api d3d11 --own-hooks after)
     uih_add_host_test(remote --api d3d11 --remote)
     # Recovery from a crash of the overlay needs structured exception handling.
     if(MSVC)

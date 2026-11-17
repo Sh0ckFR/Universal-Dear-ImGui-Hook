@@ -5,6 +5,7 @@
 #include <malloc.h>
 
 #include <cwchar>
+#include <vector>
 
 #include "imgui_impl_win32.h"
 
@@ -38,6 +39,12 @@ RendererSlot g_renderers[] = {
 };
 
 HWND g_window = nullptr;
+
+// MinHook serves the whole module: the code that uses the library may place
+// hooks of its own with it. These are the overlay's, the only ones it removes.
+std::vector<void*> g_hookTargets;
+// MH_Initialize() succeeded here, not in the code that uses the library.
+bool g_ownsMinHook = false;
 
 // ntdll DLL load notifications -------------------------------------------
 
@@ -101,7 +108,9 @@ void InstallLoadedRenderers() {
 
 DWORD WINAPI Worker(void*) {
     MH_STATUS status = MH_Initialize();
-    if (status != MH_OK) {
+    if (status == MH_OK) {
+        g_ownsMinHook = true;
+    } else if (status != MH_ERROR_ALREADY_INITIALIZED) {
         Log("MH_Initialize failed: %s", MH_StatusToString(status));
         return 1;
     }
@@ -134,6 +143,8 @@ DWORD WINAPI UnloadThread(void* module) {
         Log("A thread is still inside a hook, the library stays loaded");
         return 0;
     }
+    // Hooks the code of the module placed lead into it: they go with it.
+    MH_Uninitialize();
     FreeLibraryAndExitThread(static_cast<HMODULE>(module), 0);
 }
 
@@ -142,12 +153,25 @@ DWORD WINAPI RemoveThread(void*) {
     return 0;
 }
 
+void DisableHooks() {
+    for (void* target : g_hookTargets)
+        MH_QueueDisableHook(target);
+    MH_ApplyQueued();
+}
+
 // Once no thread runs the hooks: MinHook frees the trampolines they call
 // the application through, and Uninstall() clears the pointers to them.
-void RemoveHooks() {
+// MinHook stays initialized when the hook starts again by itself: hooks placed
+// by the code that uses the library since Start() would go with it.
+void RemoveHooks(bool uninitialize) {
     Sleep(100);
-    MH_RemoveHook(MH_ALL_HOOKS);
-    MH_Uninitialize();
+    for (void* target : g_hookTargets)
+        MH_RemoveHook(target);
+    g_hookTargets.clear();
+    if (uninitialize && g_ownsMinHook) {
+        MH_Uninitialize();
+        g_ownsMinHook = false;
+    }
     input::UninstallHooks();
     for (RendererSlot& slot : g_renderers)
         if (slot.attempted)
@@ -186,8 +210,10 @@ WORD ControllerButtons() {
 
 bool CreateHook(const char* name, void* target, void* detour, void** original) {
     MH_STATUS status = MH_CreateHook(target, detour, original);
-    if (status == MH_OK)
+    if (status == MH_OK) {
+        g_hookTargets.push_back(target);
         status = MH_EnableHook(target);
+    }
     if (status != MH_OK) {
         Log("Hooking %s at %p failed: %s", name, target, MH_StatusToString(status));
         return false;
@@ -237,7 +263,7 @@ bool Start() {
             Log("A thread is still inside a hook, the hook cannot start yet");
             return false;
         }
-        RemoveHooks();
+        RemoveHooks(false);
         g_hooksIdle = true;
     }
     g_unloadRequested = false;
@@ -269,10 +295,10 @@ void Stop() {
             Log("The overlay is still drawing, it is released when the frame ends");
     }
 
-    MH_DisableHook(MH_ALL_HOOKS);
+    DisableHooks();
     g_hooksIdle = WaitForIdleHooks(2000);
     if (g_hooksIdle)
-        RemoveHooks();
+        RemoveHooks(!StoppingToResume());
     else
         Log("A thread is still inside a hook, the hooks are removed on the next start");
 

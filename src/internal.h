@@ -132,6 +132,8 @@ void AbandonRenderer();
 // it again with the menu open when the menu key or buttons are pressed in
 // the application. Runs on a thread of its own.
 void StopUntilMenuInput();
+// True while StopUntilMenuInput() stops the hook.
+bool StoppingToResume();
 // Destroys the ImGui context, after the renderer backend released its textures.
 void DestroyContext();
 // Called on the thread where work run by Guarded() raised an exception.
