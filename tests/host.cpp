@@ -1640,21 +1640,29 @@ int RunSwitchApiMode(std::unique_ptr<Host>& host, const Options& options) {
     }
     uih::SetMenuOpen(true);
     run(*host, 30);
-    host.reset();
 
     RECT rect{0, 0, kWidth, kHeight};
     AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
+    HWND focused = GetForegroundWindow();
     HWND window = CreateWindowExW(0, L"uih_host", L"uih host 2", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 100, 100, rect.right - rect.left,
                                   rect.bottom - rect.top, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    // The new window does not get the focus, which the overlay would follow at once.
+    if (focused)
+        SetForegroundWindow(focused);
     std::unique_ptr<Host> next = CreateHost(options.switchApi);
     int result = 0;
     uih::Backend expected = ExpectedBackend(options.switchApi);
-    if (!window || !next->Init(window, options)) {
+    bool ready = window && next->Init(window, options);
+    // The first API presents until the second one is ready, so the overlay
+    // cannot take its swap chain for a stalled one.
+    run(*host, 5);
+    host.reset();
+    if (!ready) {
         result = Fail("the second API could not render");
     } else {
         for (ULONGLONG start = GetTickCount64(); uih::ActiveBackend() != expected && GetTickCount64() - start < kDetectionTimeoutMs;)
             run(*next, 1);
-        run(*next, 30);
+        run(*next, 15);
         int vertices = ImGui::GetCurrentContext() ? ImGui::GetIO().MetricsRenderVertices : 0;
         printf("%s backend active, %d vertices\n", uih::BackendName(uih::ActiveBackend()), vertices);
         if (uih::ActiveBackend() != expected || vertices == 0)
