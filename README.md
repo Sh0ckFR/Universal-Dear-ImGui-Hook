@@ -503,9 +503,9 @@ They need `libx11-dev libxtst-dev libgl-dev libegl-dev`; without a display, run 
 </details>
 
 <details>
-<summary><b>The CI</b>: what runs on every push and pull request</summary>
+<summary><b>The CI</b>: what runs on every pull request and on <code>master</code></summary>
 
-The [CI](.github/workflows/build.yml) runs on every push and pull request:
+The [CI](.github/workflows/build.yml) runs on every pull request, on `master` and on tags, and by hand on any branch from the Actions tab:
 
 | Job | Checks |
 | --- | --- |
