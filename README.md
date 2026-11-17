@@ -448,6 +448,7 @@ Without a GPU, as on the CI runners, Direct3D uses WARP, and Mesa's software dri
 | `--capture` | Checks the overlay and an exact color on screen |
 | `--format srgb\|float` | Back buffer storing linear values |
 | `--decoy-queue` | A second D3D12 device executes work every frame |
+| `--composition` | The D3D11 or D3D12 swap chain is made for composition, without a window |
 | `--ignore-suboptimal` | The Vulkan host recreates its swap chain after `VK_ERROR_OUT_OF_DATE_KHR` only, as many engines do: the overlay, started after the swap chain was created, must still show |
 | `--scale <s>`, `--warp` | Fixed interface scale; software rasterizer |
 | `--resize` | Window and back buffers resized to 960x640, then 720x560, with the menu open |
