@@ -184,6 +184,19 @@ DXGI_SWAP_CHAIN_DESC SwapChainDesc(HWND window, const Options& options) {
     return desc;
 }
 
+DXGI_SWAP_CHAIN_DESC1 CompositionDesc() {
+    DXGI_SWAP_CHAIN_DESC1 desc{};
+    desc.Width = kWidth;
+    desc.Height = kHeight;
+    desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    desc.SampleDesc.Count = 1;
+    desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    desc.BufferCount = 2;
+    desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+    desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+    return desc;
+}
+
 // With UIH_TEST_D3D_DEBUG set, the D3D10, 11 and 12 hosts create their
 // device with the debug layer, which also checks what the hook does on that
 // device, and count the errors it stored.
@@ -311,10 +324,30 @@ struct D3D11Host : Host {
 
     bool Fullscreen(bool on) override { return DxgiFullscreen(swapChain, on) && Resize(0, 0); }
 
+    bool InitComposition(D3D_DRIVER_TYPE driver, UINT flags) {
+        if (FAILED(D3D11CreateDevice(nullptr, driver, nullptr, flags, nullptr, 0, D3D11_SDK_VERSION, &device, nullptr, &context)))
+            return false;
+        IDXGIDevice* dxgiDevice = nullptr;
+        IDXGIAdapter* adapter = nullptr;
+        IDXGIFactory2* factory = nullptr;
+        IDXGISwapChain1* swapChain1 = nullptr;
+        DXGI_SWAP_CHAIN_DESC1 desc = CompositionDesc();
+        if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&dxgiDevice))) && SUCCEEDED(dxgiDevice->GetAdapter(&adapter)) &&
+            SUCCEEDED(adapter->GetParent(IID_PPV_ARGS(&factory))))
+            factory->CreateSwapChainForComposition(device, &desc, nullptr, &swapChain1);
+        Release(factory);
+        Release(adapter);
+        Release(dxgiDevice);
+        swapChain = swapChain1;
+        return swapChain && CreateTarget();
+    }
+
     bool Init(HWND window, const Options& options) override {
         DXGI_SWAP_CHAIN_DESC desc = SwapChainDesc(window, options);
         D3D_DRIVER_TYPE driver = options.warp ? D3D_DRIVER_TYPE_WARP : D3D_DRIVER_TYPE_HARDWARE;
         UINT flags = D3DDebug() ? D3D11_CREATE_DEVICE_DEBUG : 0;
+        if (options.composition)
+            return InitComposition(driver, flags);
         if (FAILED(D3D11CreateDeviceAndSwapChain(nullptr, driver, nullptr, flags, nullptr, 0, D3D11_SDK_VERSION, &desc, &swapChain, &device, nullptr, &context)))
             return false;
         return CreateTarget();
@@ -479,7 +512,10 @@ struct D3D12Host : Host {
         desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
         IDXGISwapChain1* swapChain1 = nullptr;
         Settle(options);
-        HRESULT hr = factory->CreateSwapChainForHwnd(queue, window, &desc, nullptr, nullptr, &swapChain1);
+        if (options.composition)
+            desc = CompositionDesc();
+        HRESULT hr = options.composition ? factory->CreateSwapChainForComposition(queue, &desc, nullptr, &swapChain1)
+                                         : factory->CreateSwapChainForHwnd(queue, window, &desc, nullptr, nullptr, &swapChain1);
         factory->Release();
         if (FAILED(hr))
             return false;
@@ -2212,6 +2248,7 @@ int main(int argc, char** argv) {
         else if (arg == "--fault" && i + 1 < argc) options.fault = argv[++i];
         else if (arg == "--second-window") options.secondWindow = true;
         else if (arg == "--shared-device") options.sharedDevice = true;
+        else if (arg == "--composition") options.composition = true;
         else if (arg == "--capture-frame") options.captureFrame = true;
         else if (arg == "--remote") options.remote = true;
         else if (arg == "--textures" && i + 1 < argc) options.textures = atoi(argv[++i]);
@@ -2238,7 +2275,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--own-hooks before|after] [--fault access|exception|draw] [--second-window [--shared-device]] [--capture-frame] [--remote] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--own-hooks before|after] [--fault access|exception|draw] [--second-window [--shared-device]] [--composition] [--capture-frame] [--remote] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 

@@ -67,6 +67,8 @@ struct Options {
     bool secondWindow = false;
     // The second window renders with the device of the first one.
     bool sharedDevice = false;
+    // D3D11, D3D12: the swap chain is made for composition, without a window.
+    bool composition = false;
     // Copies a frame with uih::CaptureFrame() while the menu is open.
     bool captureFrame = false;
     // Drives the remote control as remote/uih_mcp.py does, then stops the hook

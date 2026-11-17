@@ -1,10 +1,8 @@
 #pragma once
 
-#include <dxgiformat.h>
+#include <dxgi.h>
 
 #include "MinHook.h"
-
-struct IDXGISwapChain;
 
 namespace uih::detail {
 
@@ -73,6 +71,8 @@ DXGI_FORMAT RenderTargetFormat(DXGI_FORMAT format);
 bool StoresLinear(DXGI_FORMAT format);
 // Layout of the texels of a render target format, for CaptureFrame().
 TexelLayout DxgiTexelLayout(DXGI_FORMAT format);
+// The window of the process of its size for a swap chain made for composition, which has none.
+HWND SwapChainWindow(IDXGISwapChain* swapChain, const DXGI_SWAP_CHAIN_DESC& desc);
 // Hidden window for dummy swap chains.
 HWND CreateHiddenWindow();
 

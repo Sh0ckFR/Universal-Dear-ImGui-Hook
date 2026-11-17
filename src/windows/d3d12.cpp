@@ -321,7 +321,7 @@ bool Init(IDXGISwapChain* swapChain, ID3D12CommandQueue* queue) {
     DXGI_FORMAT format = RenderTargetFormat(desc.BufferDesc.Format);
     if (g_device && (device != g_device || queue != g_queue || format != g_format || desc.BufferCount != g_bufferCount))
         Teardown();
-    if (!BindWindow(desc.OutputWindow)) {
+    if (!BindWindow(SwapChainWindow(swapChain, desc))) {
         device->Release();
         return false;
     }
@@ -434,6 +434,9 @@ std::vector<uint8_t> ReadCapture(const D3D12_PLACED_SUBRESOURCE_FOOTPRINT& footp
 }
 
 void Render(IDXGISwapChain* swapChain) {
+    // The swap chain may present while the hooks are still being installed.
+    if (!g_executeCommandLists)
+        return;
     bool known = false;
     ID3D12CommandQueue* queue = QueueFor(swapChain, known);
     if (!queue)
