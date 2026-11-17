@@ -81,6 +81,8 @@ struct OverlayTarget {
 std::timed_mutex g_frameMutex;
 OverlayTarget g_target;
 std::chrono::steady_clock::time_point g_lastFocusCheck{};
+// The backend of the target is gone: the next swap chain to present takes the overlay.
+std::atomic<bool> g_targetGone{false};
 // Thread that drew the last overlay frame, the one to release its resources.
 std::atomic<std::thread::id> g_renderThread{};
 constexpr auto kStalledTarget = std::chrono::milliseconds(500);
@@ -89,6 +91,8 @@ constexpr auto kFocusCheckInterval = std::chrono::milliseconds(250);
 bool IsOverlayTarget(uint64_t swapchain, NativeWindow window) {
     auto now = std::chrono::steady_clock::now();
     OverlayTarget& target = g_target;
+    if (g_targetGone.exchange(false))
+        target = {};
     if (swapchain == target.swapchain) {
         target.lastPresent = now;
         return true;
@@ -268,8 +272,10 @@ bool ClaimBackend(Backend backend) {
 
 void ReleaseBackend(Backend backend) {
     Backend expected = backend;
-    if (g_activeBackend.compare_exchange_strong(expected, Backend::None))
+    if (g_activeBackend.compare_exchange_strong(expected, Backend::None)) {
+        g_targetGone = true;
         Log("%s backend released", BackendName(backend));
+    }
 }
 
 bool BeginOverlayFrame(uint64_t swapchain, NativeWindow window) {
@@ -526,6 +532,7 @@ void Start(const Config& config) {
     g_teardownPending = false;
     g_faulted = false;
     g_target = {};
+    g_targetGone = false;
     g_renderThread = std::thread::id();
     g_state = State::Running;
     if (!platform::Start()) {
