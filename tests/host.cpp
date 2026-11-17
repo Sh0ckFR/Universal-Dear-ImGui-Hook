@@ -33,6 +33,7 @@
 #include <utility>
 #include <vector>
 
+#include "MinHook.h"
 #include "imgui.h"
 #include "imgui_internal.h"
 
@@ -1352,6 +1353,106 @@ int RunRemoveMode(HWND window, Host& host) {
     return result;
 }
 
+#ifdef _MSC_VER
+#define UIH_NOINLINE __declspec(noinline)
+#else
+#define UIH_NOINLINE __attribute__((noinline))
+#endif
+
+// A function of the host, as one of a game, and the detour the host places on it.
+UIH_NOINLINE int OwnTarget(int value) {
+    volatile int doubled = value * 2;
+    return doubled + 1;
+}
+
+int OwnDetour(int) { return -1; }
+
+int (*volatile g_ownTarget)(int) = OwnTarget;
+
+// The host places a hook of its own with the MinHook the library uses, as a
+// trainer does on functions of its game. "before": the host initializes
+// MinHook before uih::Start(); the overlay must still start, and the hook
+// and MinHook outlive uih::Stop(). "after": the host hooks once the library
+// initialized MinHook; its hook must outlive the removal of the overlay by
+// F11 and its return by INSERT.
+int RunOwnHooksMode(HWND window, Host& host, const Options& options) {
+    auto run = [&](int frames) {
+        for (int frame = 0; frame < frames; ++frame) {
+            PumpMessages();
+            host.Frame();
+        }
+    };
+    auto waitFor = [&](auto condition) {
+        for (ULONGLONG start = GetTickCount64(); !condition() && GetTickCount64() - start < kDetectionTimeoutMs;)
+            run(1);
+        return condition();
+    };
+    auto tap = [&](int key) {
+        if (!PressKey(window, key))
+            return false;
+        run(5);
+        HoldKey(key, false);
+        return true;
+    };
+    auto hook = [] {
+        void* target = reinterpret_cast<void*>(&OwnTarget);
+        return MH_CreateHook(target, reinterpret_cast<void*>(&OwnDetour), nullptr) == MH_OK && MH_EnableHook(target) == MH_OK;
+    };
+    auto hooked = [] { return g_ownTarget(1) == -1; };
+    auto active = [] { return uih::ActiveBackend() != uih::Backend::None; };
+
+    if (options.ownHooks == "before") {
+        if (MH_Initialize() != MH_OK || !hook() || !hooked())
+            return Fail("the host could not place its hook");
+        for (int cycle = 0; cycle < 2; ++cycle) {
+            StartHook(options);
+            bool started = waitFor(active);
+            run(30);
+            uih::Stop();
+            if (!started)
+                return Fail("the overlay did not start with MinHook already initialized");
+            if (!hooked())
+                return Fail("uih::Stop() removed the hook of the host");
+        }
+        if (MH_Uninitialize() != MH_OK)
+            return Fail("uih::Stop() uninitialized the MinHook of the host");
+        printf("PASS: hook of the host placed before the overlay\n");
+        return 0;
+    }
+
+    StartHook(options);
+    int result = 0;
+    if (!waitFor(active))
+        result = Fail("backend was not detected");
+    BringToFront(window);
+    run(30);
+    if (result == 0 && (!hook() || !hooked()))
+        result = Fail("the host could not place its hook");
+    if (result == 0 && !tap(VK_INSERT))
+        result = Skip("the host window does not have the focus");
+    if (result == 0 && !waitFor([] { return uih::IsMenuOpen(); }))
+        result = Fail("the menu did not open");
+    if (result == 0 && !tap(VK_F11))
+        result = Skip("the host window lost the focus");
+    if (result == 0 && !waitFor([] { return uih::ActiveBackend() == uih::Backend::None && !ImGui::GetCurrentContext(); }))
+        result = Fail("the unload key did not remove the overlay");
+    if (result == 0) {
+        run(60);
+        if (!hooked())
+            result = Fail("removing the overlay removed the hook of the host");
+    }
+    if (result == 0 && !tap(VK_INSERT))
+        result = Skip("the host window lost the focus");
+    if (result == 0 && !waitFor([&] { return uih::IsMenuOpen() && active(); }))
+        result = Fail("the menu key did not bring the overlay back");
+    if (result == 0 && !hooked())
+        result = Fail("the return of the overlay removed the hook of the host");
+    uih::Stop();
+    if (result == 0)
+        printf("PASS: hook of the host placed after the overlay\n");
+    return result;
+}
+
 // A second window, with its own device and swap chain, presents after the
 // first one every frame. The overlay stays on one window instead of moving at
 // every present, follows the focus, and goes back to the first window when
@@ -2112,6 +2213,7 @@ int main(int argc, char** argv) {
         else if (arg == "--reload") options.reload = true;
         else if (arg == "--fullscreen") options.fullscreen = true;
         else if (arg == "--remove") options.remove = true;
+        else if (arg == "--own-hooks" && i + 1 < argc) options.ownHooks = argv[++i];
         else if (arg == "--fault" && i + 1 < argc) options.fault = argv[++i];
         else if (arg == "--second-window") options.secondWindow = true;
         else if (arg == "--shared-device") options.sharedDevice = true;
@@ -2141,7 +2243,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--fault access|exception|draw] [--second-window [--shared-device]] [--capture-frame] [--remote] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--own-hooks before|after] [--fault access|exception|draw] [--second-window [--shared-device]] [--capture-frame] [--remote] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -2211,6 +2313,12 @@ int main(int argc, char** argv) {
     }
     if (options.remove) {
         int result = RunRemoveMode(window, *host);
+        host.reset();
+        DestroyWindow(window);
+        return result;
+    }
+    if (!options.ownHooks.empty()) {
+        int result = RunOwnHooksMode(window, *host, options);
         host.reset();
         DestroyWindow(window);
         return result;
