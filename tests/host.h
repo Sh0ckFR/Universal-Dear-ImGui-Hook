@@ -59,8 +59,7 @@ struct Options {
     bool fullscreen = false;
     // Removes the overlay with the unload key and brings it back with the menu key.
     bool remove = false;
-    // "before" or "after": the host places a hook of its own with MinHook
-    // before or after the library starts.
+    // "before" or "after" the library starts: the host places a hook with MinHook.
     std::string ownHooks;
     // "access" or "exception": the render callback faults, as a bug in a menu would.
     std::string fault;

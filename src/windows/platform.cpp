@@ -40,10 +40,8 @@ RendererSlot g_renderers[] = {
 
 HWND g_window = nullptr;
 
-// MinHook serves the whole module: the code that uses the library may place
-// hooks of its own with it. These are the overlay's, the only ones it removes.
+// Hooks of the overlay: the code that uses the library may place its own with MinHook.
 std::vector<void*> g_hookTargets;
-// MH_Initialize() succeeded here, not in the code that uses the library.
 bool g_ownsMinHook = false;
 
 // ntdll DLL load notifications -------------------------------------------
@@ -143,7 +141,7 @@ DWORD WINAPI UnloadThread(void* module) {
         Log("A thread is still inside a hook, the library stays loaded");
         return 0;
     }
-    // Hooks the code of the module placed lead into it: they go with it.
+    // Every hook left leads into the module.
     MH_Uninitialize();
     FreeLibraryAndExitThread(static_cast<HMODULE>(module), 0);
 }
@@ -161,8 +159,6 @@ void DisableHooks() {
 
 // Once no thread runs the hooks: MinHook frees the trampolines they call
 // the application through, and Uninstall() clears the pointers to them.
-// MinHook stays initialized when the hook starts again by itself: hooks placed
-// by the code that uses the library since Start() would go with it.
 void RemoveHooks(bool uninitialize) {
     Sleep(100);
     for (void* target : g_hookTargets)

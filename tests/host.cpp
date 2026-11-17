@@ -1359,7 +1359,6 @@ int RunRemoveMode(HWND window, Host& host) {
 #define UIH_NOINLINE __attribute__((noinline))
 #endif
 
-// A function of the host, as one of a game, and the detour the host places on it.
 UIH_NOINLINE int OwnTarget(int value) {
     volatile int doubled = value * 2;
     return doubled + 1;
@@ -1369,12 +1368,8 @@ int OwnDetour(int) { return -1; }
 
 int (*volatile g_ownTarget)(int) = OwnTarget;
 
-// The host places a hook of its own with the MinHook the library uses, as a
-// trainer does on functions of its game. "before": the host initializes
-// MinHook before uih::Start(); the overlay must still start, and the hook
-// and MinHook outlive uih::Stop(). "after": the host hooks once the library
-// initialized MinHook; its hook must outlive the removal of the overlay by
-// F11 and its return by INSERT.
+// The host hooks OwnTarget() with the MinHook the library uses, before
+// uih::Start() or once the overlay runs: its hook must stay.
 int RunOwnHooksMode(HWND window, Host& host, const Options& options) {
     auto run = [&](int frames) {
         for (int frame = 0; frame < frames; ++frame) {
