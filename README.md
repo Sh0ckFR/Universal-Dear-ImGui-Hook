@@ -274,7 +274,7 @@ Everything is in `include/uih.h`, namespace `uih`.
 <details>
 <summary><b>Startup</b>: hooks found through dummy objects, or symbol interposition on Linux</summary>
 
-`Start()` launches a worker thread. On Windows it hooks every graphics and input DLL already loaded, then the others as they load (`LdrRegisterDllNotification`). The hooks are placed with MinHook on functions found through dummy objects: a hidden window, a D3D device, a Vulkan device per GPU. On Linux, the library exports the hooked functions under their own names and overrides `dlsym()`, so the game calls them whether it links them or looks them up like SDL and GLFW do.
+`Start()` launches a worker thread. On Windows it hooks every graphics and input DLL already loaded, then the others as they load (`LdrRegisterDllNotification`). The hooks are placed with MinHook on functions found through dummy objects: a hidden window, a D3D device, a Vulkan device per GPU. Your code can place hooks of its own with the same MinHook (link `minhook`): the library only removes its own, including when `unloadKey` removes the overlay or an exception does. Call `MH_Initialize()` before `Start()` to keep MinHook after `Stop()` too; otherwise `Stop()` uninitializes it, as does the unload of the DLL by `unloadKey` in every case. On Linux, the library exports the hooked functions under their own names and overrides `dlsym()`, so the game calls them whether it links them or looks them up like SDL and GLFW do.
 
 </details>
 
@@ -454,6 +454,7 @@ Without a GPU, as on the CI runners, Direct3D uses WARP, and Mesa's software dri
 | `--fullscreen` | 800x600 exclusive fullscreen (D3D9, DXGI) or display mode change with a borderless window (Vulkan, OpenGL), then back; the window must cover the display and the overlay follow it. Skipped unless `UIH_TEST_FULLSCREEN=1`, set by the CI |
 | `--reload` | The overlay is started a second time: `Start()` after `Stop()`, or with `--dll` the DLL injected again, or, for a DLL named `dinput8.dll`, brought back by `INSERT` after `F11` |
 | `--remove` | `F11` removes the overlay and `INSERT` brings it back, twice, without a module to free |
+| `--own-hooks before\|after` | The host places a hook of its own with MinHook, before `Start()` or once the overlay runs: the overlay must start, and the hook outlive `Stop()`, or `F11` and `INSERT` |
 | `--second-window` | A second window with its own device presents too: the overlay must stay on one window, follow the focus, and come back when the second window stops presenting. With `--shared-device` (Vulkan, D3D12), the second window renders with the device of the first |
 | `--gpu-latency ms` | The D3D12 GPU runs each frame `ms` after it was submitted, as a busy GPU does: the frames of the overlay are still in flight when it moves to another swap chain |
 | `--capture-frame` | Another thread copies a frame with `uih::CaptureFrame()` while the menu is open: the copy must have the size of the back buffer and show the game where the menu covers it |
