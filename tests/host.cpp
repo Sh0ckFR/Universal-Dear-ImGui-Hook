@@ -201,6 +201,8 @@ DXGI_SWAP_CHAIN_DESC1 CompositionDesc() {
 // device with the debug layer, which also checks what the hook does on that
 // device, and count the errors it stored.
 bool D3DDebug() { return getenv("UIH_TEST_D3D_DEBUG") != nullptr; }
+// The debug layer of D3D12 cannot be enabled once the process has a device, as the hook does.
+bool g_hookStarted = false;
 
 template <typename Message, typename InfoQueue>
 int CountDebugErrors(InfoQueue* queue) {
@@ -463,7 +465,7 @@ struct D3D12Host : Host {
         if (options.warp)
             factory->EnumWarpAdapter(IID_PPV_ARGS(&adapter));
         ID3D12Debug* debug = nullptr;
-        if (D3DDebug() && SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)))) {
+        if (D3DDebug() && !g_hookStarted && SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)))) {
             debug->EnableDebugLayer();
             debug->Release();
         }
@@ -986,6 +988,7 @@ void StartHook(const Options& options) {
     config.render = DrawTestMenu;
     config.setup = [] { g_setupCalled = true; };
     config.debugLog = true;
+    g_hookStarted = true;
     uih::Start(config);
 }
 
