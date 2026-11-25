@@ -26,6 +26,12 @@ float Scale();
 // Polled while the hook is stopped: true when `keysym` is down and a window
 // of this process has the focus, or the focus follows the pointer.
 bool KeyDownInApplication(int keysym);
+// Major opcode of XInput on the X server, 0 when unknown.
+uint8_t XInputOpcode();
+// True for the connection the overlay reads the input from.
+bool OwnConnection(const void* connection);
+// Turns of the mouse wheel the application did not see, for the menu.
+void AddWheel(int x, int y);
 } // namespace input
 
 namespace interpose {
@@ -52,6 +58,7 @@ struct Library {
 extern const Library kGlx;
 extern const Library kEgl;
 extern const Library kVulkan;
+extern const Library kXcb;
 
 } // namespace interpose
 

@@ -104,6 +104,7 @@ else()
         src/linux/platform.cpp
         src/linux/interpose.cpp
         src/linux/x11.cpp
+        src/linux/events.cpp
         src/linux/opengl.cpp
         src/linux/remote.cpp)
     target_link_libraries(uih PUBLIC uih_imgui PRIVATE PkgConfig::UIH_XCB Threads::Threads ${CMAKE_DL_LIBS})

@@ -172,6 +172,16 @@ else()
         uih_add_remote_test(preload_glx_remote --api opengl)
         uih_add_remote_test(preload_egl_remote --api opengl --egl)
         uih_add_remote_test(preload_vulkan_remote --api vulkan)
+
+        # The hook with a probe of the mouse wheel, for the input scenario.
+        add_library(uih_input_preload SHARED input_preload.cpp)
+        target_link_libraries(uih_input_preload PRIVATE uih)
+        target_link_options(uih_input_preload PRIVATE LINKER:--no-undefined)
+        string(REPLACE $<TARGET_FILE:uih_example> $<TARGET_FILE:uih_input_preload> UIH_INPUT_PRELOAD "${UIH_PRELOAD}")
+        foreach(api opengl vulkan)
+            uih_add_host_test(preload_${api}_input --api ${api} --input x11)
+            set_tests_properties(preload_${api}_input PROPERTIES ENVIRONMENT "LD_PRELOAD=${UIH_INPUT_PRELOAD};${UIH_SANITIZER_OPTIONS}")
+        endforeach()
         # The Vulkan loader opened as libvulkan.so, the name the development package installs.
         find_library(UIH_VULKAN_LOADER NAMES libvulkan.so.1)
         if(UIH_VULKAN_LOADER)
