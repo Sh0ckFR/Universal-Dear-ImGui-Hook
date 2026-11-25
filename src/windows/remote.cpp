@@ -204,15 +204,31 @@ int KeyCode(const std::string& name) {
     return 0;
 }
 
+namespace {
+
+// The window the overlay draws on, or before its first frame the main window
+// of the process: another window of the game may have the focus.
+HWND TargetWindow() {
+    HWND window = BoundWindow();
+    return window && IsWindowVisible(window) ? window : input::FindProcessWindow();
+}
+
+bool HasFocus(HWND window) {
+    HWND foreground = GetForegroundWindow();
+    return foreground && (foreground == window || foreground == GetAncestor(window, GA_ROOT));
+}
+
+} // namespace
+
 // SendInput when the game has the focus. Otherwise, as when the player types
 // to the assistant in another window, the keys go to the game window as
 // messages, which games that poll the keyboard state do not see. Stop()
 // releases the keys at once.
 std::string HoldKeys(const std::vector<int>& keys, unsigned ms) {
-    HWND window = input::FindProcessWindow();
+    HWND window = TargetWindow();
     if (!window)
         return "error the game has no visible window";
-    if (GetForegroundWindow() == window) {
+    if (HasFocus(window)) {
         SendKeys(keys, false);
         WaitForSingleObject(g_stopEvent, ms);
         SendKeys(keys, true);
@@ -240,10 +256,10 @@ std::string ClickAt(int x, int y, int button, unsigned ms) {
     static const UINT kDownMessage[] = {0, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_RBUTTONDOWN};
     static const UINT kUpMessage[] = {0, WM_LBUTTONUP, WM_MBUTTONUP, WM_RBUTTONUP};
     static const WPARAM kHeld[] = {0, MK_LBUTTON, MK_MBUTTON, MK_RBUTTON};
-    HWND window = input::FindProcessWindow();
+    HWND window = TargetWindow();
     if (!window)
         return "error the game has no visible window";
-    if (GetForegroundWindow() == window) {
+    if (HasFocus(window)) {
         POINT point{x, y};
         ClientToScreen(window, &point);
         int left = GetSystemMetrics(SM_XVIRTUALSCREEN);
@@ -277,13 +293,13 @@ std::string ClickAt(int x, int y, int button, unsigned ms) {
 }
 
 bool GameWindow(uint32_t& width, uint32_t& height, bool& focused) {
-    HWND window = input::FindProcessWindow();
+    HWND window = TargetWindow();
     RECT client{};
     if (!window || !GetClientRect(window, &client))
         return false;
     width = static_cast<uint32_t>(client.right);
     height = static_cast<uint32_t>(client.bottom);
-    focused = GetForegroundWindow() == window;
+    focused = HasFocus(window);
     return true;
 }
 

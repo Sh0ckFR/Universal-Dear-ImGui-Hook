@@ -4,6 +4,7 @@
 
 #include <malloc.h>
 
+#include <atomic>
 #include <cwchar>
 #include <vector>
 
@@ -38,7 +39,7 @@ RendererSlot g_renderers[] = {
     {&kXInput910Hooks},
 };
 
-HWND g_window = nullptr;
+std::atomic<HWND> g_window{nullptr};
 
 // Hooks of the overlay: the code that uses the library may place its own with MinHook.
 std::vector<void*> g_hookTargets;
@@ -238,6 +239,8 @@ bool BindWindow(HWND window) {
     Log("Bound to window %p", window);
     return true;
 }
+
+NativeWindow BoundWindow() { return g_window; }
 
 void UnbindWindow() {
     InputLock lock;

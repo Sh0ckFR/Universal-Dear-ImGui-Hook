@@ -108,6 +108,8 @@ bool CreateContext();
 // Creates the ImGui context on first use and attaches the platform backend
 // and input hooks to `window`.
 bool BindWindow(NativeWindow window);
+// Window the overlay draws on, none before its first frame.
+NativeWindow BoundWindow();
 // Platform NewFrame, key polling, user callback and ImGui::Render().
 ImDrawData* Frame();
 // True while CaptureFrame() waits: the backend copies the frame of the game,

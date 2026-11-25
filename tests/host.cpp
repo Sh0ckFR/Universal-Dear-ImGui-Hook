@@ -1191,6 +1191,33 @@ int RemoteScenario(bool memory, Frame&& frame) {
         return Fail("the keys of the remote control did not reach the window");
     if (rightClick.rfind("ok ", 0) != 0 || g_remoteClickDowns == 0 || g_remoteClickUps == 0)
         return Fail("the clicks of the remote control did not reach the window");
+
+    // Another window of the game has the focus: the keys and clicks still go
+    // to the window of the overlay.
+    HWND other = CreateWindowExW(0, L"STATIC", L"", WS_POPUP | WS_VISIBLE, 0, 0, 50, 50, nullptr, nullptr, nullptr, nullptr);
+    SetForegroundWindow(other);
+    uih::SetMenuOpen(false);
+    int keyUps = g_remoteKeyUps;
+    int clickUps = g_remoteClickUps;
+    std::string otherKey;
+    std::string otherClick;
+    WhileRendering(
+        [&] {
+            RemoteClient client;
+            if (client.Open()) {
+                otherKey = client.Request("key u 50");
+                otherClick = client.Request("click " + std::to_string(kRemoteClick[0]) + " " + std::to_string(kRemoteClick[1]) + " right 50");
+            }
+        },
+        frame);
+    for (ULONGLONG start = GetTickCount64(); GetTickCount64() - start < 1000 && (g_remoteKeyUps == keyUps || g_remoteClickUps == clickUps);)
+        frame();
+    DestroyWindow(other);
+    uih::SetMenuOpen(true);
+    frame();
+    printf("another window focused: key %s, click %s\n", otherKey.c_str(), otherClick.c_str());
+    if (otherKey.rfind("ok ", 0) != 0 || otherClick.rfind("ok ", 0) != 0 || g_remoteKeyUps == keyUps || g_remoteClickUps == clickUps)
+        return Fail("the remote control did not reach the window of the overlay while another window of the game had the focus");
     return 0;
 }
 
