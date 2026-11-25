@@ -182,6 +182,23 @@ else()
             uih_add_host_test(preload_${api}_input --api ${api} --input x11)
             set_tests_properties(preload_${api}_input PROPERTIES ENVIRONMENT "LD_PRELOAD=${UIH_INPUT_PRELOAD};${UIH_SANITIZER_OPTIONS}")
         endforeach()
+        # The hook with a render callback that faults, for the fault scenario.
+        add_library(uih_fault_preload SHARED fault_preload.cpp)
+        target_link_libraries(uih_fault_preload PRIVATE uih)
+        target_link_options(uih_fault_preload PRIVATE LINKER:--no-undefined)
+        string(REPLACE $<TARGET_FILE:uih_example> $<TARGET_FILE:uih_fault_preload> UIH_FAULT_PRELOAD "${UIH_PRELOAD}")
+        # AddressSanitizer leaves the faults to the handler of the hook.
+        set(UIH_FAULT_SANITIZER_OPTIONS)
+        if(UIH_SANITIZE)
+            set(UIH_FAULT_SANITIZER_OPTIONS "ASAN_OPTIONS=detect_leaks=0:handle_segv=0" "UBSAN_OPTIONS=print_stacktrace=1")
+        endif()
+        foreach(api opengl vulkan)
+            foreach(fault access exception draw)
+                uih_add_host_test(preload_${api}_fault_${fault} --api ${api} --fault)
+                set_tests_properties(preload_${api}_fault_${fault} PROPERTIES
+                                     ENVIRONMENT "LD_PRELOAD=${UIH_FAULT_PRELOAD};UIH_TEST_FAULT=${fault};${UIH_FAULT_SANITIZER_OPTIONS}")
+            endforeach()
+        endforeach()
         # The Vulkan loader opened as libvulkan.so, the name the development package installs.
         find_library(UIH_VULKAN_LOADER NAMES libvulkan.so.1)
         if(UIH_VULKAN_LOADER)
