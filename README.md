@@ -51,6 +51,8 @@ Sections marked with ▶ unfold on click.
 | Windows, 32-bit | `Universal-ImGui-Hook-msvc-Win32.dll` |
 | Linux, x86-64 or ARM64 | `Universal-ImGui-Hook-linux-x86_64.so` or `-linux-aarch64.so` (glibc 2.28 or later) |
 
+Each release lists the SHA256 of its libraries in `SHA256SUMS`, and GitHub attests that the CI of this repository built them: `gh attestation verify Universal-ImGui-Hook-msvc-x64.dll --repo Sh0ckFR/Universal-Dear-ImGui-Hook` checks a file you downloaded.
+
 **2. Or build it.** On Windows, open `Universal-ImGui-Hook.sln` in Visual Studio 2022 or newer and build `Release|x64`: the DLL is `build/vs/x64/Release/Universal-ImGui-Hook.dll`. On Linux:
 
 ```sh
@@ -550,7 +552,7 @@ The [CI](.github/workflows/build.yml) runs on every pull request, on `master` an
 | DDNet, Godot on Windows | The DLL injected into the same games once they render: DDNet with OpenGL and Vulkan, Godot with Direct3D 12, Vulkan and Direct3D 11 (its OpenGL renderer through ANGLE), without GPU |
 | FetchContent consumer | The repository as a CMake dependency |
 
-Pushing a `v*` tag publishes the MSVC and Linux portable libraries as a release, once every job above has passed.
+Pushing a `v*` tag publishes the MSVC and Linux portable libraries as a release, once every job above has passed, with their SHA256 in `SHA256SUMS` and a build provenance attestation.
 
 </details>
 
