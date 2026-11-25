@@ -5,6 +5,7 @@
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -60,13 +61,15 @@ std::string CheckRemoteMemory(Client& client) {
 
     std::string modules = RemotePayload(client, client.Request("modules"));
     size_t line = modules.find("uih_host");
+    if (line == std::string::npos)
+        return "the module list does not show the host";
     size_t start = modules.rfind('\n', line);
     start = start == std::string::npos ? 0 : start + 1;
     uintptr_t base = strtoull(modules.c_str() + start, nullptr, 16);
     std::string name = modules.substr(line, modules.find('\n', line) - line);
     printf("modules: %zu bytes, executable %s at 0x%" PRIxPTR "\n", modules.size(), name.c_str(), base);
-    if (line == std::string::npos || base == 0)
-        return "the module list does not show the host";
+    if (base == 0)
+        return "the module list does not show the base of the host";
 
     char relative[300];
     snprintf(relative, sizeof(relative), "read %s+%" PRIxPTR " 4", name.c_str(), reinterpret_cast<uintptr_t>(&g_remoteValue) - base);
