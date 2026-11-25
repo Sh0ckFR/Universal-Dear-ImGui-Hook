@@ -474,6 +474,45 @@ std::vector<uint8_t> ToRgba(const void* texels, size_t pitch, uint32_t width, ui
     return rgba;
 }
 
+namespace {
+
+// Draw callbacks of the frame, replaced by GuardedCallback. Used by the
+// thread that draws the overlay only.
+std::vector<std::pair<const ImDrawCmd*, ImDrawCallback>>& DrawCallbacks() {
+    static std::vector<std::pair<const ImDrawCmd*, ImDrawCallback>> callbacks;
+    return callbacks;
+}
+bool g_callbackFaulted = false;
+
+// A fault in a callback returns to the backend, which restores the state of
+// the device as after any frame.
+void GuardedCallback(const ImDrawList* list, const ImDrawCmd* command) {
+    if (g_callbackFaulted)
+        return;
+    for (const auto& [cmd, callback] : DrawCallbacks()) {
+        if (cmd == command) {
+            g_callbackFaulted = !Guarded([&] { callback(list, command); });
+            return;
+        }
+    }
+}
+
+void GuardCallbacks(ImDrawData* drawData) {
+    auto& callbacks = DrawCallbacks();
+    callbacks.clear();
+    g_callbackFaulted = false;
+    for (ImDrawList* list : drawData->CmdLists) {
+        for (ImDrawCmd& command : list->CmdBuffer) {
+            if (command.UserCallback && command.UserCallback != ImDrawCallback_ResetRenderState) {
+                callbacks.emplace_back(&command, command.UserCallback);
+                command.UserCallback = GuardedCallback;
+            }
+        }
+    }
+}
+
+} // namespace
+
 ImDrawData* Frame() {
     UpdateTextures();
     {
@@ -497,7 +536,9 @@ ImDrawData* Frame() {
     t_inRenderCallback = false;
     remote::Draw();
     ImGui::Render();
-    return ImGui::GetDrawData();
+    ImDrawData* drawData = ImGui::GetDrawData();
+    GuardCallbacks(drawData);
+    return drawData;
 }
 
 void AbandonRenderer() {
