@@ -326,7 +326,7 @@ The overlay is drawn on one swap chain, its target, by one thread at a time; the
 <details>
 <summary><b>Faults</b>: why an exception in the overlay does not crash the game</summary>
 
-On Windows, what the overlay runs in the game's threads (frames, teardown, window messages) is protected by structured exception handling. An exception there, such as an access violation in the `render` callback, removes the overlay from another thread, as the unload key does without a `module`: the game keeps running, and the menu key or buttons bring the overlay back. The frame runs before the backends take a reference to the back buffer, so a fault leaks none.
+On Windows, what the overlay runs in the game's threads (frames, teardown, window messages) is protected by structured exception handling. An exception there, such as an access violation in the `render` callback, removes the overlay from another thread, as the unload key does without a `module`: the game keeps running, and the menu key or buttons bring the overlay back. The frame runs before the backends take a reference to the back buffer, so a fault leaks none. Draw callbacks of the application (`ImDrawList::AddCallback`) run under a protection of their own: after a fault in one, the backend finishes its frame and restores the state of the device, and the callbacks left in the frame are skipped.
 
 </details>
 
@@ -557,7 +557,6 @@ Pushing a `v*` tag publishes the MSVC and Linux portable libraries as a release,
 - When the game, or another overlay, subclasses the window after the hook, the hook's window procedure stays in its chain: the unload key leaves the DLL loaded, and injecting it again does not start it.
 - Native ARM64 Windows games are not supported: MinHook only handles x86 and x64.
 - Only Windows builds made with MSVC, the released ones, survive an exception in the overlay: MinGW-w64 has no structured exception handling, and Linux builds are not protected either.
-- D3D9: after an exception in a draw callback (`ImDrawList::AddCallback`), the state block of the Dear ImGui backend is never released, and the game cannot reset its device.
 
 **Linux**
 - Input is read from the X server: native Wayland windows get no menu input (run SDL games with `SDL_VIDEODRIVER=x11`), and the game still receives the keyboard and the mouse while the menu is open. The mouse wheel and input methods are not handled.
