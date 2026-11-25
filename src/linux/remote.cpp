@@ -3,6 +3,10 @@
 // the keys sent to the X server.
 #include "internal.h"
 
+#include <fcntl.h>
+#include <link.h>
+#include <sys/mman.h>
+
 #include <poll.h>
 #include <pthread.h>
 #include <signal.h>
@@ -16,6 +20,8 @@
 #include <xcb/xcbext.h>
 
 #include <cctype>
+#include <algorithm>
+#include <cstdint>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -531,6 +537,91 @@ void Stop() {
     g_listener = -1;
     g_stopEvent = -1;
     ClearText();
+}
+
+
+bool StopRequested() {
+    pollfd stop{g_stopEvent, POLLIN, 0};
+    return g_stopEvent >= 0 && poll(&stop, 1, 0) > 0;
+}
+
+std::vector<MemoryRegion> MemoryRegions() {
+    std::vector<MemoryRegion> regions;
+    FILE* maps = fopen("/proc/self/maps", "re");
+    if (!maps)
+        return regions;
+    char line[4096];
+    while (fgets(line, sizeof(line), maps)) {
+        unsigned long start = 0;
+        unsigned long end = 0;
+        char permissions[8] = {};
+        int pathAt = 0;
+        if (sscanf(line, "%lx-%lx %7s %*s %*s %*s %n", &start, &end, permissions, &pathAt) < 3)
+            continue;
+        const char* path = line + pathAt;
+        // Device memory, such as the GPU's, and the kernel's pages.
+        if (permissions[0] != 'r' || strncmp(path, "/dev/", 5) == 0 || strncmp(path, "[vvar", 5) == 0 || strncmp(path, "[vsyscall]", 10) == 0)
+            continue;
+        regions.push_back({start, end - start, permissions[1] == 'w'});
+    }
+    fclose(maps);
+    return regions;
+}
+
+std::vector<LoadedModule> LoadedModules() {
+    std::vector<LoadedModule> modules;
+    dl_iterate_phdr(
+        [](dl_phdr_info* info, size_t, void* context) {
+            uintptr_t low = UINTPTR_MAX;
+            uintptr_t high = 0;
+            for (int i = 0; i < info->dlpi_phnum; ++i) {
+                const auto& header = info->dlpi_phdr[i];
+                if (header.p_type != PT_LOAD)
+                    continue;
+                low = std::min<uintptr_t>(low, info->dlpi_addr + header.p_vaddr);
+                high = std::max<uintptr_t>(high, info->dlpi_addr + header.p_vaddr + header.p_memsz);
+            }
+            if (low >= high)
+                return 0;
+            auto* list = static_cast<std::vector<LoadedModule>*>(context);
+            // The executable comes first, without a name.
+            bool executable = list->empty() && (!info->dlpi_name || !info->dlpi_name[0]);
+            std::string path = executable ? "" : (info->dlpi_name ? info->dlpi_name : "");
+            if (executable) {
+                char buffer[4096];
+                ssize_t length = readlink("/proc/self/exe", buffer, sizeof(buffer) - 1);
+                path.assign(buffer, length > 0 ? static_cast<size_t>(length) : 0);
+            }
+            size_t slash = path.rfind('/');
+            list->push_back({slash == std::string::npos ? path : path.substr(slash + 1), low, high - low, executable});
+            return 0;
+        },
+        &modules);
+    return modules;
+}
+
+bool ReadMemory(uintptr_t address, void* out, size_t size) {
+    iovec local{out, size};
+    iovec remote{reinterpret_cast<void*>(address), size};
+    return process_vm_readv(getpid(), &local, 1, &remote, 1, 0) == static_cast<ssize_t>(size);
+}
+
+// /proc/self/mem writes read-only pages too, such as code.
+bool WriteMemory(uintptr_t address, const void* data, size_t size) {
+    int memory = open("/proc/self/mem", O_RDWR | O_CLOEXEC);
+    bool written = memory >= 0 && pwrite(memory, data, size, static_cast<off_t>(address)) == static_cast<ssize_t>(size);
+    if (memory >= 0)
+        close(memory);
+    if (written)
+        return true;
+    iovec local{const_cast<void*>(data), size};
+    iovec remote{reinterpret_cast<void*>(address), size};
+    return process_vm_writev(getpid(), &local, 1, &remote, 1, 0) == static_cast<ssize_t>(size);
+}
+
+void* AllocateScanMemory(size_t size) {
+    void* memory = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    return memory == MAP_FAILED ? nullptr : memory;
 }
 
 } // namespace uih::detail::remote

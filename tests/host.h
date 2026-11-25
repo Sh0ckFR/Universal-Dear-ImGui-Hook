@@ -75,6 +75,8 @@ struct Options {
     // Drives the remote control as remote/uih_mcp.py does, then stops the hook
     // while a client is connected.
     bool remote = false;
+    // With remote: the memory commands too, on values of the host.
+    bool remoteMemory = false;
     // Images created with uih::CreateTexture() and drawn every frame.
     int textures = 0;
     // Removes the device of the host while the menu is open, then creates a

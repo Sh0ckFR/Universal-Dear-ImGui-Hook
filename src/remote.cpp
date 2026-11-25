@@ -4,10 +4,11 @@
 // pipe (src/windows/remote.cpp) or a Unix socket (src/linux/remote.cpp).
 //
 // One request per line, local clients only:
-//   info                       -> ok <backend> <width>x<height> focused=0|1 menu=0|1
+//   info                       -> ok <backend> <width>x<height> focused=0|1 menu=0|1 memory=0|1
 //   screenshot <max size>      -> ok <width> <height>, then width * height RGB bytes
 //   text <seconds> <message>   -> ok         (\n in the message starts a new line)
 //   key <keys> <milliseconds>  -> ok <how the keys were sent>  (keys: space, or left+space held together)
+// and the memory commands of src/memory.cpp.
 // Failures answer: error <reason>
 #include "internal.h"
 
@@ -126,7 +127,8 @@ std::string Handle(const std::string& line, std::vector<uint8_t>& payload) {
         bool focused = false;
         GameWindow(width, height, focused);
         char answer[160];
-        snprintf(answer, sizeof(answer), "ok %s %ux%u focused=%d menu=%d", BackendName(ActiveBackend()), width, height, focused, IsMenuOpen());
+        snprintf(answer, sizeof(answer), "ok %s %ux%u focused=%d menu=%d memory=%d", BackendName(ActiveBackend()), width, height, focused,
+                 IsMenuOpen(), GetConfig().remoteMemory);
         return answer;
     }
     if (command == "screenshot")
@@ -135,6 +137,9 @@ std::string Handle(const std::string& line, std::vector<uint8_t>& payload) {
         return Text(rest);
     if (command == "key")
         return Keys(rest);
+    std::string answer;
+    if (HandleMemory(command, rest, payload, answer))
+        return answer;
     return "error unknown command";
 }
 

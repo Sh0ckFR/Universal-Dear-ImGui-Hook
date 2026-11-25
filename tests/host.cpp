@@ -4,6 +4,7 @@
 #include "uih.h"
 
 #include "host.h"
+#include "remote_memory.h"
 
 #include <d3d10_1.h>
 #include <d3d11.h>
@@ -985,6 +986,7 @@ void StartHook(const Options& options) {
     config.scale = options.scale;
     std::string pipe = RemotePipe();
     config.remoteControl = options.remote;
+    config.remoteMemory = options.remoteMemory;
     config.remotePipe = pipe.c_str();
     config.render = DrawTestMenu;
     config.setup = [] { g_setupCalled = true; };
@@ -1080,11 +1082,12 @@ void WhileRendering(Work&& work, Frame&& frame) {
 // shows the game without the overlay, the message is drawn, and the keys reach
 // the window once the menu is closed.
 template <typename Frame>
-int RemoteScenario(Frame&& frame) {
+int RemoteScenario(bool memory, Frame&& frame) {
     std::string info;
     std::string screenshot;
     std::string text;
     std::string unknownKey;
+    std::string memoryFailure;
     std::vector<uint8_t> rgb;
     WhileRendering(
         [&] {
@@ -1100,6 +1103,10 @@ int RemoteScenario(Frame&& frame) {
             }
             text = client.Request("text 5 hello\\nworld");
             unknownKey = client.Request("key nokey 50");
+            if (memory)
+                memoryFailure = CheckRemoteMemory(client);
+            else if (client.Request("read 1000 4").rfind("error memory access is off", 0) != 0)
+                memoryFailure = "the memory commands answer while remoteMemory is off";
         },
         frame);
     printf("info: %s\nscreenshot: %s\ntext: %s\nunknown key: %s\n", info.c_str(), screenshot.c_str(), text.c_str(), unknownKey.c_str());
@@ -1114,6 +1121,8 @@ int RemoteScenario(Frame&& frame) {
             return Fail("the screenshot does not show the frame of the game alone");
     if (text != "ok" || unknownKey.rfind("error unknown key nokey", 0) != 0)
         return Fail("the remote control does not answer its commands");
+    if (!memoryFailure.empty())
+        return Fail(memoryFailure.c_str());
     for (int i = 0; i < 3; ++i)
         frame();
     ImGuiWindow* message = ImGui::FindWindowByName("##uih_remote_message");
@@ -2305,6 +2314,7 @@ int main(int argc, char** argv) {
         else if (arg == "--composition") options.composition = true;
         else if (arg == "--capture-frame") options.captureFrame = true;
         else if (arg == "--remote") options.remote = true;
+        else if (arg == "--remote-memory") options.remote = options.remoteMemory = true;
         else if (arg == "--textures" && i + 1 < argc) options.textures = atoi(argv[++i]);
         else if (arg == "--remove-device") options.removeDevice = true;
         else if (arg == "--transfer-only") options.transferOnly = true;
@@ -2329,7 +2339,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--own-hooks before|after] [--fault access|exception|draw] [--second-window [--shared-device]] [--composition] [--capture-frame] [--remote] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--own-hooks before|after] [--fault access|exception|draw] [--second-window [--shared-device]] [--composition] [--capture-frame] [--remote [--remote-memory]] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -2540,7 +2550,7 @@ int main(int argc, char** argv) {
                     break;
             }
             if (options.remote) {
-                result = RemoteScenario([&] {
+                result = RemoteScenario(options.remoteMemory, [&] {
                     PumpMessages();
                     host->Frame();
                 });

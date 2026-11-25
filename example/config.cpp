@@ -32,4 +32,7 @@ void ApplySettings(uih::Config& config) {
     // otherwise.
     config.remoteControl = false;
     config.remotePipe = "universal-imgui-hook";
+    // With remoteControl: the assistant can also read, write and scan the
+    // memory of the game, as a memory editor does. Single-player games only.
+    config.remoteMemory = false;
 }

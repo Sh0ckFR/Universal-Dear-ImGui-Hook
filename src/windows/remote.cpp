@@ -3,6 +3,8 @@
 // keys sent with SendInput or as window messages.
 #include "internal.h"
 
+#include <tlhelp32.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
@@ -272,5 +274,59 @@ void Stop() {
     g_stopEvent = nullptr;
     ClearText();
 }
+
+
+bool StopRequested() { return g_stopEvent && Stopping(); }
+
+std::vector<MemoryRegion> MemoryRegions() {
+    constexpr DWORD kWritable = PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
+    constexpr DWORD kReadable = kWritable | PAGE_READONLY | PAGE_EXECUTE_READ;
+    // Uncached memory, such as memory of the GPU, is slow to read.
+    constexpr DWORD kSkipped = PAGE_GUARD | PAGE_NOACCESS | PAGE_NOCACHE | PAGE_WRITECOMBINE;
+    std::vector<MemoryRegion> regions;
+    SYSTEM_INFO system{};
+    GetSystemInfo(&system);
+    auto* address = static_cast<uint8_t*>(system.lpMinimumApplicationAddress);
+    MEMORY_BASIC_INFORMATION info{};
+    while (address < system.lpMaximumApplicationAddress && VirtualQuery(address, &info, sizeof(info)) == sizeof(info)) {
+        if (info.State == MEM_COMMIT && (info.Protect & kReadable) && !(info.Protect & kSkipped))
+            regions.push_back({reinterpret_cast<uintptr_t>(info.BaseAddress), info.RegionSize, (info.Protect & kWritable) != 0});
+        address = static_cast<uint8_t*>(info.BaseAddress) + info.RegionSize;
+    }
+    return regions;
+}
+
+std::vector<LoadedModule> LoadedModules() {
+    std::vector<LoadedModule> modules;
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, 0);
+    if (snapshot == INVALID_HANDLE_VALUE)
+        return modules;
+    HMODULE executable = GetModuleHandleW(nullptr);
+    MODULEENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    for (BOOL more = Module32FirstW(snapshot, &entry); more; more = Module32NextW(snapshot, &entry)) {
+        char name[MAX_PATH * 3] = {};
+        WideCharToMultiByte(CP_UTF8, 0, entry.szModule, -1, name, sizeof(name), nullptr, nullptr);
+        modules.push_back({name, reinterpret_cast<uintptr_t>(entry.modBaseAddr), entry.modBaseSize, entry.hModule == executable});
+    }
+    CloseHandle(snapshot);
+    return modules;
+}
+
+bool ReadMemory(uintptr_t address, void* out, size_t size) {
+    SIZE_T read = 0;
+    return ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(address), out, size, &read) && read == size;
+}
+
+// WriteProcessMemory makes read-only pages, such as code, writable for the write.
+bool WriteMemory(uintptr_t address, const void* data, size_t size) {
+    SIZE_T written = 0;
+    if (!WriteProcessMemory(GetCurrentProcess(), reinterpret_cast<void*>(address), data, size, &written) || written != size)
+        return false;
+    FlushInstructionCache(GetCurrentProcess(), reinterpret_cast<void*>(address), size);
+    return true;
+}
+
+void* AllocateScanMemory(size_t size) { return VirtualAlloc(nullptr, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE); }
 
 } // namespace uih::detail::remote

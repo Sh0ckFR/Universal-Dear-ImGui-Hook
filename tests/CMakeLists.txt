@@ -56,6 +56,7 @@ if(WIN32)
     uih_add_host_test(own_hooks_before --api d3d11 --own-hooks before)
     uih_add_host_test(own_hooks_after --api d3d11 --own-hooks after)
     uih_add_host_test(remote --api d3d11 --remote)
+    uih_add_host_test(remote_memory --api d3d11 --remote-memory)
     # Recovery from a crash of the overlay needs structured exception handling.
     if(MSVC)
         foreach(api d3d9 d3d10 d3d11 d3d12 vulkan opengl)

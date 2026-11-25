@@ -72,6 +72,79 @@ TOOLS = [
     },
 ]
 
+MEMORY_TYPES = {"i8": "<b", "i16": "<h", "i32": "<i", "i64": "<q", "f32": "<f", "f64": "<d"}
+MEMORY_NOTE = " Needs config.remoteMemory = true in example/config.cpp."
+ADDRESS = {"type": "string", "description": "Hexadecimal, such as 0x7ff6a1b2c3d4, or module+offset, such as game.exe+1a2b3c."}
+
+TOOLS += [
+    {
+        "name": "memory_modules",
+        "description": "Lists the modules loaded in the game (executable and libraries) with their base address and size." + MEMORY_NOTE,
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "memory_read",
+        "description": "Reads memory of the game: hexadecimal dump, and the first bytes as integers, floats and a pointer." + MEMORY_NOTE,
+        "inputSchema": {
+            "type": "object",
+            "properties": {"address": ADDRESS, "size": {"type": "integer", "description": "64 by default.", "minimum": 1, "maximum": 4096}},
+            "required": ["address"],
+        },
+    },
+    {
+        "name": "memory_write",
+        "description": "Writes a value or bytes into the memory of the game, code included." + MEMORY_NOTE,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "address": ADDRESS,
+                "type": {"type": "string", "enum": list(MEMORY_TYPES) + ["bytes"]},
+                "value": {"type": "string", "description": "A number of the type, or for bytes hexadecimal such as 90 90 90."},
+            },
+            "required": ["address", "type", "value"],
+        },
+    },
+    {
+        "name": "memory_find",
+        "description": "Starts a value scan of the writable memory of the game, as Cheat Engine does: finds every address holding the "
+        "value. Then change the value in the game (spend money, take damage) and narrow the scan with memory_next until a few "
+        "addresses are left. Floats match when they round to the value given, to as many decimals as it has." + MEMORY_NOTE,
+        "inputSchema": {
+            "type": "object",
+            "properties": {"type": {"type": "string", "enum": list(MEMORY_TYPES)}, "value": {"type": "string"}},
+            "required": ["type", "value"],
+        },
+    },
+    {
+        "name": "memory_next",
+        "description": "Narrows the last memory_find to the addresses that now hold a value, or whose value changed, did not change, "
+        "increased or decreased since the previous scan." + MEMORY_NOTE,
+        "inputSchema": {
+            "type": "object",
+            "properties": {"condition": {"type": "string", "description": "A value, or changed, unchanged, increased, decreased."}},
+            "required": ["condition"],
+        },
+    },
+    {
+        "name": "memory_results",
+        "description": "Addresses left by the last scan, with their current value and module+offset when they are in a module." + MEMORY_NOTE,
+        "inputSchema": {"type": "object", "properties": {"count": {"type": "integer", "description": "20 by default.", "minimum": 1, "maximum": 1000}}},
+    },
+    {
+        "name": "memory_pattern",
+        "description": "Finds a byte pattern in a module, such as an instruction to patch: hexadecimal bytes separated by spaces, ?? "
+        "for any byte. Up to 1000 addresses." + MEMORY_NOTE,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string", "description": "Such as 48 8B 05 ?? ?? ?? ?? 89 41 10."},
+                "module": {"type": "string", "description": "Module name from memory_modules; the executable by default."},
+            },
+            "required": ["pattern"],
+        },
+    },
+]
+
 # The font of the overlay covers Latin-1: typographic signs outside it become their ASCII forms.
 TYPOGRAPHY = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"', "\u2013": "-", "\u2014": "-", "\u2026": "...", "\u00a0": " ", "\u202f": " "})
 
@@ -106,6 +179,10 @@ def connect():
         try:
             return open(path, "r+b", buffering=0)
         except FileNotFoundError:
+            # Between two clients, the game creates the pipe again.
+            if attempt < 10:
+                time.sleep(0.1)
+                continue
             raise GameError(f"No game is under remote control on {path}: start the game, then load the DLL built with "
                             "config.remoteControl = true in example/config.cpp (python uih_mcp.py inject <game.exe> <dll>). "
                             "The unload key stops the remote control: inject the DLL again, or press the menu key in the game "
@@ -154,7 +231,9 @@ def call_tool(name, args):
     if name == "game_info":
         text, _ = request("info")
         backend, size, focused, menu = text.split()[1:5]
-        return [{"type": "text", "text": f"Graphics API: {backend}, window {size}, keyboard focus: {focused[8:] == '1'}, overlay menu open: {menu[5:] == '1'}"}]
+        memory = "memory=1" in text.split()
+        return [{"type": "text", "text": f"Graphics API: {backend}, window {size}, keyboard focus: {focused[8:] == '1'}, overlay menu open: "
+                 f"{menu[5:] == '1'}, memory tools: {'on' if memory else 'off'}"}]
     if name == "screenshot":
         size = int(args.get("max_size", 1280))
         text, rgb = request(f"screenshot {size}", payload=lambda answer: int(answer.split()[1]) * int(answer.split()[2]) * 3)
@@ -172,7 +251,68 @@ def call_tool(name, args):
             raise GameError("Give keys without spaces, such as space or right+space.")
         text, _ = request(f"key {key} {int(args.get('duration_ms', 150))}")
         return [{"type": "text", "text": f"Pressed {key}: {text[3:]}."}]
+    if name.startswith("memory_"):
+        return [{"type": "text", "text": memory_tool(name, args)}]
     raise GameError(f"Unknown tool {name}.")
+
+
+def text_payload(answer):
+    return int(answer.split()[1])
+
+
+def memory_tool(name, args):
+    if name == "memory_modules":
+        _, data = request("modules", payload=text_payload)
+        return data.decode("utf-8", "replace") or "No module."
+    if name == "memory_read":
+        address = str(args.get("address", "")).strip()
+        size = max(1, min(int(args.get("size", 64)), 4096))
+        _, data = request(f"read {address} {size}", payload=text_payload)
+        lines = []
+        for offset in range(0, len(data), 16):
+            row = data[offset:offset + 16]
+            ascii_text = "".join(chr(b) if 32 <= b < 127 else "." for b in row)
+            lines.append(f"+{offset:04x}  {row.hex(' '):<47}  {ascii_text}")
+        views = [f"{kind} {struct.unpack(code, data[:struct.calcsize(code)])[0]:g}" if kind[0] == "f" else
+                 f"{kind} {struct.unpack(code, data[:struct.calcsize(code)])[0]}"
+                 for kind, code in MEMORY_TYPES.items() if len(data) >= struct.calcsize(code)]
+        if len(data) >= 8:
+            views.append(f"pointer 0x{struct.unpack('<Q', data[:8])[0]:x}")
+        return "\n".join(lines) + "\nAt the address: " + ", ".join(views)
+    if name == "memory_write":
+        address = str(args.get("address", "")).strip()
+        kind = str(args.get("type", ""))
+        value = str(args.get("value", "")).strip()
+        if kind == "bytes":
+            data = bytes.fromhex(value)
+        elif kind in MEMORY_TYPES:
+            number = float(value) if kind[0] == "f" else int(value, 0)
+            code = MEMORY_TYPES[kind]
+            if kind[0] == "i" and number >= 1 << (struct.calcsize(code) * 8 - 1):
+                code = code.upper()  # Unsigned.
+            data = struct.pack(code, number)
+        else:
+            raise GameError("The type is i8, i16, i32, i64, f32, f64 or bytes.")
+        if not data:
+            raise GameError("Give at least one byte.")
+        request(f"write {address} {data.hex(' ')}")
+        return f"Wrote {len(data)} bytes at {address}."
+    if name == "memory_find":
+        text, _ = request(f"find {args.get('type', '')} {str(args.get('value', '')).strip()}")
+        words = text.split()
+        if len(words) >= 4:
+            return f"{words[1]} matches; the first {words[3]} are kept. Narrow them with memory_next."
+        return f"{words[1]} matches." + (" Narrow them with memory_next, or list them with memory_results." if words[1] != "0" else "")
+    if name == "memory_next":
+        text, _ = request(f"next {str(args.get('condition', '')).strip()}")
+        return f"{text.split()[1]} matches left."
+    if name == "memory_results":
+        _, data = request(f"results {int(args.get('count', 20))}", payload=text_payload)
+        return data.decode("utf-8", "replace") or "No match."
+    pattern = " ".join(str(args.get("pattern", "")).split())
+    module = str(args.get("module", "")).strip()
+    _, data = request(f"pattern {pattern} {module}".strip(), payload=text_payload)
+    return data.decode("utf-8", "replace") or "Not found."
 
 
 def reply(message_id, result=None, error=None):
