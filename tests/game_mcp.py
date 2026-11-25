@@ -103,7 +103,7 @@ def play(game, assistant, backend, screenshot):
     assistant.send({"jsonrpc": "2.0", "method": "notifications/initialized"})
     tools = sorted(tool["name"] for tool in assistant.request("tools/list", {})["tools"])
     memory = ["memory_find", "memory_modules", "memory_next", "memory_pattern", "memory_read", "memory_results", "memory_write"]
-    if tools != ["game_info"] + memory + ["press_key", "screenshot", "show_text"]:
+    if tools != ["click", "game_info"] + memory + ["press_key", "screenshot", "show_text"]:
         raise Failure(f"unexpected tools {tools}")
 
     _, text = assistant.call("game_info")
@@ -131,6 +131,9 @@ def play(game, assistant, backend, screenshot):
     _, text = assistant.call("game_info")
     if "menu open: True" not in text:
         raise Failure("the menu opened by the assistant is described as closed")
+    _, text = assistant.call("click", {"x": 20, "y": 20})
+    if not text.startswith("Clicked left at ") or "sent as mouse input" not in text:
+        raise Failure("the click was not sent as mouse input to the focused game")
 
     # The unload key ends the remote control with the overlay, while the
     # assistant holds it: the answer may be lost.

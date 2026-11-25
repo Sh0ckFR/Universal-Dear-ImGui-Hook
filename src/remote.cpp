@@ -8,6 +8,7 @@
 //   screenshot <max size>      -> ok <width> <height>, then width * height RGB bytes
 //   text <seconds> <message>   -> ok         (\n in the message starts a new line)
 //   key <keys> <milliseconds>  -> ok <how the keys were sent>  (keys: space, or left+space held together)
+//   click <x> <y> [left|right|middle] [milliseconds]  -> ok <how the click was sent>  (pixels of the game window)
 // and the memory commands of src/memory.cpp.
 // Failures answer: error <reason>
 #include "internal.h"
@@ -16,6 +17,7 @@
 #include <cctype>
 #include <chrono>
 #include <cstdio>
+#include <cstdint>
 #include <cstdlib>
 
 namespace uih::detail::remote {
@@ -115,6 +117,35 @@ std::string Keys(const std::string& rest) {
     return HoldKeys(keys, std::clamp<unsigned>(ms, 30, kMaxHoldMs));
 }
 
+std::string Click(const std::string& rest) {
+    const char* start = rest.c_str();
+    char* end = nullptr;
+    long x = strtol(start, &end, 10);
+    bool parsed = end != start;
+    start = end;
+    long y = strtol(start, &end, 10);
+    if (!parsed || end == start || x < INT32_MIN || x > INT32_MAX || y < INT32_MIN || y > INT32_MAX)
+        return "error give x and y in pixels of the game window, then optionally left, right or middle and milliseconds";
+    std::string name = "left";
+    unsigned ms = 100;
+    if (*end == ' ') {
+        std::string options = end + 1;
+        size_t split = options.find(' ');
+        name = options.substr(0, split);
+        if (split != std::string::npos)
+            ms = static_cast<unsigned>(strtoul(options.c_str() + split + 1, nullptr, 10));
+    }
+    int button = name == "left" ? 1 : name == "middle" ? 2 : name == "right" ? 3 : 0;
+    if (!button)
+        return "error unknown button " + name + ": use left, right or middle";
+    uint32_t width = 0;
+    uint32_t height = 0;
+    bool focused = false;
+    if (GameWindow(width, height, focused) && (x < 0 || y < 0 || static_cast<uint32_t>(x) >= width || static_cast<uint32_t>(y) >= height))
+        return "error the point is outside the game window, which is " + std::to_string(width) + "x" + std::to_string(height);
+    return ClickAt(static_cast<int>(x), static_cast<int>(y), button, std::clamp<unsigned>(ms, 30, kMaxHoldMs));
+}
+
 } // namespace
 
 std::string Handle(const std::string& line, std::vector<uint8_t>& payload) {
@@ -137,6 +168,8 @@ std::string Handle(const std::string& line, std::vector<uint8_t>& payload) {
         return Text(rest);
     if (command == "key")
         return Keys(rest);
+    if (command == "click")
+        return Click(rest);
     std::string answer;
     if (HandleMemory(command, rest, payload, answer))
         return answer;

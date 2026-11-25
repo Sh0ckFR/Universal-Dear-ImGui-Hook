@@ -292,7 +292,7 @@ bool HasKeyboard(xcb_window_t window, uint32_t width, uint32_t height) {
 }
 
 // The FakeInput request of XTEST, as xcb_test_fake_input() sends it.
-void FakeInput(uint8_t type, uint8_t keycode) {
+void FakeInput(uint8_t type, uint8_t detail, int16_t rootX = 0, int16_t rootY = 0) {
     struct {
         uint8_t majorOpcode;
         uint8_t minorOpcode;
@@ -310,7 +310,10 @@ void FakeInput(uint8_t type, uint8_t keycode) {
     } request{};
     static_assert(sizeof(request) == 36, "the FakeInput request is 36 bytes");
     request.type = type;
-    request.detail = keycode;
+    request.detail = detail;
+    request.root = type == XCB_MOTION_NOTIFY ? g_root : XCB_NONE;
+    request.rootX = rootX;
+    request.rootY = rootY;
     // xcb_send_request() fills the opcodes and the length, and uses the two
     // entries before the request.
     iovec parts[3] = {};
@@ -344,6 +347,33 @@ void SendKeys(xcb_window_t window, const std::vector<uint8_t>& keycodes, bool up
         // overlay draws on a child of the game window.
         xcb_send_event(g_x, 1, window, up ? XCB_EVENT_MASK_KEY_RELEASE : XCB_EVENT_MASK_KEY_PRESS, reinterpret_cast<const char*>(&event));
     }
+    xcb_flush(g_x);
+}
+
+// A move to x, y in `window`, then the press or the release of `button`, as
+// events sent to the window.
+void SendButton(xcb_window_t window, int16_t x, int16_t y, uint8_t button, bool up) {
+    xcb_motion_notify_event_t motion{};
+    motion.response_type = XCB_MOTION_NOTIFY;
+    motion.time = XCB_CURRENT_TIME;
+    motion.root = g_root;
+    motion.event = window;
+    motion.event_x = x;
+    motion.event_y = y;
+    motion.state = up ? static_cast<uint16_t>(XCB_BUTTON_MASK_1 << (button - 1)) : 0;
+    motion.same_screen = 1;
+    xcb_send_event(g_x, 1, window, XCB_EVENT_MASK_POINTER_MOTION, reinterpret_cast<const char*>(&motion));
+    xcb_button_press_event_t event{};
+    event.response_type = up ? XCB_BUTTON_RELEASE : XCB_BUTTON_PRESS;
+    event.detail = button;
+    event.time = XCB_CURRENT_TIME;
+    event.root = g_root;
+    event.event = window;
+    event.event_x = x;
+    event.event_y = y;
+    event.state = motion.state;
+    event.same_screen = 1;
+    xcb_send_event(g_x, 1, window, up ? XCB_EVENT_MASK_BUTTON_RELEASE : XCB_EVENT_MASK_BUTTON_PRESS, reinterpret_cast<const char*>(&event));
     xcb_flush(g_x);
 }
 
@@ -440,6 +470,39 @@ std::string HoldKeys(const std::vector<int>& keys, unsigned ms) {
     SendKeys(window, keycodes, true);
     return g_hasXTest ? "ok sent as window events, the game does not have the focus: games that read the keyboard state directly do not see them"
                       : "ok sent as window events, the X server lacks XTEST: games that read the keyboard state directly do not see them";
+}
+
+// XTEST when the game has the keyboard: the pointer moves there and the
+// button is pressed, which the overlay menu sees too. Otherwise events sent to
+// the game window, which the menu does not read.
+std::string ClickAt(int x, int y, int button, unsigned ms) {
+    xcb_window_t window = XCB_NONE;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    if (!FindWindow(window, width, height))
+        return "error the game has no X11 window: clicks reach X11 and XWayland games only";
+    uint8_t detail = static_cast<uint8_t>(button == 2 ? 2 : button == 3 ? 3 : 1);
+    if (g_hasXTest && HasKeyboard(window, width, height)) {
+        Reply<xcb_translate_coordinates_reply_t> root(
+            xcb_translate_coordinates_reply(g_x, xcb_translate_coordinates(g_x, window, g_root, static_cast<int16_t>(x), static_cast<int16_t>(y)), nullptr));
+        if (root) {
+            FakeInput(XCB_MOTION_NOTIFY, 0, root->dst_x, root->dst_y);
+            xcb_flush(g_x);
+            // Games read the pointer once per frame.
+            Sleep(50);
+            FakeInput(XCB_BUTTON_PRESS, detail);
+            xcb_flush(g_x);
+            Sleep(static_cast<int>(ms));
+            FakeInput(XCB_BUTTON_RELEASE, detail);
+            xcb_flush(g_x);
+            return "ok sent as mouse input, the game has the focus";
+        }
+    }
+    SendButton(window, static_cast<int16_t>(x), static_cast<int16_t>(y), detail, false);
+    Sleep(static_cast<int>(ms));
+    SendButton(window, static_cast<int16_t>(x), static_cast<int16_t>(y), detail, true);
+    return g_hasXTest ? "ok sent as window events, the game does not have the focus: the overlay menu and games that read the mouse directly do not see them"
+                      : "ok sent as window events, the X server lacks XTEST: the overlay menu and games that read the mouse directly do not see them";
 }
 
 bool GameWindow(uint32_t& width, uint32_t& height, bool& focused) {

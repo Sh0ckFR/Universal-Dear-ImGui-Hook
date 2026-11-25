@@ -193,6 +193,9 @@ void Stop();
 int KeyCode(const std::string& name);
 // Holds `keys` for `ms` milliseconds, or until Stop(), and answers the request.
 std::string HoldKeys(const std::vector<int>& keys, unsigned ms);
+// Clicks `button` (1 left, 2 middle, 3 right) at x, y in the client area of the
+// game window, held for `ms` milliseconds or until Stop(), and answers the request.
+std::string ClickAt(int x, int y, int button, unsigned ms);
 // Client area of the game window, and whether it has the keyboard focus.
 bool GameWindow(uint32_t& width, uint32_t& height, bool& focused);
 // True once Stop() was called, for long commands.

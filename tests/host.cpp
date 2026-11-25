@@ -808,6 +808,11 @@ void FaultWhileDrawing(const ImDrawList*, const ImDrawCmd*) {
     *address = 1;
 }
 
+// Clicks on the button of the menu, and its center, for the remote control.
+std::atomic<int> g_buttonClicks{0};
+std::atomic<int> g_buttonX{0};
+std::atomic<int> g_buttonY{0};
+
 void DrawTestMenu() {
     if (DWORD ms = g_slowFrameMs.exchange(0))
         Sleep(ms);
@@ -847,7 +852,12 @@ void DrawTestMenu() {
         ImGui::SameLine();
         ImGui::Image(late->GetTexRef(), ImVec2(64, 64));
     }
-    ImGui::Button("Button", ImVec2(400, 200));
+    if (ImGui::Button("Button", ImVec2(400, 200)))
+        ++g_buttonClicks;
+    ImVec2 itemMin = ImGui::GetItemRectMin();
+    ImVec2 itemMax = ImGui::GetItemRectMax();
+    g_buttonX = static_cast<int>((itemMin.x + itemMax.x) * 0.5f);
+    g_buttonY = static_cast<int>((itemMin.y + itemMax.y) * 0.5f);
     ImGui::End();
 }
 
@@ -1052,16 +1062,25 @@ private:
     HANDLE pipe_ = INVALID_HANDLE_VALUE;
 };
 
-// Keys the remote control pressed in the host window.
+// Keys the remote control pressed in the host window, and right clicks at
+// kRemoteClick.
 std::atomic<int> g_remoteKeyDowns{0};
 std::atomic<int> g_remoteKeyUps{0};
+std::atomic<int> g_remoteClickDowns{0};
+std::atomic<int> g_remoteClickUps{0};
+constexpr int kRemoteClick[2] = {100, 120};
 WNDPROC g_remoteHostProc = nullptr;
 
 LRESULT CALLBACK CountRemoteKeys(HWND window, UINT msg, WPARAM wParam, LPARAM lParam) {
+    bool atClick = static_cast<short>(LOWORD(lParam)) == kRemoteClick[0] && static_cast<short>(HIWORD(lParam)) == kRemoteClick[1];
     if (wParam == 'U' && msg == WM_KEYDOWN)
         ++g_remoteKeyDowns;
     else if (wParam == 'U' && msg == WM_KEYUP)
         ++g_remoteKeyUps;
+    else if (msg == WM_RBUTTONDOWN && atClick)
+        ++g_remoteClickDowns;
+    else if (msg == WM_RBUTTONUP && atClick)
+        ++g_remoteClickUps;
     return CallWindowProcW(g_remoteHostProc, window, msg, wParam, lParam);
 }
 
@@ -1088,7 +1107,10 @@ int RemoteScenario(bool memory, Frame&& frame) {
     std::string text;
     std::string unknownKey;
     std::string memoryFailure;
+    std::string click;
+    std::string outside;
     std::vector<uint8_t> rgb;
+    int clicksBefore = g_buttonClicks;
     WhileRendering(
         [&] {
             RemoteClient client;
@@ -1107,8 +1129,20 @@ int RemoteScenario(bool memory, Frame&& frame) {
                 memoryFailure = CheckRemoteMemory(client);
             else if (client.Request("read 1000 4").rfind("error memory access is off", 0) != 0)
                 memoryFailure = "the memory commands answer while remoteMemory is off";
+            click = client.Request("click " + std::to_string(g_buttonX) + " " + std::to_string(g_buttonY) + " left 100");
+            outside = client.Request("click 800 10");
         },
         frame);
+    for (ULONGLONG start = GetTickCount64(); GetTickCount64() - start < 1000 && g_buttonClicks == clicksBefore;)
+        frame();
+    for (int i = 0; i < 10; ++i)
+        frame();
+    printf("click on the button of the menu at %d,%d: %s, %d clicks\nclick outside: %s\n", g_buttonX.load(), g_buttonY.load(), click.c_str(),
+           g_buttonClicks - clicksBefore, outside.c_str());
+    if (click.rfind("ok ", 0) != 0 || g_buttonClicks == clicksBefore)
+        return Fail("the click of the remote control did not reach the menu");
+    if (outside.rfind("error the point is outside the game window", 0) != 0)
+        return Fail("the remote control clicked outside the game window");
     printf("info: %s\nscreenshot: %s\ntext: %s\nunknown key: %s\n", info.c_str(), screenshot.c_str(), text.c_str(), unknownKey.c_str());
     if (info.rfind("ok ", 0) != 0 || info.find(" 800x600 ") == std::string::npos || info.find("menu=1") == std::string::npos)
         return Fail("the remote control does not describe the game");
@@ -1131,20 +1165,32 @@ int RemoteScenario(bool memory, Frame&& frame) {
 
     uih::SetMenuOpen(false);
     std::string key;
+    std::string rightClick;
     WhileRendering(
         [&] {
             RemoteClient client;
-            if (client.Open())
+            if (client.Open()) {
                 key = client.Request("key u 100");
+                rightClick = client.Request("click " + std::to_string(kRemoteClick[0]) + " " + std::to_string(kRemoteClick[1]) + " right 50");
+            }
         },
         frame);
+    // SendInput goes through the input thread of the system.
+    for (ULONGLONG start = GetTickCount64(); GetTickCount64() - start < 1000;) {
+        frame();
+        if (g_remoteKeyUps > 0 && g_remoteClickUps > 0)
+            break;
+    }
     for (int i = 0; i < 10; ++i)
         frame();
-    printf("key: %s, %d down, %d up\n", key.c_str(), g_remoteKeyDowns.load(), g_remoteKeyUps.load());
+    printf("key: %s, %d down, %d up\nright click: %s, %d down, %d up\n", key.c_str(), g_remoteKeyDowns.load(), g_remoteKeyUps.load(),
+           rightClick.c_str(), g_remoteClickDowns.load(), g_remoteClickUps.load());
     uih::SetMenuOpen(true);
     frame();
     if (key.rfind("ok ", 0) != 0 || g_remoteKeyDowns == 0 || g_remoteKeyUps == 0)
         return Fail("the keys of the remote control did not reach the window");
+    if (rightClick.rfind("ok ", 0) != 0 || g_remoteClickDowns == 0 || g_remoteClickUps == 0)
+        return Fail("the clicks of the remote control did not reach the window");
     return 0;
 }
 
