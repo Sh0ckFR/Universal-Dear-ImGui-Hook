@@ -33,8 +33,8 @@ Sections marked with ▶ unfold on click.
 
 - **One library for every API**: the backend is picked from the first API that presents a frame. Inject before or after the game initializes its graphics.
 - **Remote control by an AI assistant**: through [MCP](#remote-control-by-an-ai-assistant) and a local named pipe (Windows) or Unix socket (Linux), an assistant such as Claude Code sees the game, writes to the player over it and presses its keys.
-- **Menu input**: `INSERT`, or L3 + R3 on a controller, opens the menu; `F11` removes the overlay and unloads the DLL. The keys are [settings](#settings) in `example/config.cpp`. While the menu is open the game sees no keyboard, mouse or controller input (Windows), and an XInput controller navigates the menu.
-- **No crash from the overlay** (Windows, MSVC builds): an exception in the overlay, from a renderer backend or the menu code, removes it instead of taking the game down; the menu key brings it back.
+- **Menu input**: `INSERT`, or L3 + R3 on a controller, opens the menu; `F11` removes the overlay and unloads the DLL. The keys are [settings](#settings) in `example/config.cpp`. While the menu is open the game sees no keyboard, mouse or controller input (on Linux, no key or button presses and no motion), and an XInput controller navigates the menu.
+- **No crash from the overlay** (MSVC builds on Windows, and Linux): an access violation or a C++ exception in the overlay, from a renderer backend or the menu code, removes it instead of taking the game down; the menu key brings it back.
 - **Images and frame capture**: `uih::CreateTexture()` turns RGBA pixels into an image for `ImGui::Image()`, and `uih::CaptureFrame()` copies what the game draws, without the overlay, on every backend.
 - **Several windows**: when the game presents to more than one window or swap chain, the overlay stays on one of them and follows the focus.
 - **Readable on any display**: the interface follows the DPI of the game window, or a fixed scale, with correct colors on sRGB and floating-point back buffers.
@@ -305,7 +305,7 @@ Everything is in `include/uih.h`, namespace `uih`.
 
 **Windows.** The game window is subclassed to feed ImGui, and its input messages are swallowed while the menu is open, except releases, keyboard and mouse raw input (filtered below) and Alt+F4. `GetRawInputData`, `GetRawInputBuffer`, `GetAsyncKeyState`, `GetKeyState`, `GetKeyboardState`, DirectInput and XInput then report no input to the game, and `GetCursorPos` a frozen position. The cursor is freed from the game's `ClipCursor` rectangle, which is applied again when the menu closes. Releases always go through, so no key stays stuck; calls made by the hook itself see the real state.
 
-**Linux.** The pointer and the keyboard are polled from the X server on a separate XCB connection.
+**Linux.** The pointer and the keyboard are polled from the X server on a separate XCB connection. The game reads its events with `xcb_wait_for_event`, `xcb_poll_for_event` or `xcb_poll_for_queued_event`, which Xlib calls too, and so SDL and GLFW: the library stands for them, and while the menu is open it drops key and button presses and motion, core or XInput 2, raw ones included. Releases still reach the game, so no key stays down. Presses of the wheel buttons (4 to 7) scroll the menu instead.
 
 </details>
 
@@ -326,7 +326,9 @@ The overlay is drawn on one swap chain, its target, by one thread at a time; the
 <details>
 <summary><b>Faults</b>: why an exception in the overlay does not crash the game</summary>
 
-On Windows, what the overlay runs in the game's threads (frames, teardown, window messages) is protected by structured exception handling. An exception there, such as an access violation in the `render` callback, removes the overlay from another thread, as the unload key does without a `module`: the game keeps running, and the menu key or buttons bring the overlay back. The frame runs before the backends take a reference to the back buffer, so a fault leaks none.
+On Windows, what the overlay runs in the game's threads (frames, teardown, window messages) is protected by structured exception handling. An exception there, such as an access violation in the `render` callback, removes the overlay from another thread, as the unload key does without a `module`: the game keeps running, and the menu key or buttons bring the overlay back. The frame runs before the backends take a reference to the back buffer, so a fault leaks none. Draw callbacks of the application (`ImDrawList::AddCallback`) run under a protection of their own: after a fault in one, the backend finishes its frame and restores the state of the device, and the callbacks left in the frame are skipped.
+
+On Linux, C++ exceptions are caught the same way, and the first `Start()` installs a handler of `SIGSEGV`, `SIGBUS`, `SIGFPE` and `SIGILL` that jumps out of the overlay when the signal comes from it; other signals go to the handler installed before it, or to the default action. Crash reporters the game installs later usually pass the signals they do not handle on to it; one that does not leaves the overlay unprotected. MinGW-w64 builds of the DLL catch C++ exceptions only.
 
 </details>
 
@@ -436,6 +438,8 @@ Without a GPU, as on the CI runners, Direct3D uses WARP, and Mesa's software dri
 
 `UIH_TEST_VULKAN_VALIDATION=1` runs the Vulkan host under `VK_LAYER_KHRONOS_validation`, from the Vulkan SDK on Windows or `vulkan-validationlayers` on Linux, and `UIH_TEST_D3D_DEBUG=1` creates the Direct3D 10, 11 and 12 devices with the debug layer, from the Graphics Tools optional feature of Windows. Any error they report, from the host or from the hook, fails the test.
 
+When the Windows host crashes, it prints the exception code, module and offset, and writes a minidump to the directory named by `UIH_TEST_DUMPS`, when it is set. The Windows test jobs of the CI set it and build with symbols, and keep the dumps with the binaries and their PDBs when a test fails.
+
 </details>
 
 <details>
@@ -494,6 +498,8 @@ On Linux, `uih_host` does not link the hook: each test preloads the `.so`, opens
 
 - GLX, EGL, `dlsym()` lookups and Vulkan;
 - `--resize`, `--reload`, `--second-window`, `--recreate-context` and `--bound-framebuffer` variants;
+- faults of the overlay (`--fault`), with `tests/fault_preload.cpp`: a null pointer write in the render callback or in a draw callback, or a C++ exception, must remove the overlay while the host keeps rendering, and the menu key bring it back;
+- what the host reads while the menu is open (`--input x11`), with `tests/input_preload.cpp`: no key or button press and no motion, but the release of a key held when the menu opened, and the wheel scrolls the menu;
 - the remote control (`--remote`), with `tests/remote_preload.cpp`, the hook built with it on: game description, screenshot without the message of the assistant, message on screen, keys through XTEST with the focus and as X11 events without it;
 - presents through `eglSwapBuffersWithDamage` that redraw and post a single pixel once `EGL_EXT_buffer_age` allows it (`--swap-with-damage`);
 - the Vulkan loader opened as `libvulkan.so` (`--vulkan-library`).
@@ -540,7 +546,7 @@ Pushing a `v*` tag publishes the MSVC and Linux portable libraries as a release,
 | `src/vulkan.cpp` | Vulkan renderer, shared by both platforms |
 | `src/windows/` | MinHook, Direct3D, WGL, Win32 input, DirectInput, XInput, remote control (`remote.cpp`) |
 | `src/gl_state.h` | OpenGL state set aside while the overlay draws, and the frame capture shared by WGL, GLX and EGL |
-| `src/linux/` | Symbol interposition, GLX, EGL, X11 input, `exports.map` |
+| `src/linux/` | Symbol interposition, GLX, EGL, X11 input and the events of the game (`events.cpp`), `exports.map` |
 | `remote/` | `uih_mcp.py`, the MCP server of the remote control, and the DLL injector it includes |
 | `example/` | The built library: `config.cpp` (settings), `menu.cpp` (the widget tour), `image.cpp` and `image.rc` (`imgui.png` embedded), `dllmain.cpp`, `proxy.cpp`, `preload.cpp` |
 | `tests/` | `uih_host`, `uih_game`, `game.sh` and `game_mcp.py` for real games, the Godot project they run, the `FetchContent` consumer |
@@ -556,11 +562,10 @@ Pushing a `v*` tag publishes the MSVC and Linux portable libraries as a release,
 - A Vulkan swap chain created before the hook has no overlay until the game recreates it: its presents report `VK_SUBOPTIMAL_KHR`, which games answer by recreating it.
 - When the game, or another overlay, subclasses the window after the hook, the hook's window procedure stays in its chain: the unload key leaves the DLL loaded, and injecting it again does not start it.
 - Native ARM64 Windows games are not supported: MinHook only handles x86 and x64.
-- Only Windows builds made with MSVC, the released ones, survive an exception in the overlay: MinGW-w64 has no structured exception handling, and Linux builds are not protected either.
-- D3D9: after an exception in a draw callback (`ImDrawList::AddCallback`), the state block of the Dear ImGui backend is never released, and the game cannot reset its device.
+- MinGW-w64 builds of the DLL survive C++ exceptions in the overlay, not access violations: MinGW-w64 has no structured exception handling. The released DLLs are built with MSVC.
 
 **Linux**
-- Input is read from the X server: native Wayland windows get no menu input (run SDL games with `SDL_VIDEODRIVER=x11`), and the game still receives the keyboard and the mouse while the menu is open. The mouse wheel and input methods are not handled.
+- Input is read from the X server: native Wayland windows get no menu input (run SDL games with `SDL_VIDEODRIVER=x11`). The wheel scrolls the menu in games that read the mouse buttons from the X server; input methods are not handled, and a pointer the game grabbed stays grabbed while the menu is open.
 - 32-bit games, OpenGL ES, and games that link their GL or Vulkan loader statically are not supported.
 - The remote control sends no keys to native Wayland games.
 
