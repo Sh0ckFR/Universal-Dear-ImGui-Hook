@@ -630,6 +630,7 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
     std::string text;
     std::string screenshot;
     std::string unknownKey;
+    std::string memoryFailure;
     std::vector<uint8_t> rgb;
     WhileRendering(
         [&] {
