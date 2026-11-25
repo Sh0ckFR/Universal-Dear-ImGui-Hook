@@ -497,13 +497,19 @@ void GuardedCallback(const ImDrawList* list, const ImDrawCmd* command) {
     }
 }
 
+// The renderer backend recognizes its own callbacks, those of ImGuiPlatformIO.
+bool BackendCallback(ImDrawCallback callback) {
+    const ImGuiPlatformIO& io = ImGui::GetPlatformIO();
+    return callback == io.DrawCallback_ResetRenderState || callback == io.DrawCallback_SetSamplerLinear || callback == io.DrawCallback_SetSamplerNearest;
+}
+
 void GuardCallbacks(ImDrawData* drawData) {
     auto& callbacks = DrawCallbacks();
     callbacks.clear();
     g_callbackFaulted = false;
     for (ImDrawList* list : drawData->CmdLists) {
         for (ImDrawCmd& command : list->CmdBuffer) {
-            if (command.UserCallback && command.UserCallback != ImDrawCallback_ResetRenderState) {
+            if (command.UserCallback && !BackendCallback(command.UserCallback)) {
                 callbacks.emplace_back(&command, command.UserCallback);
                 command.UserCallback = GuardedCallback;
             }
