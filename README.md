@@ -32,7 +32,7 @@ Sections marked with ▶ unfold on click.
 ## Features
 
 - **One library for every API**: the backend is picked from the first API that presents a frame. Inject before or after the game initializes its graphics.
-- **Remote control by an AI assistant**: through [MCP](#remote-control-by-an-ai-assistant) and a local named pipe (Windows) or Unix socket (Linux), an assistant such as Claude Code sees the game, writes to the player over it and presses its keys.
+- **Remote control by an AI assistant**: through [MCP](#remote-control-by-an-ai-assistant) and a local named pipe (Windows) or Unix socket (Linux), an assistant such as Claude Code sees the game, writes to the player over it, presses its keys and clicks in it.
 - **Menu input**: `INSERT`, or L3 + R3 on a controller, opens the menu; `F11` removes the overlay and unloads the DLL. The keys are [settings](#settings) in `example/config.cpp`. While the menu is open the game sees no keyboard, mouse or controller input (on Linux, no key or button presses and no motion), and an XInput controller navigates the menu.
 - **No crash from the overlay** (MSVC builds on Windows, and Linux): an access violation or a C++ exception in the overlay, from a renderer backend or the menu code, removes it instead of taking the game down; the menu key brings it back.
 - **Images and frame capture**: `uih::CreateTexture()` turns RGBA pixels into an image for `ImGui::Image()`, and `uih::CaptureFrame()` copies what the game draws, without the overlay, on every backend.
@@ -202,6 +202,7 @@ On Linux, the same with `python3 /path/to/Universal-Dear-ImGui-Hook/remote/uih_m
 - *Write "Well done!" in the game for 5 seconds.*
 - *Walk right to the edge of the platform, then jump.*
 - *Open the overlay menu and describe it.*
+- *Click on "New game" in the main menu.*
 - *Find my money in memory and set it to 99999.* (with `remoteMemory`)
 
 The assistant gets these tools:
@@ -211,6 +212,7 @@ The assistant gets these tools:
 | `screenshot` | The current frame, without the overlay, at most 1280 pixels wide or high by default |
 | `show_text` | A message to the player at the top of the screen, drawn by the overlay, for 10 seconds by default |
 | `press_key` | Holds keys for a duration, 150 ms by default; `right+space` holds them together |
+| `click` | Clicks at a point of the last screenshot, left, right or middle button |
 | `game_info` | Graphics API, window size, keyboard focus, menu state |
 
 With `remoteMemory`, it also gets memory tools, as a memory editor such as Cheat Engine has:
@@ -228,10 +230,10 @@ Addresses are hexadecimal or `module+offset`, such as `game.exe+1a2b3c`.
 <summary>Good to know: security, focus, limits</summary>
 
 - **Any program you run can use the pipe or the socket**, so the remote control is off by default; other machines cannot, nor, on Linux, other users. Turn it on for single-player games only: anti-cheat software watches injected DLLs.
-- **While you type to the assistant, the game does not have the focus**: the keys then reach it as window messages, or X11 events on Linux, which games that read the keyboard state directly (DirectInput, raw input) do not see. Click the game window after sending your request, or let the assistant play on a second screen.
+- **While you type to the assistant, the game does not have the focus**: the keys and clicks then reach it as window messages, or X11 events on Linux, which games that read the keyboard or mouse state directly (DirectInput, raw input) do not see, nor on Linux the overlay menu. With the focus, a click moves the cursor of the player. Click the game window after sending your request, or let the assistant play on a second screen.
 - While the overlay menu is open, the game sees no keys: the assistant can close it with `insert`.
 - The assistant plays turn by turn, a screenshot and a few keys at a time: fine for menus, puzzles and slow games, not for reflexes.
-- On Linux, keys go through the XTEST extension of the X server; without it, they are sent as events to the window. Native Wayland games get no keys.
+- On Linux, keys and clicks go through the XTEST extension of the X server; without it, they are sent as events to the window. Native Wayland games get neither.
 - One game per pipe or socket name: a second game started with the same name logs that the remote control is unavailable.
 - `unloadKey` stops the remote control with the overlay.
 - With `remoteMemory`, any program you run can also read and write the memory of the game through the pipe or the socket; on Linux, that goes around the ptrace restrictions of Yama for programs of your user. A value scan finds copies of the value too: change it in the game and narrow the scan until one address is left.
@@ -250,6 +252,7 @@ Addresses are hexadecimal or `module+offset`, such as `game.exe+1a2b3c`.
 | `screenshot <max size>` | `ok <width> <height>`, then the RGB pixels, rows from the top |
 | `text <seconds> <message>` | `ok`; `\n` in the message starts a new line, `0` seconds removes it |
 | `key <keys> <milliseconds>` | `ok <how the keys were sent>` once they are released |
+| `click <x> <y> [left\|right\|middle] [milliseconds]` | `ok <how the click was sent>` once the button is released; pixels of the client area of the game window |
 | `modules` | `ok <bytes>`, then lines `<base> <size> <name>` |
 | `read <address> <size>` | `ok <size>`, then the bytes, at most 65536 |
 | `write <address> <hex bytes>` | `ok` |
@@ -258,7 +261,7 @@ Addresses are hexadecimal or `module+offset`, such as `game.exe+1a2b3c`.
 | `results <count>` | `ok <bytes>`, then lines `<address> <value> <module+offset>` |
 | `pattern <bytes> [module]` | `ok <bytes>`, then lines `<address> <module+offset>`, at most 1000 |
 
-The memory commands (`src/memory.cpp`) answer only with `remoteMemory`; types are `i8`, `i16`, `i32`, `i64`, `f32` and `f64`, and floating-point values match when they round to the value given, to as many decimals as it has. Failures answer `error <reason>`. The screenshots come from `uih::CaptureFrame()`; the keys go through `SendInput` on Windows and XTEST on Linux when the game has the focus.
+The memory commands (`src/memory.cpp`) answer only with `remoteMemory`; types are `i8`, `i16`, `i32`, `i64`, `f32` and `f64`, and floating-point values match when they round to the value given, to as many decimals as it has. Failures answer `error <reason>`. The screenshots come from `uih::CaptureFrame()`; the keys and clicks go through `SendInput` on Windows and XTEST on Linux when the game has the focus.
 
 </details>
 
@@ -368,7 +371,7 @@ When `CaptureFrame()` waits, the backend copies its back buffer at the next pres
 <details>
 <summary><b>Remote control</b>: the server thread</summary>
 
-With `remoteControl` set, a thread of the library serves the named pipe with overlapped I/O on Windows, or the Unix socket with `poll()` and an `eventfd` on Linux, so that `Stop()` ends a connection or a command at once. Messages are drawn after the `render` callback, in the frame of the overlay; keys go through `SendInput` (Windows) or XTEST on a connection of its own to the X server (Linux) when the game has the focus, and as window messages or X11 events otherwise.
+With `remoteControl` set, a thread of the library serves the named pipe with overlapped I/O on Windows, or the Unix socket with `poll()` and an `eventfd` on Linux, so that `Stop()` ends a connection or a command at once. Messages are drawn after the `render` callback, in the frame of the overlay; keys and clicks go through `SendInput` (Windows) or XTEST on a connection of its own to the X server (Linux) when the game has the focus, and as window messages or X11 events otherwise. On Windows, a click moves the cursor with `SendInput` too, as the hook of `SetCursorPos` holds it still while the menu is open.
 
 On Linux, every process the game starts preloads the library, so the socket is opened at the first frame of the overlay by the process that draws it. The socket file is only open to its owner (`0600`), and the server also checks the user of each client (`SO_PEERCRED`), for the `/tmp` fallback. A file left by a game that crashed is replaced when nobody answers on it.
 
