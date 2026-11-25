@@ -102,7 +102,8 @@ def play(game, assistant, backend, screenshot):
         raise Failure(f"unexpected server {info['serverInfo']}")
     assistant.send({"jsonrpc": "2.0", "method": "notifications/initialized"})
     tools = sorted(tool["name"] for tool in assistant.request("tools/list", {})["tools"])
-    if tools != ["game_info", "press_key", "screenshot", "show_text"]:
+    memory = ["memory_find", "memory_modules", "memory_next", "memory_pattern", "memory_read", "memory_results", "memory_write"]
+    if tools != ["game_info"] + memory + ["press_key", "screenshot", "show_text"]:
         raise Failure(f"unexpected tools {tools}")
 
     _, text = assistant.call("game_info")
