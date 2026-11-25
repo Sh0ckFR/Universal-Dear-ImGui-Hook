@@ -23,8 +23,6 @@ HGLRC g_context = nullptr;
 int g_contextMisses = 0;
 bool g_ready = false;
 
-};
-
 void Teardown() {
     if (!g_ready)
         return;

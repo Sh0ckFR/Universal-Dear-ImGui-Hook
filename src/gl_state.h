@@ -102,6 +102,7 @@ private:
     GLint scissorBox_[4] = {};
     GLint blend_[kBlendCount] = {};
     GLboolean enabled_[kCapabilityCount] = {};
+};
 
 // Copies the back buffer of the window, before the overlay is drawn on it,
 // for CaptureFrame(), and sets back the state the read changes.
