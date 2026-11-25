@@ -492,7 +492,7 @@ When the Windows host crashes, it prints the exception code, module and offset, 
 | `--second-window` | A second window with its own device presents too: the overlay must stay on one window, follow the focus, and come back when the second window stops presenting. With `--shared-device` (Vulkan, D3D12), the second window renders with the device of the first |
 | `--gpu-latency ms` | The D3D12 GPU runs each frame `ms` after it was submitted, as a busy GPU does: the frames of the overlay are still in flight when it moves to another swap chain |
 | `--capture-frame` | Another thread copies a frame with `uih::CaptureFrame()` while the menu is open: the copy must have the size of the back buffer and show the game where the menu covers it |
-| `--remote` | Drives the remote control as `remote/uih_mcp.py` does: game description, screenshot without the overlay, message drawn, keys received by the window; then `uih::Stop()` must end it while a client stays connected |
+| `--remote` | Drives the remote control as `remote/uih_mcp.py` does: game description, screenshot without the overlay, message drawn, a click on the button of the menu, keys and a right click received by the window, also while another window of the host has the focus; then `uih::Stop()` must end it while a client stays connected |
 | `--fault access\|exception\|draw` | The render callback writes to a null pointer or throws, or a draw callback writes to a null pointer while the backend draws: the overlay must be removed while the host keeps rendering and can resize its back buffers, then start again (MSVC) |
 | `--slow-frame ms` | One frame of the menu lasts `ms` while `Stop()` is called from another thread: nothing that frame uses may be released under it. `_slow_frame` tests last 2.5 s, within the waits of `Stop()`; `_stuck_frame` tests last 6 s, beyond them. The hook must then start again |
 | `--bound-framebuffer` | The OpenGL host leaves a framebuffer object and a pixel unpack buffer bound at every swap: the overlay must still show on the window |
@@ -529,7 +529,7 @@ On Linux, `uih_host` does not link the hook: each test preloads the `.so`, opens
 - `--resize`, `--reload`, `--second-window`, `--recreate-context` and `--bound-framebuffer` variants;
 - faults of the overlay (`--fault`), with `tests/fault_preload.cpp`: a null pointer write in the render callback or in a draw callback, or a C++ exception, must remove the overlay while the host keeps rendering, and the menu key bring it back;
 - what the host reads while the menu is open (`--input x11`), with `tests/input_preload.cpp`: no key or button press and no motion, but the release of a key held when the menu opened, and the wheel scrolls the menu;
-- the remote control (`--remote`), with `tests/remote_preload.cpp`, the hook built with it on: game description, screenshot without the message of the assistant, message on screen, keys through XTEST with the focus and as X11 events without it;
+- the remote control (`--remote`), with `tests/remote_preload.cpp`, the hook built with it on: game description, screenshot without the message of the assistant, message on screen, keys and right clicks through XTEST with the focus and as X11 events without it;
 - presents through `eglSwapBuffersWithDamage` that redraw and post a single pixel once `EGL_EXT_buffer_age` allows it (`--swap-with-damage`);
 - the Vulkan loader opened as `libvulkan.so` (`--vulkan-library`).
 
