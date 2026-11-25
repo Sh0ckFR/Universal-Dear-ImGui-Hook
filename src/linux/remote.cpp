@@ -545,7 +545,42 @@ bool StopRequested() {
     return g_stopEvent >= 0 && poll(&stop, 1, 0) > 0;
 }
 
+namespace {
+
+// Anonymous mappings can be huge and nearly empty, as the shadow memory of
+// AddressSanitizer or the reservations of allocators and JIT compilers: only
+// their resident pages are listed, the others hold zeros or are swapped out.
+void AddResidentRuns(std::vector<MemoryRegion>& regions, uintptr_t start, uintptr_t end, bool writable) {
+    constexpr uintptr_t kWindow = 64 << 20;
+    const uintptr_t page = static_cast<uintptr_t>(sysconf(_SC_PAGESIZE));
+    std::vector<unsigned char> resident(kWindow / page);
+    uintptr_t runStart = 0;
+    bool inRun = false;
+    for (uintptr_t window = start; window < end; window += kWindow) {
+        uintptr_t length = std::min(kWindow, end - window);
+        size_t pages = static_cast<size_t>((length + page - 1) / page);
+        if (mincore(reinterpret_cast<void*>(window), length, resident.data()) != 0)
+            std::fill(resident.begin(), resident.begin() + static_cast<std::ptrdiff_t>(pages), 0);
+        for (size_t i = 0; i < pages; ++i) {
+            bool in = resident[i] & 1;
+            if (in == inRun)
+                continue;
+            uintptr_t address = window + i * page;
+            if (in)
+                runStart = address;
+            else
+                regions.push_back({runStart, address - runStart, writable});
+            inRun = in;
+        }
+    }
+    if (inRun)
+        regions.push_back({runStart, end - runStart, writable});
+}
+
+} // namespace
+
 std::vector<MemoryRegion> MemoryRegions() {
+    constexpr unsigned long kLargeAnonymous = 64ul << 20;
     std::vector<MemoryRegion> regions;
     FILE* maps = fopen("/proc/self/maps", "re");
     if (!maps)
@@ -562,7 +597,11 @@ std::vector<MemoryRegion> MemoryRegions() {
         // Device memory, such as the GPU's, and the kernel's pages.
         if (permissions[0] != 'r' || strncmp(path, "/dev/", 5) == 0 || strncmp(path, "[vvar", 5) == 0 || strncmp(path, "[vsyscall]", 10) == 0)
             continue;
-        regions.push_back({start, end - start, permissions[1] == 'w'});
+        bool anonymous = path[0] == '\0' || path[0] == '\n' || path[0] == '[';
+        if (anonymous && end - start > kLargeAnonymous)
+            AddResidentRuns(regions, start, end, permissions[1] == 'w');
+        else
+            regions.push_back({start, end - start, permissions[1] == 'w'});
     }
     fclose(maps);
     return regions;
