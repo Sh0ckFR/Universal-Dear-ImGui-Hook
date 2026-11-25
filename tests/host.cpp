@@ -2279,7 +2279,7 @@ void InstallCrashReport() {
     DWORD length = GetEnvironmentVariableA("UIH_TEST_DUMPS", directory, sizeof(directory));
     if (length > 0 && length < sizeof(directory)) {
         CreateDirectoryA(directory, nullptr);
-        snprintf(g_dumpPath, sizeof(g_dumpPath), "%s\uih_host-%lu.dmp", directory, GetCurrentProcessId());
+        snprintf(g_dumpPath, sizeof(g_dumpPath), "%s\\uih_host-%lu.dmp", directory, GetCurrentProcessId());
         // Loaded now: the crash may come from the loader lock or the heap.
         g_writeDump = reinterpret_cast<MiniDumpWriteDumpFn>(reinterpret_cast<void*>(GetProcAddress(LoadLibraryW(L"dbghelp.dll"), "MiniDumpWriteDump")));
     }
