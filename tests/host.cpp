@@ -1123,7 +1123,7 @@ int RemoteScenario(bool memory, Frame&& frame) {
                 if (!client.Read(rgb.data(), rgb.size()))
                     rgb.clear();
             }
-            text = client.Request("text 5 hello\\nworld");
+            text = client.Request("text 60 hello\\nworld");
             unknownKey = client.Request("key nokey 50");
             if (memory)
                 memoryFailure = CheckRemoteMemory(client);
