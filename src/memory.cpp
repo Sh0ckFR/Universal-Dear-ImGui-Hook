@@ -413,25 +413,41 @@ std::string Pattern(const std::string& rest, std::vector<uint8_t>& payload) {
     std::lock_guard<std::mutex> lock(g_scanMutex);
     if (!EnsureScanMemory())
         return "error out of memory";
+    // The readable parts of the module: segments aligned to 64 KiB, as on
+    // aarch64, leave unmapped pages between them.
+    std::vector<MemoryRegion> spans;
+    uintptr_t moduleEnd = module->base + module->size;
+    for (const MemoryRegion& region : MemoryRegions()) {
+        uintptr_t start = std::max(region.base, module->base);
+        uintptr_t end = std::min(region.base + region.size, moduleEnd);
+        if (start >= end)
+            continue;
+        if (!spans.empty() && spans.back().base + spans.back().size == start)
+            spans.back().size += end - start;
+        else
+            spans.push_back({start, end - start, region.writable});
+    }
     std::string text;
     size_t found = 0;
     char line[48];
     // Chunks overlap by the length of the pattern, less one byte.
     size_t step = kChunk - (pattern.size() - 1);
-    for (size_t offset = 0; offset < module->size && found < kMaxListed; offset += step) {
-        size_t length = std::min(kChunk, module->size - offset);
-        if (length < pattern.size() || !ReadMemory(module->base + offset, g_memory.chunk, length))
-            continue;
-        for (size_t i = 0; i + pattern.size() <= length && found < kMaxListed; ++i) {
-            size_t j = 0;
-            while (j < pattern.size() && (pattern[j] < 0 || g_memory.chunk[i + j] == pattern[j]))
-                ++j;
-            if (j < pattern.size())
+    for (const MemoryRegion& span : spans) {
+        for (size_t offset = 0; offset < span.size && found < kMaxListed; offset += step) {
+            size_t length = std::min(kChunk, span.size - offset);
+            if (length < pattern.size() || !ReadMemory(span.base + offset, g_memory.chunk, length))
                 continue;
-            uintptr_t address = module->base + offset + i;
-            snprintf(line, sizeof(line), "0x%" PRIxPTR " ", address);
-            text += line + Locate(address, modules) + "\n";
-            ++found;
+            for (size_t i = 0; i + pattern.size() <= length && found < kMaxListed; ++i) {
+                size_t j = 0;
+                while (j < pattern.size() && (pattern[j] < 0 || g_memory.chunk[i + j] == pattern[j]))
+                    ++j;
+                if (j < pattern.size())
+                    continue;
+                uintptr_t address = span.base + offset + i;
+                snprintf(line, sizeof(line), "0x%" PRIxPTR " ", address);
+                text += line + Locate(address, modules) + "\n";
+                ++found;
+            }
         }
     }
     return WithPayload(text, payload);
