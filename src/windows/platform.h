@@ -72,6 +72,9 @@ void ReleaseRemovedQueues();
 DXGI_FORMAT RenderTargetFormat(DXGI_FORMAT format);
 // True for render target formats that store linear values.
 bool StoresLinear(DXGI_FORMAT format);
+// Converts the vertex colors for the back buffer of `swapChain`, of `format`:
+// to linear values, or to PQ when the game set the swap chain to HDR10.
+void EncodeColors(IDXGISwapChain* swapChain, DXGI_FORMAT format, ImDrawData* drawData);
 // Layout of the texels of a render target format, for CaptureFrame().
 TexelLayout DxgiTexelLayout(DXGI_FORMAT format);
 // The window of the process of its size for a swap chain made for composition, which has none.

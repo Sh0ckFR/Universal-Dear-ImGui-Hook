@@ -52,7 +52,7 @@ bool Init(IDXGISwapChain* swapChain) {
     return true;
 }
 
-ID3D11RenderTargetView* CreateTarget(bool& linear) {
+ID3D11RenderTargetView* CreateTarget(DXGI_FORMAT& format) {
     ID3D11Texture2D* buffer = nullptr;
     if (FAILED(g_swapChain->GetBuffer(0, IID_PPV_ARGS(&buffer))))
         return nullptr;
@@ -60,7 +60,7 @@ ID3D11RenderTargetView* CreateTarget(bool& linear) {
     buffer->GetDesc(&textureDesc);
     D3D11_RENDER_TARGET_VIEW_DESC viewDesc{};
     viewDesc.Format = RenderTargetFormat(textureDesc.Format);
-    linear = StoresLinear(viewDesc.Format);
+    format = viewDesc.Format;
     viewDesc.ViewDimension = textureDesc.SampleDesc.Count > 1 ? D3D11_RTV_DIMENSION_TEXTURE2DMS : D3D11_RTV_DIMENSION_TEXTURE2D;
     ID3D11RenderTargetView* target = nullptr;
     HRESULT hr = g_device->CreateRenderTargetView(buffer, &viewDesc, &target);
@@ -127,12 +127,11 @@ void Render(IDXGISwapChain* swapChain) {
     // Before any reference to the back buffer, which an exception in the frame would leak.
     ImGui_ImplDX11_NewFrame();
     ImDrawData* drawData = Frame();
-    bool linear = false;
-    ID3D11RenderTargetView* target = CreateTarget(linear);
+    DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
+    ID3D11RenderTargetView* target = CreateTarget(format);
     if (!target)
         return;
-    if (linear)
-        LinearizeColors(drawData);
+    EncodeColors(swapChain, format, drawData);
 
     ID3D11RenderTargetView* previous[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
     ID3D11DepthStencilView* depth = nullptr;

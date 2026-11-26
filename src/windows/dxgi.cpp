@@ -1,7 +1,11 @@
 #include "internal.h"
 
 #include <d3d11.h>
-#include <dxgi1_4.h>
+#include <dxgi1_6.h>
+
+#include <algorithm>
+#include <mutex>
+#include <vector>
 
 namespace uih::detail {
 namespace {
@@ -10,6 +14,7 @@ using PresentFn = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, UINT, UINT);
 using Present1Fn = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain1*, UINT, UINT, const DXGI_PRESENT_PARAMETERS*);
 using ResizeBuffersFn = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, UINT, UINT, UINT, DXGI_FORMAT, UINT);
 using ResizeBuffers1Fn = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain3*, UINT, UINT, UINT, DXGI_FORMAT, UINT, const UINT*, IUnknown* const*);
+using SetColorSpace1Fn = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain3*, DXGI_COLOR_SPACE_TYPE);
 using D3D11CreateDeviceAndSwapChainFn = HRESULT(WINAPI*)(IDXGIAdapter*, D3D_DRIVER_TYPE, HMODULE, UINT, const D3D_FEATURE_LEVEL*, UINT, UINT,
                                                          const DXGI_SWAP_CHAIN_DESC*, IDXGISwapChain**, ID3D11Device**, D3D_FEATURE_LEVEL*,
                                                          ID3D11DeviceContext**);
@@ -17,6 +22,7 @@ using D3D11CreateDeviceAndSwapChainFn = HRESULT(WINAPI*)(IDXGIAdapter*, D3D_DRIV
 constexpr size_t kPresentIndex = 8;
 constexpr size_t kResizeBuffersIndex = 13;
 constexpr size_t kPresent1Index = 22;
+constexpr size_t kSetColorSpace1Index = 38;
 constexpr size_t kResizeBuffers1Index = 39;
 
 HMODULE g_module = nullptr;
@@ -24,6 +30,12 @@ PresentFn g_present = nullptr;
 Present1Fn g_present1 = nullptr;
 ResizeBuffersFn g_resizeBuffers = nullptr;
 ResizeBuffers1Fn g_resizeBuffers1 = nullptr;
+SetColorSpace1Fn g_setColorSpace1 = nullptr;
+
+// The color spaces the game set on its swap chains: HDR10 stores BT.2020
+// colors encoded with the PQ curve. DXGI has no getter for the color space.
+std::mutex g_pqMutex;
+std::vector<std::pair<IDXGISwapChain*, bool>> g_colorSpaces;
 
 // D3D10 devices also expose ID3D11Device, so D3D10 is probed before D3D11.
 const DxgiPresenter* const kPresenters[] = {&kD3D12Presenter, &kD3D10Presenter, &kD3D11Presenter};
@@ -132,6 +144,45 @@ HRESULT STDMETHODCALLTYPE HookResizeBuffers1(IDXGISwapChain3* swapChain, UINT bu
     return g_resizeBuffers1(swapChain, bufferCount, width, height, format, flags, nodeMasks, queues);
 }
 
+// For a swap chain whose color space was set before the hook: a 10-bit swap
+// chain on a display in HDR mode is HDR10, as games set it. Checked again
+// every 2 seconds, since the window may move to another display.
+bool OnHdrOutput(IDXGISwapChain* swapChain) {
+    static IDXGISwapChain* checkedChain = nullptr;
+    static ULONGLONG checked = 0;
+    static bool hdr = false;
+    ULONGLONG now = GetTickCount64();
+    if (swapChain == checkedChain && now - checked < 2000)
+        return hdr;
+    checkedChain = swapChain;
+    checked = now;
+    hdr = false;
+    IDXGIOutput* output = nullptr;
+    IDXGIOutput6* output6 = nullptr;
+    DXGI_OUTPUT_DESC1 desc{};
+    if (SUCCEEDED(swapChain->GetContainingOutput(&output)) && SUCCEEDED(output->QueryInterface(IID_PPV_ARGS(&output6))) &&
+        SUCCEEDED(output6->GetDesc1(&desc)))
+        hdr = desc.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+    Release(output6);
+    Release(output);
+    return hdr;
+}
+
+HRESULT STDMETHODCALLTYPE HookSetColorSpace1(IDXGISwapChain3* swapChain, DXGI_COLOR_SPACE_TYPE colorSpace) {
+    ScopedCall call;
+    HRESULT hr = g_setColorSpace1(swapChain, colorSpace);
+    if (SUCCEEDED(hr)) {
+        std::lock_guard<std::mutex> lock(g_pqMutex);
+        bool pq = colorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+        auto it = std::find_if(g_colorSpaces.begin(), g_colorSpaces.end(), [&](const auto& entry) { return entry.first == swapChain; });
+        if (it != g_colorSpaces.end())
+            it->second = pq;
+        else
+            g_colorSpaces.emplace_back(swapChain, pq);
+    }
+    return hr;
+}
+
 bool Install() {
     g_module = LoadLibraryW(L"d3d11.dll");
     auto create = GetProc<D3D11CreateDeviceAndSwapChainFn>(g_module, "D3D11CreateDeviceAndSwapChain");
@@ -176,6 +227,8 @@ bool Install() {
         if (SUCCEEDED(swapChain->QueryInterface(IID_PPV_ARGS(&swapChain3)))) {
             CreateHook("IDXGISwapChain3::ResizeBuffers1", VirtualMethod(swapChain3, kResizeBuffers1Index),
                        reinterpret_cast<void*>(HookResizeBuffers1), reinterpret_cast<void**>(&g_resizeBuffers1));
+            CreateHook("IDXGISwapChain3::SetColorSpace1", VirtualMethod(swapChain3, kSetColorSpace1Index),
+                       reinterpret_cast<void*>(HookSetColorSpace1), reinterpret_cast<void**>(&g_setColorSpace1));
             swapChain3->Release();
         }
         swapChain->Release();
@@ -213,6 +266,26 @@ DXGI_FORMAT RenderTargetFormat(DXGI_FORMAT format) {
     case DXGI_FORMAT_R16G16B16A16_TYPELESS: return DXGI_FORMAT_R16G16B16A16_FLOAT;
     default: return format;
     }
+}
+
+void EncodeColors(IDXGISwapChain* swapChain, DXGI_FORMAT format, ImDrawData* drawData) {
+    if (StoresLinear(format)) {
+        LinearizeColors(drawData);
+        return;
+    }
+    if (format != DXGI_FORMAT_R10G10B10A2_UNORM && format != DXGI_FORMAT_R10G10B10A2_TYPELESS)
+        return;
+    int set = -1;
+    {
+        std::lock_guard<std::mutex> lock(g_pqMutex);
+        for (const auto& [chain, pq] : g_colorSpaces)
+            if (chain == swapChain)
+                set = pq;
+    }
+    if (set < 0)
+        set = OnHdrOutput(swapChain);
+    if (set)
+        EncodePqColors(drawData, platform::SdrWhiteNits());
 }
 
 bool StoresLinear(DXGI_FORMAT format) {

@@ -1,5 +1,6 @@
 #include "internal.h"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -602,6 +603,48 @@ void LinearizeColors(ImDrawData* drawData) {
             ImU32 c = vertex.col;
             vertex.col = (c & IM_COL32_A_MASK) | kLinear[(c >> IM_COL32_R_SHIFT) & 0xFF] << IM_COL32_R_SHIFT |
                          kLinear[(c >> IM_COL32_G_SHIFT) & 0xFF] << IM_COL32_G_SHIFT | kLinear[(c >> IM_COL32_B_SHIFT) & 0xFF] << IM_COL32_B_SHIFT;
+        }
+    }
+}
+
+void EncodePqColors(ImDrawData* drawData, float whiteNits) {
+    static const std::array<float, 256> kLinear = [] {
+        std::array<float, 256> table{};
+        for (int i = 0; i < 256; ++i) {
+            float c = i / 255.0f;
+            table[i] = c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
+        }
+        return table;
+    }();
+    auto pq = [](float nits) {
+        constexpr float m1 = 2610.0f / 16384.0f;
+        constexpr float m2 = 2523.0f / 4096.0f * 128.0f;
+        constexpr float c1 = 3424.0f / 4096.0f;
+        constexpr float c2 = 2413.0f / 4096.0f * 32.0f;
+        constexpr float c3 = 2392.0f / 4096.0f * 32.0f;
+        float y = std::pow(std::clamp(nits / 10000.0f, 0.0f, 1.0f), m1);
+        return static_cast<ImU32>(std::pow((c1 + c2 * y) / (1.0f + c3 * y), m2) * 255.0f + 0.5f);
+    };
+    // Vertices share their colors: each one is converted once.
+    ImU32 lastIn = 0;
+    ImU32 lastOut = 0;
+    bool any = false;
+    for (ImDrawList* list : drawData->CmdLists) {
+        for (ImDrawVert& vertex : list->VtxBuffer) {
+            ImU32 c = vertex.col;
+            if (!any || (c & ~IM_COL32_A_MASK) != (lastIn & ~IM_COL32_A_MASK)) {
+                float r = kLinear[(c >> IM_COL32_R_SHIFT) & 0xFF];
+                float g = kLinear[(c >> IM_COL32_G_SHIFT) & 0xFF];
+                float b = kLinear[(c >> IM_COL32_B_SHIFT) & 0xFF];
+                // BT.709 primaries to BT.2020 (ITU-R BT.2087).
+                float r2 = 0.6274040f * r + 0.3292820f * g + 0.0433136f * b;
+                float g2 = 0.0690970f * r + 0.9195400f * g + 0.0113612f * b;
+                float b2 = 0.0163916f * r + 0.0880132f * g + 0.8955950f * b;
+                lastIn = c;
+                lastOut = pq(r2 * whiteNits) << IM_COL32_R_SHIFT | pq(g2 * whiteNits) << IM_COL32_G_SHIFT | pq(b2 * whiteNits) << IM_COL32_B_SHIFT;
+                any = true;
+            }
+            vertex.col = (c & IM_COL32_A_MASK) | lastOut;
         }
     }
 }
