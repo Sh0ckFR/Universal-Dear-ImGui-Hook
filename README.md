@@ -194,13 +194,13 @@ Then build: on Windows, open `Universal-ImGui-Hook.sln` in Visual Studio and bui
 
 ### Step 2: start the game with the library
 
-**Windows**: start the game, wait for its window, then in a terminal opened in the repository:
+**Windows**: the DLL must be loaded into the game, by whatever means you like. **If it already is**, with your own injector or as `dinput8.dll` next to the game, skip to the check below. Otherwise, start the game, wait for its window, then in a terminal opened in the repository:
 
 ```sh
 python remote/uih_mcp.py inject game.exe build/vs/x64/Release/Universal-ImGui-Hook.dll
 ```
 
-`game.exe` is the name of the process in the Task Manager (*Details* tab), or its PID: give the process that shows the game window, not its launcher. Any other injector works too, or copy the DLL next to the game as `dinput8.dll` when the game loads that DLL.
+`game.exe` is the name of the process in the Task Manager (*Details* tab), or its PID: give the process that shows the game window, not its launcher. `inject` only loads the DLL and returns: it is not needed for anything else.
 
 **Linux**: start the game with the library preloaded:
 
@@ -208,7 +208,17 @@ python remote/uih_mcp.py inject game.exe build/vs/x64/Release/Universal-ImGui-Ho
 LD_PRELOAD=$PWD/build/linux/Universal-ImGui-Hook.so /path/to/game
 ```
 
-The overlay shows up with the menu open: that is how you know the library is in.
+The overlay shows up with the menu open: that is how you know the library is in. To check that the game also answers on its pipe or socket, however the library got in:
+
+```sh
+python remote/uih_mcp.py check
+```
+
+```text
+The game answers on universal-imgui-hook. Graphics API: Vulkan, window 1024x768, keyboard focus: True, overlay menu open: True, memory tools: on, advanced tools: on.
+```
+
+Add `--pipe <name>` when `config.remotePipe` is not the default.
 
 ### Step 3: start the bridge
 
@@ -219,6 +229,8 @@ python remote/uih_chat.py
 ```
 
 (`python3` on Linux.) It prints `Connected` once it found the game. Start it before or after the game, in any order: it waits for the game, and for it to come back after a restart.
+
+You never start `remote/uih_mcp.py` yourself for the chat: the bridge gives it to Claude Code, which starts it for each answer. Run without arguments, it is an MCP server waiting for a client on its standard input, and does nothing on its own.
 
 ### Step 4: chat
 
@@ -279,9 +291,9 @@ config.aiAdvancedFeatures = true;             // optional: the advanced tools an
 python remote/uih_mcp.py inject game.exe build/vs/x64/Release/Universal-ImGui-Hook.dll
 ```
 
-On Linux, preload it: `LD_PRELOAD=/path/to/Universal-ImGui-Hook.so ./game`. The socket opens with the first frame of the overlay, in the process that draws it, not in the launch scripts that preload the library too.
+On Linux, preload it: `LD_PRELOAD=/path/to/Universal-ImGui-Hook.so ./game`. The socket opens with the first frame of the overlay, in the process that draws it, not in the launch scripts that preload the library too. Whichever way the library got in, `python remote/uih_mcp.py check` says whether the game answers.
 
-**3. Give the assistant the MCP server**, once. With Claude Code:
+**3. Give the assistant the MCP server**, once. You do not start `uih_mcp.py` yourself: the assistant does, when a session starts, and talks to it on its standard input and output. With Claude Code:
 
 ```sh
 claude mcp add game -- python C:/path/to/Universal-Dear-ImGui-Hook/remote/uih_mcp.py

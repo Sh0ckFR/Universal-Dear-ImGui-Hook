@@ -7,6 +7,7 @@ stdin/stdout and forwards each tool call there. Python 3.8+, standard library
 only.
 
     python uih_mcp.py [--pipe NAME]         MCP server, started by the assistant
+    python uih_mcp.py check [--pipe NAME]   checks that a game with the library answers
     python uih_mcp.py inject <exe|pid> DLL  loads the DLL into a running game (Windows)
 
 NAME is config.remotePipe, universal-imgui-hook by default.
@@ -657,14 +658,30 @@ def inject(target, dll):
     print(f"Loaded {path} into process {pid}")
 
 
+def check():
+    try:
+        text = call_tool("game_info", {})[0]["text"]
+    except GameError as error:
+        sys.exit(f"No answer on {PIPE_NAME}: {error}")
+    print(f"The game answers on {PIPE_NAME}. {text}.")
+
+
+def valid_pipe(name):
+    return bool(name) and not any(c in name for c in "\\/")
+
+
 if __name__ == "__main__":
-    if len(sys.argv) == 4 and sys.argv[1] == "inject":
+    if len(sys.argv) in (2, 4) and sys.argv[1] == "check" and (len(sys.argv) == 2 or (sys.argv[2] == "--pipe" and valid_pipe(sys.argv[3]))):
+        if len(sys.argv) == 4:
+            PIPE_NAME = sys.argv[3]
+        check()
+    elif len(sys.argv) == 4 and sys.argv[1] == "inject":
         if sys.platform != "win32":
             sys.exit("On Linux, start the game with LD_PRELOAD=/path/to/Universal-ImGui-Hook.so instead")
         inject(sys.argv[2], sys.argv[3])
     elif len(sys.argv) == 1:
         serve()
-    elif len(sys.argv) == 3 and sys.argv[1] == "--pipe" and sys.argv[2] and not any(c in sys.argv[2] for c in "\\/"):
+    elif len(sys.argv) == 3 and sys.argv[1] == "--pipe" and valid_pipe(sys.argv[2]):
         PIPE_NAME = sys.argv[2]
         serve()
     else:
