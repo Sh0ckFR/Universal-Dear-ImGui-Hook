@@ -156,7 +156,7 @@ target_link_libraries(my_overlay PRIVATE uih::uih)
 
 ## Remote control by an AI assistant
 
-The library can let an AI assistant, such as [Claude Code](https://claude.com/claude-code), see the game, write to the player over it and press its keys, through the [Model Context Protocol](https://modelcontextprotocol.io) (MCP) and a local named pipe on Windows, or a Unix socket on Linux. Every graphics API; on Linux, X11 and XWayland games.
+The library can let an AI assistant, such as [Claude Code](https://claude.com/claude-code), see the game, write to the player over it, press its keys and click in it, and optionally read and write its memory, through the [Model Context Protocol](https://modelcontextprotocol.io) (MCP) and a local named pipe on Windows, or a Unix socket on Linux. Every graphics API; on Linux, X11 and XWayland games.
 
 ```mermaid
 flowchart LR
@@ -213,7 +213,7 @@ The assistant gets these tools:
 | `show_text` | A message to the player at the top of the screen, drawn by the overlay, for 10 seconds by default |
 | `press_key` | Holds keys for a duration, 150 ms by default; `right+space` holds them together |
 | `click` | Clicks at a point of the last screenshot, left, right or middle button |
-| `game_info` | Graphics API, window size, keyboard focus, menu state |
+| `game_info` | Graphics API, window size, keyboard focus, menu state, whether the memory tools are on |
 
 With `remoteMemory`, it also gets memory tools, as a memory editor such as Cheat Engine has:
 
@@ -481,6 +481,9 @@ When the Windows host crashes, it prints the exception code, module and offset, 
 | `--capture` | Checks the overlay and an exact color on screen |
 | `--format srgb\|float` | Back buffer storing linear values |
 | `--decoy-queue` | A second D3D12 device executes work every frame |
+| `--remove-device` | The D3D12 device is removed: the overlay must not hold up its frames, and must show on the new device the host creates |
+| `--transfer-only` | The Vulkan swap chain images are created for transfers only, without `COLOR_ATTACHMENT` usage: the overlay must still show |
+| `--device-proc-addr` | The Vulkan host calls the device functions it gets from `vkGetDeviceProcAddr` |
 | `--composition` | The D3D11 or D3D12 swap chain is made for composition, without a window |
 | `--ignore-suboptimal` | The Vulkan host recreates its swap chain after `VK_ERROR_OUT_OF_DATE_KHR` only, as many engines do: the overlay, started after the swap chain was created, must still show |
 | `--scale <s>`, `--warp` | Fixed interface scale; software rasterizer |
@@ -491,8 +494,10 @@ When the Windows host crashes, it prints the exception code, module and offset, 
 | `--own-hooks before\|after` | The host places a hook of its own with MinHook, before `Start()` or once the overlay runs: the overlay must start, and the hook outlive `Stop()`, or `F11` and `INSERT` |
 | `--second-window` | A second window with its own device presents too: the overlay must stay on one window, follow the focus, and come back when the second window stops presenting. With `--shared-device` (Vulkan, D3D12), the second window renders with the device of the first |
 | `--gpu-latency ms` | The D3D12 GPU runs each frame `ms` after it was submitted, as a busy GPU does: the frames of the overlay are still in flight when it moves to another swap chain |
+| `--textures <n>` | `n` images created with `uih::CreateTexture()`, 300 in the tests, more than `kMaxTextures`: every image it accepts must be drawn |
 | `--capture-frame` | Another thread copies a frame with `uih::CaptureFrame()` while the menu is open: the copy must have the size of the back buffer and show the game where the menu covers it |
 | `--remote` | Drives the remote control as `remote/uih_mcp.py` does: game description, screenshot without the overlay, message drawn, a click on the button of the menu, keys and a right click received by the window, also while another window of the host has the focus; then `uih::Stop()` must end it while a client stays connected |
+| `--remote-memory` | `--remote` with `remoteMemory` on: value scans of an integer and a float narrowed by change, a write through `module+offset` read back, the module list and a pattern scan must find the values and bytes of the host; `--remote` alone checks that the memory commands are refused |
 | `--fault access\|exception\|draw` | The render callback writes to a null pointer or throws, or a draw callback writes to a null pointer while the backend draws: the overlay must be removed while the host keeps rendering and can resize its back buffers, then start again (MSVC) |
 | `--slow-frame ms` | One frame of the menu lasts `ms` while `Stop()` is called from another thread: nothing that frame uses may be released under it. `_slow_frame` tests last 2.5 s, within the waits of `Stop()`; `_stuck_frame` tests last 6 s, beyond them. The hook must then start again |
 | `--bound-framebuffer` | The OpenGL host leaves a framebuffer object and a pixel unpack buffer bound at every swap: the overlay must still show on the window |
@@ -516,7 +521,7 @@ When the Windows host crashes, it prints the exception code, module and offset, 
 
 `tests/game.sh` runs the same scenario on a Linux game, such as [DDNet](https://ddnet.org/) or a [Godot](https://godotengine.org/) project.
 
-`tests/game_mcp.py libuih_remote_preload.so <backend> mcp.png game [arguments]` plays a Linux game through `remote/uih_mcp.py`, as an assistant does, with the remote control on: game description, screenshot, message, `INSERT` to open the menu and `F11` to remove the overlay, after which the socket must be gone and the game still running.
+`tests/game_mcp.py libuih_remote_preload.so <backend> mcp.png game [arguments]` plays a Linux game through `remote/uih_mcp.py`, as an assistant does, with the remote control on: the list of tools, memory tools included, game description, screenshot, message, `INSERT` to open the menu, a click in the menu and `F11` to remove the overlay, after which the socket must be gone and the game still running.
 
 </details>
 
@@ -529,8 +534,9 @@ On Linux, `uih_host` does not link the hook: each test preloads the `.so`, opens
 - `--resize`, `--reload`, `--second-window`, `--recreate-context` and `--bound-framebuffer` variants;
 - faults of the overlay (`--fault`), with `tests/fault_preload.cpp`: a null pointer write in the render callback or in a draw callback, or a C++ exception, must remove the overlay while the host keeps rendering, and the menu key bring it back;
 - what the host reads while the menu is open (`--input x11`), with `tests/input_preload.cpp`: no key or button press and no motion, but the release of a key held when the menu opened, and the wheel scrolls the menu;
-- the remote control (`--remote`), with `tests/remote_preload.cpp`, the hook built with it on: game description, screenshot without the message of the assistant, message on screen, keys and right clicks through XTEST with the focus and as X11 events without it;
+- the remote control (`--remote`), with `tests/remote_preload.cpp`, the hook built with it on: game description, screenshot without the message of the assistant, message on screen, keys and right clicks through XTEST with the focus and as X11 events without it, and the memory commands as with `--remote-memory` on Windows;
 - presents through `eglSwapBuffersWithDamage` that redraw and post a single pixel once `EGL_EXT_buffer_age` allows it (`--swap-with-damage`);
+- Vulkan swap chain images for transfers only (`--transfer-only`) and device functions from `vkGetDeviceProcAddr` (`--device-proc-addr`);
 - the Vulkan loader opened as `libvulkan.so` (`--vulkan-library`).
 
 They need `libx11-dev libxtst-dev libgl-dev libegl-dev`; without a display, run `xvfb-run -a ctest --test-dir build/linux`. With `-DUIH_SANITIZE=ON`, the preload tests load the sanitizer runtime before the library, and any memory error or undefined behavior in the hook fails them.
@@ -572,6 +578,7 @@ Pushing a `v*` tag publishes the MSVC and Linux portable libraries as a release,
 | --- | --- |
 | `include/uih.h` | Public API |
 | `src/uih.cpp`, `src/internal.h` | Platform-independent core: lifecycle, frame, textures, scale |
+| `src/remote.cpp`, `src/memory.cpp` | Commands of the remote control, and its memory commands |
 | `src/vulkan.cpp` | Vulkan renderer, shared by both platforms |
 | `src/windows/` | MinHook, Direct3D, WGL, Win32 input, DirectInput, XInput, remote control (`remote.cpp`) |
 | `src/gl_state.h` | OpenGL state set aside while the overlay draws, and the frame capture shared by WGL, GLX and EGL |
@@ -596,7 +603,7 @@ Pushing a `v*` tag publishes the MSVC and Linux portable libraries as a release,
 **Linux**
 - Input is read from the X server: native Wayland windows get no menu input (run SDL games with `SDL_VIDEODRIVER=x11`). The wheel scrolls the menu in games that read the mouse buttons from the X server; input methods are not handled, and a pointer the game grabbed stays grabbed while the menu is open.
 - 32-bit games, OpenGL ES, and games that link their GL or Vulkan loader statically are not supported.
-- The remote control sends no keys to native Wayland games.
+- The remote control sends no keys or clicks to native Wayland games.
 
 ## Credits
 
@@ -610,7 +617,7 @@ Built with [Dear ImGui](https://github.com/ocornut/imgui), [MinHook](https://git
 
 ## Support
 
-This project is free and MIT-licensed. Building it from scratch represents roughly 83 days of senior C++ work, about €54,000 at French freelance rates: six graphics backends on two operating systems, input blocking, crash protection, frame capture and the remote control by an AI assistant, and about 130 test scenarios run on every commit, real games included. If it saved you time, consider [sponsoring](https://github.com/sponsors/Sh0ckFR) or starring the repository.
+This project is free and MIT-licensed. Building it from scratch represents roughly 125 days of senior C++ work, about €81,000 at French freelance rates: six graphics backends on two operating systems, input blocking, crash protection, frame capture, and the remote control by an AI assistant with its clicks and memory tools, and about 150 test scenarios run on every commit, real games included. If it saved you time, consider [sponsoring](https://github.com/sponsors/Sh0ckFR) or starring the repository.
 
 ## License
 
