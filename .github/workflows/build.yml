@@ -516,6 +516,74 @@ jobs:
           path: '*.bmp'
           if-no-files-found: ignore
 
+  # A Windows game under Wine, as Linux and Steam Deck players run it: the
+  # released DLL next to the executable as dinput8.dll, loaded with
+  # WINEDLLOVERRIDES="dinput8=n,b", without GPU: Wine draws OpenGL and
+  # Direct3D 11 with llvmpipe, Vulkan with lavapipe. Godot loads dinput8.dll
+  # for its controllers; DDNet does not, its SDL creates DirectInput through COM.
+  # Godot's Direct3D 12 renderer crashes in Wine on lavapipe, with or without the DLL.
+  games-wine:
+    name: Godot under Wine
+    needs: msvc
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GODOT: Godot_v4.7.2-stable_win64
+      # The Wine of Ubuntu 24.04, 9.0, crashes in Godot 4.7 before its window shows.
+      WINE: 11.0.0.0~noble-1
+      WINEPREFIX: ${{ github.workspace }}/prefix
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Universal-ImGui-Hook-msvc-x64
+      - name: Add the WineHQ repository
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo mkdir -pm755 /etc/apt/keyrings
+          curl -fsSL --retry 3 https://dl.winehq.org/wine-builds/winehq.key | sudo gpg --dearmor -o /etc/apt/keyrings/winehq-archive.key
+          sudo curl -fsSL --retry 3 -o /etc/apt/sources.list.d/winehq-noble.sources https://dl.winehq.org/wine-builds/ubuntu/dists/noble/winehq-noble.sources
+      - name: Install Wine and the software drivers
+        uses: ./.github/actions/apt-install
+        with:
+          packages: >-
+            winehq-stable=${{ env.WINE }} wine-stable=${{ env.WINE }} wine-stable-amd64=${{ env.WINE }} wine-stable-i386:i386=${{ env.WINE }}
+            xvfb xdotool imagemagick libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libvulkan1 mesa-vulkan-drivers
+      - name: Install the game
+        run: |
+          wine --version
+          curl -fsSL --retry 3 --connect-timeout 20 --max-time 300 -o godot.zip https://github.com/godotengine/godot/releases/download/4.7.2-stable/$GODOT.exe.zip
+          unzip -q godot.zip -d godot
+      # Without Mono and Gecko, whose installers would wait for a click, and
+      # without the crash dialog: a crash ends the game with a backtrace.
+      - name: Create the Wine prefix
+        env:
+          WINEDLLOVERRIDES: mscoree=;mshtml=
+        run: |
+          timeout 300 xvfb-run -a sh -c "wineboot --init && wine reg add 'HKCU\Software\Wine\WineDbg' /v ShowCrashDialog /t REG_DWORD /d 0 /f && wineserver -w"
+      - name: Godot with OpenGL
+        if: ${{ !cancelled() }}
+        run: |
+          xvfb-run -a -s "-screen 0 1280x800x24" sh tests/wine.sh Universal-ImGui-Hook.dll OpenGL godot-opengl \
+            godot/$GODOT.exe --path "Z:$PWD/tests/godot" --audio-driver Dummy --rendering-driver opengl3 --rendering-method gl_compatibility
+      # ANGLE draws Godot's OpenGL renderer with Direct3D 11, which Wine draws with OpenGL.
+      - name: Godot with D3D11
+        if: ${{ !cancelled() }}
+        run: |
+          xvfb-run -a -s "-screen 0 1280x800x24" sh tests/wine.sh Universal-ImGui-Hook.dll D3D11 godot-d3d11 \
+            godot/$GODOT.exe --path "Z:$PWD/tests/godot" --audio-driver Dummy --rendering-driver opengl3_angle --rendering-method gl_compatibility
+      - name: Godot with Vulkan
+        if: ${{ !cancelled() }}
+        run: |
+          xvfb-run -a -s "-screen 0 1280x800x24" sh tests/wine.sh Universal-ImGui-Hook.dll Vulkan godot-vulkan \
+            godot/$GODOT.exe --path "Z:$PWD/tests/godot" --audio-driver Dummy --rendering-driver vulkan
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Godot-wine
+          path: godot-*.png
+          if-no-files-found: ignore
+
   consumer:
     name: FetchContent consumer
     runs-on: windows-latest
