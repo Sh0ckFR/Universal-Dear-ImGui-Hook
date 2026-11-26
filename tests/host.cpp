@@ -1425,8 +1425,9 @@ int RunPreviewMode(HWND window, Host& host, const Options& options) {
 // loaded the way a game loads a proxy: F11 only removes the overlay, and
 // INSERT brings it back. Otherwise F11 unloads the DLL, and --reload injects
 // it again.
-// With --resubclass, the host subclasses the window after the overlay: the
-// DLL stays loaded after F11, as the host's procedure still calls its own.
+// With --resubclass, the host subclasses the window after the overlay: F11
+// unloads the DLL all the same, and the host's procedure still reaches the
+// window's own through what the DLL left.
 int RunDllMode(HWND window, Host& host, const Options& options) {
     const int menuKey = options.menuKey ? options.menuKey : VK_INSERT;
     const int unloadKey = options.unloadKey ? options.unloadKey : VK_F11;
@@ -1479,13 +1480,14 @@ int RunDllMode(HWND window, Host& host, const Options& options) {
         if (pixels < visible)
             return Fail("overlay is not visible on screen");
 
-        if (options.resubclass)
+        // Once: the host's procedure calls the procedure it replaced, the DLL's of the first cycle.
+        if (options.resubclass && cycle == 0)
             SubclassWindow(window);
         if (!PressKey(window, unloadKey))
             return Skip("the host window lost the focus");
         run(5);
         HoldKey(unloadKey, false);
-        if (proxy || options.resubclass) {
+        if (proxy) {
             for (ULONGLONG start = GetTickCount64(); pixels >= visible && GetTickCount64() - start < 10000;) {
                 run(15);
                 pixels = overlayPixels();
@@ -1493,14 +1495,14 @@ int RunDllMode(HWND window, Host& host, const Options& options) {
             printf("cycle %d: %d overlay pixels after the unload key\n", cycle + 1, pixels);
             if (pixels >= visible)
                 return Fail("overlay is still visible after the unload key");
-            run(30);
-            if (options.resubclass && !ProcedureChainWorks(window))
-                return Fail("the procedures of the window no longer chain");
         } else {
             for (ULONGLONG start = GetTickCount64(); GetModuleHandleW(name.c_str()) && GetTickCount64() - start < 10000;)
                 run(1);
             if (GetModuleHandleW(name.c_str()))
                 return Fail("DLL did not unload");
+            run(30);
+            if (options.resubclass && !ProcedureChainWorks(window))
+                return Fail("the procedures of the window no longer chain");
         }
     }
     printf("PASS: %s via %s\n", options.api.c_str(), options.dll.c_str());
