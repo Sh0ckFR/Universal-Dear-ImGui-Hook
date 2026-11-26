@@ -6,6 +6,7 @@
 #include "host.h"
 #include "remote_memory.h"
 #include "remote_advanced.h"
+#include "remote_time.h"
 #define UIH_TEST_TOOLS_HOOK
 #include "remote_tools.h"
 
@@ -1130,6 +1131,36 @@ void WhileRendering(Work&& work, Frame&& frame) {
     thread.join();
 }
 
+// QueryPerformanceCounter() in milliseconds, called from code generated at run
+// time: the hook keeps real time for the host's module, which it is part of,
+// and scales the calls of the game's code.
+int64_t GameMs() {
+    using QueryFn = BOOL(WINAPI*)(LARGE_INTEGER*);
+    static const QueryFn query = [] {
+        void* target = reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "QueryPerformanceCounter"));
+        auto* code = static_cast<uint8_t*>(VirtualAlloc(nullptr, 64, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
+#ifdef _WIN64
+        // sub rsp, 28h; mov rax, target; call rax; add rsp, 28h; ret
+        const uint8_t head[] = {0x48, 0x83, 0xEC, 0x28, 0x48, 0xB8};
+        const uint8_t tail[] = {0xFF, 0xD0, 0x48, 0x83, 0xC4, 0x28, 0xC3};
+#else
+        // push [esp+4]; mov eax, target; call eax; ret 4
+        const uint8_t head[] = {0xFF, 0x74, 0x24, 0x04, 0xB8};
+        const uint8_t tail[] = {0xFF, 0xD0, 0xC2, 0x04, 0x00};
+#endif
+        memcpy(code, head, sizeof(head));
+        memcpy(code + sizeof(head), &target, sizeof(target));
+        memcpy(code + sizeof(head) + sizeof(target), tail, sizeof(tail));
+        FlushInstructionCache(GetCurrentProcess(), code, 64);
+        return reinterpret_cast<QueryFn>(code);
+    }();
+    LARGE_INTEGER counter{};
+    LARGE_INTEGER frequency{};
+    query(&counter);
+    QueryPerformanceFrequency(&frequency);
+    return counter.QuadPart * 1000 / frequency.QuadPart;
+}
+
 // The commands of remote/uih_mcp.py while the menu is open: the screenshot
 // shows the game without the overlay, the message is drawn, and the keys reach
 // the window once the menu is closed.
@@ -1165,9 +1196,11 @@ int RemoteScenario(bool memory, bool advanced, Frame&& frame) {
                 memoryFailure = CheckRemoteMemory(client);
             else if (client.Request("read 1000 4").rfind("error memory access is off", 0) != 0)
                 memoryFailure = "the memory commands answer while remoteMemory is off";
-            if (advanced)
+            if (advanced) {
                 advancedFailure = CheckRemoteAdvanced(client);
-            else if (client.Request("wait 100").rfind("error the advanced features are off", 0) != 0 ||
+                if (advancedFailure.empty())
+                    advancedFailure = CheckRemoteTime(client, GameMs);
+            } else if (client.Request("wait 100").rfind("error the advanced features are off", 0) != 0 ||
                      client.Request("type x").rfind("error the advanced features are off", 0) != 0 ||
                      client.Request("chat poll").rfind("error the advanced features are off", 0) != 0 ||
                      (memory && client.Request("pointer 1000").rfind("error the advanced features are off", 0) != 0))

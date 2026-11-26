@@ -441,6 +441,7 @@ void MapKeycode(uint8_t keycode, uint32_t keysym) {
 }
 
 void Serve() {
+    timing::RealTime realTime;
     while (WaitFor(g_listener, POLLIN, -1)) {
         int client = accept4(g_listener, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
         if (client < 0) {

@@ -158,6 +158,7 @@ void PostKeys(HWND window, const std::vector<int>& keys, bool repeat, bool up) {
 }
 
 DWORD WINAPI Serve(void*) {
+    timing::RealTime realTime;
     while (!Stopping()) {
         HANDLE pipe = CreateNamedPipeW(g_pipeName.c_str(), PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
                                        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, 1, 1 << 20, 4096, 0, nullptr);

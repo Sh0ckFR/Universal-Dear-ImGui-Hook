@@ -925,6 +925,18 @@ void DrawAIAdvancedFeatures(bool* open) {
     if (ImGui::Checkbox("Let the assistant read and change the memory of the game", &memory))
         g_memoryAllowed = memory;
     ImGui::EndDisabled();
+    // The player can always resume a game the assistant paused.
+    if (detail::timing::ClocksHooked()) {
+        float speed = static_cast<float>(detail::timing::Speed());
+        ImGui::SetNextItemWidth(220.0f);
+        if (ImGui::SliderFloat("Speed of the game", &speed, 0.0f, 2.0f, speed == 0.0f ? "paused" : "%.2fx"))
+            detail::timing::SetSpeed(speed);
+        ImGui::SameLine();
+        ImGui::BeginDisabled(speed == 1.0f);
+        if (ImGui::Button(speed == 0.0f ? "Resume" : "Real time"))
+            detail::timing::SetSpeed(1.0);
+        ImGui::EndDisabled();
+    }
 
     if (ImGui::BeginTabBar("ai_tabs")) {
         if (ImGui::BeginTabItem("Chat")) {

@@ -41,7 +41,7 @@ Sections marked with ▶ expand on click. What changed in each version is listed
 
 - **Chat with Claude in the game**: a [chat window over the game](#talk-to-claude-from-the-game) where you tell Claude what to do. It looks at the game, plays it, reads or changes its memory, and answers in the chat.
 - **One library for every API**: the backend is picked from the first API that presents a frame. Inject before or after the game initializes its graphics.
-- **AI remote control**: through [MCP](#remote-control-by-an-ai-assistant), an assistant such as Claude Code sees the game, shows messages to the player, presses keys and clicks. Your menu can give it [tools of your own](#tools-of-your-own), such as *teleport* or *spawn an item*, which it calls like the built-in ones. With the [advanced features](#advanced-features-and-the-ai-advanced-features-window), it also types text, drags the mouse, waits for the screen to change, follows pointer chains, freezes values and finds the code that writes them, and the *AI Advanced Features* window shows everything it does.
+- **AI remote control**: through [MCP](#remote-control-by-an-ai-assistant), an assistant such as Claude Code sees the game, shows messages to the player, presses keys and clicks. Your menu can give it [tools of your own](#tools-of-your-own), such as *teleport* or *spawn an item*, which it calls like the built-in ones. With the [advanced features](#advanced-features-and-the-ai-advanced-features-window), it also types text, drags the mouse, waits for the screen to change, pauses or slows down the game while it thinks, follows pointer chains, freezes values and finds the code that writes them, and the *AI Advanced Features* window shows everything it does.
 - **Menu input**: `INSERT`, or L3 + R3 on a controller, opens the menu; `F11` removes the overlay and unloads the DLL. Both keys are [settings](#settings). While the menu is open, the game receives no keyboard, mouse or controller input (on Linux, no key or button presses and no motion), and an XInput controller navigates the menu.
 - **The overlay can't crash the game** (MSVC builds on Windows, and Linux): an access violation or a C++ exception in the overlay, whether in a renderer backend or in your menu code, removes the overlay instead of taking the game down. The menu key brings it back.
 - **Images and frame capture**: `uih::CreateTexture()` turns RGBA pixels into an image for `ImGui::Image()`, and `uih::CaptureFrame()` copies the game's frame, without the overlay, on every backend.
@@ -332,7 +332,7 @@ The assistant gets these tools:
 | `show_text` | A message to the player at the top of the screen, drawn by the overlay, for 10 seconds by default |
 | `press_key` | Holds keys for a duration, 150 ms by default; `right+space` holds them together |
 | `click` | Clicks at a point of the last screenshot, with the left, right or middle button |
-| `game_info` | Graphics API, window size, keyboard focus, menu state, and whether the memory and advanced tools are on |
+| `game_info` | Graphics API, window size, keyboard focus, menu state, whether the memory and advanced tools are on, and the speed of the game when it is not real time |
 
 ### Memory tools
 
@@ -356,6 +356,7 @@ With `config.aiAdvancedFeatures = true`, the assistant also gets these tools:
 | `type_text` | Types Unicode text, for chat boxes and text fields; a new line presses Enter |
 | `mouse_move`, `drag` | Moves the cursor to a point of the last screenshot, or drags from one point to another with a button held |
 | `wait_for_change` | Waits until a share of the frame's pixels has changed, 1% by default, or for a timeout: use it after a loading screen or an animation, instead of taking screenshots in a loop |
+| `game_speed` | Pauses the game while the assistant thinks, slows it down (0.25 for a fast fight) or brings it back to real time; while it is paused, each key, click or wait runs it for its duration, and `advance_ms` runs it for a set time. The overlay keeps drawing and the screenshots keep working |
 
 and, with `remoteMemory` too:
 
@@ -370,7 +371,7 @@ The example menu then shows an **AI Advanced Features** button, which opens a wi
 
 - **Chat**: talk to Claude from the game while `remote/uih_chat.py` runs: see [Talk to Claude from the game](#talk-to-claude-from-the-game);
 - **Activity**: the assistant's commands and their answers, newest first;
-- two switches that pause the assistant's input (keys, clicks, typing, mouse) or its memory tools, without rebuilding;
+- two switches that pause the assistant's input (keys, clicks, typing, mouse) or its memory tools, without rebuilding, and the speed of the game, to resume a game the assistant paused;
 - **Watch list**: the values watched by the assistant or the player, updated live, with a checkbox to freeze each one, a value to write, and a form to add one;
 - **Pointers**: a pointer chain followed as you type it, and a pointer scan whose results go to the watch list in one click;
 - **What writes**: the instruction watch on an address, with each instruction, its hit count and the bytes before it.
@@ -549,12 +550,14 @@ Bug reports, fixes and features are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) 
 - A Vulkan swap chain created before the hook has no overlay until the game recreates it. Its presents report `VK_SUBOPTIMAL_KHR`, to which games respond by recreating it.
 - When the game, or another overlay, subclasses the window after the hook, the hook's window procedure stays in its chain: the unload key leaves the DLL loaded, and injecting it again does not start it.
 - Native ARM64 Windows games are not supported: MinHook only handles x86 and x64.
+- `game_speed` slows down the clocks the game reads through Windows. A game that times itself with the processor's counter alone (`rdtsc`), which is rare, keeps running in real time.
 - MinGW-w64 builds of the DLL survive C++ exceptions in the overlay, but not access violations, since MinGW-w64 has no structured exception handling. The released DLLs are built with MSVC.
 
 **Linux**
 - Input is read from the X server, so native Wayland windows get no menu input (run SDL games with `SDL_VIDEODRIVER=x11`). The wheel scrolls the menu in games that read the mouse buttons from the X server. Input methods are not handled, and a pointer the game has grabbed stays grabbed while the menu is open.
 - 32-bit games, OpenGL ES, and games that link their GL or Vulkan loader statically are not supported.
 - The remote control sends no keys or clicks to native Wayland games.
+- `game_speed` needs the library preloaded, since it stands for `clock_gettime()`. A paused game that sleeps until a time it computed from its own clock may spin a core until it runs again.
 
 ## Credits
 

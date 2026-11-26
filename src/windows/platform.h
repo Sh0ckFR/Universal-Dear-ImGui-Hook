@@ -48,6 +48,8 @@ extern const Renderer kDirectInputHooks;
 extern const Renderer kXInput14Hooks;
 extern const Renderer kXInput13Hooks;
 extern const Renderer kXInput910Hooks;
+// timeGetTime(), hooked once winmm.dll loads for the speed of the game's clocks.
+extern const Renderer kClockHooks;
 
 // DXGI swap chain presenters implemented by the D3D10/11/12 backends.
 struct DxgiPresenter {
@@ -78,6 +80,12 @@ TexelLayout DxgiTexelLayout(DXGI_FORMAT format);
 HWND SwapChainWindow(IDXGISwapChain* swapChain, const DXGI_SWAP_CHAIN_DESC& desc);
 // Hidden window for dummy swap chains.
 HWND CreateHiddenWindow();
+
+// The clocks the game reads, src/windows/clocks.cpp, with Config::aiAdvancedFeatures.
+namespace clocks {
+void InstallHooks();
+void UninstallHooks();
+} // namespace clocks
 
 namespace input {
 void InstallHooks();

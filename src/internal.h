@@ -301,6 +301,61 @@ std::vector<InstructionHit> InstructionHits();
 void RefreshInstructionWatch();
 } // namespace remote
 
+// Speed of the game's clocks, src/timing.cpp ---------------------------------
+
+namespace timing {
+// The clocks the platforms hook: their readings are scaled one by one.
+enum Clock {
+    kQpc,           // QueryPerformanceCounter(), in its ticks
+    kTickMs,        // GetTickCount64() and GetTickCount(), in milliseconds
+    kTimeGetTime,   // timeGetTime(), in milliseconds
+    kMonotonic,     // clock_gettime(CLOCK_MONOTONIC), in nanoseconds
+    kMonotonicRaw,  // CLOCK_MONOTONIC_RAW
+    kMonotonicCoarse,
+    kBoottime,
+    kClockCount
+};
+// True once the speed changed, outside RealTime: the hooks then scale the
+// readings of the game's code.
+bool Scaling();
+// The game's reading of `clock` for its real reading `real`.
+int64_t GameTime(Clock clock, int64_t real);
+double Speed();
+// 0 pauses the game, 1 is real time.
+void SetSpeed(double speed);
+// Back to real time, once the overlay is gone.
+void Reset();
+std::string Command(const std::string& rest);
+
+// The clocks read by the overlay on this thread keep real time.
+class RealTime {
+public:
+    RealTime();
+    ~RealTime();
+    RealTime(const RealTime&) = delete;
+    RealTime& operator=(const RealTime&) = delete;
+};
+
+// For an input command of the assistant: a paused game runs during it, then
+// pauses again.
+class RunWhilePaused {
+public:
+    RunWhilePaused();
+    ~RunWhilePaused();
+    RunWhilePaused(const RunWhilePaused&) = delete;
+    RunWhilePaused& operator=(const RunWhilePaused&) = delete;
+
+private:
+    uint64_t epoch_ = 0;
+};
+
+// Implemented once per platform, in clocks.cpp:
+// the real reading of `clock`; false when the platform has no such clock.
+bool RealClock(Clock clock, int64_t& real);
+// True when the clock functions of the game are hooked.
+bool ClocksHooked();
+} // namespace timing
+
 // Runs work of the overlay on a thread of the application. On Windows with
 // MSVC, an exception in it, from a renderer backend or the render callback,
 // removes the overlay instead of crashing the application, and the menu key

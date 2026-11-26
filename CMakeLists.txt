@@ -79,12 +79,13 @@ else()
 endif()
 add_library(uih::imgui ALIAS uih_imgui)
 
-add_library(uih STATIC src/uih.cpp src/vulkan.cpp src/remote.cpp src/memory.cpp src/advanced.cpp src/tools.cpp)
+add_library(uih STATIC src/uih.cpp src/vulkan.cpp src/remote.cpp src/memory.cpp src/advanced.cpp src/tools.cpp src/timing.cpp)
 target_include_directories(uih PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 if(WIN32)
     target_sources(uih PRIVATE
         src/windows/platform.cpp
         src/windows/input.cpp
+        src/windows/clocks.cpp
         src/windows/dinput.cpp
         src/windows/remote.cpp
         src/windows/breakpoints.cpp
@@ -104,6 +105,7 @@ else()
     target_sources(uih PRIVATE
         src/linux/platform.cpp
         src/linux/interpose.cpp
+        src/linux/clocks.cpp
         src/linux/x11.cpp
         src/linux/events.cpp
         src/linux/opengl.cpp
