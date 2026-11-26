@@ -11,6 +11,8 @@
 #endif
 
 #include <cstdint>
+#include <functional>
+#include <string>
 #include <vector>
 
 struct ImTextureData;
@@ -138,5 +140,27 @@ bool AIAdvancedFeaturesEnabled();
 // the render callback; the close button of the window clears `open`. Draws
 // nothing unless AIAdvancedFeaturesEnabled().
 void DrawAIAdvancedFeatures(bool* open = nullptr);
+
+// A tool of your own for the assistant, next to the built-in ones of the
+// remote control: remote/uih_mcp.py lists it, and the assistant calls it as it
+// calls screenshot or press_key. `call` receives the arguments as a JSON object
+// and returns the text the assistant reads; it runs in the frame of the
+// overlay, on the thread of the render callback, so it can use the game's
+// objects as the menu does. An exception it throws answers its message as an
+// error. With remoteControl only.
+using ToolCall = std::function<std::string(const std::string& arguments)>;
+// `name`: 1 to 64 letters, digits, _ or -, other than the built-in tools'.
+// `description`: what the tool does, when to use it, what it returns.
+// `parameters`: the JSON Schema of the arguments, such as
+// {"type":"object","properties":{"x":{"type":"number"}},"required":["x"]},
+// or null for none. Registering a name again replaces the tool. Callable from
+// any thread, before or after Start(). False when the name or the schema is
+// not valid. The assistant sees the tools registered when its session starts.
+bool RegisterTool(const char* name, const char* description, const char* parameters, ToolCall call);
+void UnregisterTool(const char* name);
+// The value of `key` in the JSON object `arguments`: the text of a string,
+// unescaped, or the JSON of a number, true, false, null, object or array.
+// Empty when the key is missing or the JSON is malformed.
+std::string ToolArgument(const std::string& arguments, const char* key);
 
 } // namespace uih

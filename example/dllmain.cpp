@@ -4,6 +4,7 @@
 
 void ApplySettings(uih::Config& config);
 void DrawMenu();
+void RegisterExampleTools();
 
 // Loaded as dinput8.dll, the DLL stays in the game: the unload key removes
 // the overlay, and the menu key brings it back.
@@ -23,6 +24,7 @@ BOOL WINAPI DllMain(HMODULE module, DWORD reason, LPVOID) {
         config.render = DrawMenu;
         // With UIH_DEBUG set, the log goes to OutputDebugString(), which DebugView shows.
         config.debugLog = GetEnvironmentVariableW(L"UIH_DEBUG", nullptr, 0) > 0;
+        RegisterExampleTools();
         uih::Start(config);
     }
     return TRUE;

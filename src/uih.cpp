@@ -564,6 +564,7 @@ ImDrawData* Frame() {
     t_inRenderCallback = false;
     remote::Draw();
     remote::Tick();
+    remote::RunTools();
     ImGui::Render();
     ImDrawData* drawData = ImGui::GetDrawData();
     GuardCallbacks(drawData);

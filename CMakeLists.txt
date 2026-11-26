@@ -79,7 +79,7 @@ else()
 endif()
 add_library(uih::imgui ALIAS uih_imgui)
 
-add_library(uih STATIC src/uih.cpp src/vulkan.cpp src/remote.cpp src/memory.cpp src/advanced.cpp)
+add_library(uih STATIC src/uih.cpp src/vulkan.cpp src/remote.cpp src/memory.cpp src/advanced.cpp src/tools.cpp)
 target_include_directories(uih PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 if(WIN32)
     target_sources(uih PRIVATE

@@ -34,6 +34,8 @@ Each command is one line; each answer starts with `ok` or `error <reason>`. Some
 | `freeze <id> [value]`, `unfreeze <id>` | `ok`; `freeze` keeps the current value by default |
 | `writes start <address> [1\|2\|4\|8] [write\|access]`, `writes stop` | `ok` |
 | `writes results` | `ok <bytes>`, then lines `<next instruction> <module+offset> <hits> <16 bytes before it>` |
+| `tools` | `ok <bytes>`, then a JSON array of the tools the game registered with `uih::RegisterTool()`: `{"name", "description", "inputSchema"}` |
+| `tool <name> [JSON object]` | `ok <bytes>`, then the text the tool returned; the arguments, `{}` by default, are one line of JSON |
 | `chat poll` | `ok <bytes>`, then what the player did in the chat since the last poll: lines `message <text>`, `reset` (new conversation) or `cancel` (stop the answer) |
 | `chat say <text>`, `chat note <text>` | `ok`: an answer from Claude, also shown at the top of the screen while the chat is hidden, or a line from the bridge |
 | `chat status [text]` | `ok`: what Claude is doing, empty once it has answered |
@@ -41,6 +43,7 @@ Each command is one line; each answer starts with `ok` or `error <reason>`. Some
 ## Details
 
 - **Escapes.** The `chat` texts escape a new line as `\n`, a tab as `\t` and a backslash as `\\`.
+- **Tools of the game.** `tools` and `tool` answer with `remoteControl` alone. The tool runs in the next frame of the overlay; when none comes within 10 seconds, or the tool takes longer, the command answers `error`. An exception thrown by the tool answers `error <its message>`.
 - **Which commands answer.** The memory commands, `modules` to `pattern` (`src/memory.cpp`), answer only with `remoteMemory`. The commands from `type` on answer only with `aiAdvancedFeatures` (`src/remote.cpp`, `src/advanced.cpp`), and those from `pointer` to `writes results` need `remoteMemory` as well. Otherwise they answer `error`.
 - **Types and values.** Types are `i8`, `i16`, `i32`, `i64`, `f32` and `f64`. Floating-point values match when they round to the given value, to as many decimals as it has.
 - **Addresses** are hexadecimal or `module+offset`, such as `game.exe+1a2b3c`. With `aiAdvancedFeatures`, they can also be pointer chains: `[game.exe+1a2b3c]+10` is the address 0x10 bytes after the one stored at `game.exe+1a2b3c`.
