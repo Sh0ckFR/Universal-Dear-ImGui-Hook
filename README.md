@@ -580,13 +580,22 @@ Bug reports, fixes and features are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) 
 
 ## Credits
 
-Built with [Dear ImGui](https://github.com/ocornut/imgui), [MinHook](https://github.com/TsudaKageyu/minhook), [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) and [stb_image](https://github.com/nothings/stb) (the example's picture).
+This project stands on the work of the open source community, and thanks everyone behind it:
 
-| Who | What |
+- **The libraries it is built with**: [Dear ImGui](https://github.com/ocornut/imgui) by Omar Cornut and its contributors, the interface this whole project exists to draw; [MinHook](https://github.com/TsudaKageyu/minhook) by Tsuda Kageyu, which places every hook on Windows; the [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) of the Khronos Group; [stb_image](https://github.com/nothings/stb) by Sean Barrett, for the example's picture.
+- **What the CI runs on**: [Mesa](https://www.mesa3d.org/)'s llvmpipe and lavapipe, and [mesa-dist-win](https://github.com/pal1000/mesa-dist-win) by pal1000, which let every graphics API render without a GPU; [DDNet](https://ddnet.org/) and [Godot](https://godotengine.org/), open source games that the CI plays on every commit; and [Wine](https://www.winehq.org/), on which it runs the Windows build as a Linux or Steam Deck player does.
+- **The projects that explored the same problem**: [kiero](https://github.com/Rebzzel/kiero) by Rebzzel, where this project started, and [UniversalHookX](https://github.com/bruhmoment21/UniversalHookX), [hudhook](https://github.com/veeenu/hudhook) (in Rust) and [HydraHook](https://github.com/nefarius/HydraHook) (for DirectX): have a look at them too, one may fit your project better.
+- **The [Model Context Protocol](https://modelcontextprotocol.io)**, an open standard that lets any assistant use the remote control.
+
+| Contributor | What |
 | --- | --- |
-| [Sh0ckFR](https://github.com/Sh0ckFR), [Revan600](https://github.com/Revan600) | ImGui and input hooks |
-| [Rebzzel](https://github.com/Rebzzel) | Initial work on the kiero library (no longer used) |
-| [primemb](https://github.com/primemb) | Bug fixes |
+| [Sh0ckFR](https://github.com/Sh0ckFR) | Author and maintainer |
+| [Revan600](https://github.com/Revan600) | ImGui and input hooks |
+| [Rebzzel](https://github.com/Rebzzel) | The kiero library, the original base of the hooks |
+| [primemb](https://github.com/primemb) | Dear ImGui and kiero updates, input hook improvements |
+| [SirMestre](https://github.com/SirMestre) | Fix of the buffer count type |
+
+Thanks as well to everyone who reported a bug, tested a game or starred the repository.
 
 ## Support
 
