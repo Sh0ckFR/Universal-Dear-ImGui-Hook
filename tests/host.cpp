@@ -6,6 +6,8 @@
 #include "host.h"
 #include "remote_memory.h"
 #include "remote_advanced.h"
+#define UIH_TEST_TOOLS_HOOK
+#include "remote_tools.h"
 
 #include <d3d10_1.h>
 #include <d3d11.h>
@@ -1009,6 +1011,8 @@ void StartHook(const Options& options) {
     config.render = DrawTestMenu;
     config.setup = [] { g_setupCalled = true; };
     config.debugLog = true;
+    if (options.remote && !RegisterTestTools())
+        printf("uih::RegisterTool() refused a valid tool or accepted an invalid one: the remote scenario fails\n");
     g_hookStarted = true;
     uih::Start(config);
 }
@@ -1137,6 +1141,7 @@ int RemoteScenario(bool memory, bool advanced, Frame&& frame) {
     std::string unknownKey;
     std::string memoryFailure;
     std::string advancedFailure;
+    std::string toolsFailure;
     std::string click;
     std::string outside;
     std::vector<uint8_t> rgb;
@@ -1155,6 +1160,7 @@ int RemoteScenario(bool memory, bool advanced, Frame&& frame) {
             }
             text = client.Request("text 60 hello\\nworld");
             unknownKey = client.Request("key nokey 50");
+            toolsFailure = CheckRemoteTools(client, [] { return ImGui::GetFrameCount(); });
             if (memory)
                 memoryFailure = CheckRemoteMemory(client);
             else if (client.Request("read 1000 4").rfind("error memory access is off", 0) != 0)
@@ -1196,6 +1202,8 @@ int RemoteScenario(bool memory, bool advanced, Frame&& frame) {
         return Fail(memoryFailure.c_str());
     if (!advancedFailure.empty())
         return Fail(advancedFailure.c_str());
+    if (!toolsFailure.empty())
+        return Fail(toolsFailure.c_str());
     for (int i = 0; i < 3; ++i)
         frame();
     ImGuiWindow* message = ImGui::FindWindowByName("##uih_remote_message");

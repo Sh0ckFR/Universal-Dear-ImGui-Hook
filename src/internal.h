@@ -277,6 +277,11 @@ void RecordActivity(const std::string& line, const std::string& answer);
 bool HandleAdvanced(const std::string& command, const std::string& rest, std::vector<uint8_t>& payload, std::string& answer);
 // Every frame of the overlay: writes the frozen values, watches new threads.
 void Tick();
+// The tools of the game, uih::RegisterTool(), src/tools.cpp: false when
+// `command` is not tools or tool.
+bool HandleTools(const std::string& command, const std::string& rest, std::vector<uint8_t>& payload, std::string& answer);
+// Every frame of the overlay: runs the tool the assistant called, if any.
+void RunTools();
 // Once the overlay is gone: ends the instruction watch and the scan of the window.
 void StopAdvanced();
 // Implemented once per platform: the instructions that write `size` bytes at

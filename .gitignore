@@ -9,3 +9,6 @@ CMakeUserPresets.json
 # Python
 __pycache__/
 *.pyc
+
+# Worktrees of Claude Code agents
+.claude/worktrees/

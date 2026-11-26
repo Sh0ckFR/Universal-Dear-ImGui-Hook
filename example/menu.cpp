@@ -3,10 +3,17 @@
 #include "imgui.h"
 #include "uih.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <string>
 
 ImTextureData* ExampleImage(ImVec2& size);
+
+// Shown in Basics(), and read or set by the assistant through example_menu.
+static float g_slider = 1.0f;
+static bool g_checkbox = false;
 
 static void Style() {
     static bool styled = false;
@@ -23,12 +30,10 @@ static void Style() {
 }
 
 static void Basics() {
-    static float slider = 1.0f;
-    static bool checkbox = false;
     ImGui::Text("Text Test");
     ImGui::Button("Button Test");
-    ImGui::Checkbox("Checkbox Test", &checkbox);
-    ImGui::SliderFloat("Slider Test", &slider, 1.0f, 100.0f);
+    ImGui::Checkbox("Checkbox Test", &g_checkbox);
+    ImGui::SliderFloat("Slider Test", &g_slider, 1.0f, 100.0f);
 
     // Images: any RGBA pixels, here imgui.png embedded in the library.
     ImVec2 size;
@@ -241,4 +246,24 @@ void DrawMenu() {
         uih::DrawAIAdvancedFeatures(&ai);
     if (!open)
         uih::SetMenuOpen(false);
+}
+
+// A tool of the example for the assistant, with config.remoteControl: it reads
+// and sets values of the menu. Your own tools work the same way, and give the
+// assistant what pixels cannot: teleport the player, spawn an item, read the
+// state of the game by name. They run in the frame of the overlay, as DrawMenu().
+void RegisterExampleTools() {
+    uih::RegisterTool("example_menu", "Reads the slider and the checkbox of the example menu of the overlay, or sets them, and returns their values.",
+                      R"({"type":"object","properties":{"slider":{"type":"number","minimum":1,"maximum":100},"checkbox":{"type":"boolean"}}})",
+                      [](const std::string& arguments) {
+                          std::string slider = uih::ToolArgument(arguments, "slider");
+                          std::string checkbox = uih::ToolArgument(arguments, "checkbox");
+                          if (!slider.empty())
+                              g_slider = std::clamp(static_cast<float>(atof(slider.c_str())), 1.0f, 100.0f);
+                          if (!checkbox.empty())
+                              g_checkbox = checkbox == "true";
+                          char text[96];
+                          snprintf(text, sizeof(text), "Slider Test: %.1f, Checkbox Test: %s", g_slider, g_checkbox ? "checked" : "unchecked");
+                          return std::string(text);
+                      });
 }

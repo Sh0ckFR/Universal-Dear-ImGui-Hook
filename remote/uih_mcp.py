@@ -16,6 +16,7 @@ import base64
 import ctypes
 import json
 import os
+import re
 import socket
 import struct
 import subprocess
@@ -288,6 +289,11 @@ TOOLS += [
 TYPOGRAPHY = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"', "\u2013": "-", "\u2014": "-", "\u2026": "...", "\u00a0": " ", "\u202f": " "})
 
 
+BUILTIN_TOOLS = {tool["name"] for tool in TOOLS}
+# As uih::RegisterTool() accepts them.
+TOOL_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
 class GameError(Exception):
     pass
 
@@ -428,7 +434,22 @@ def call_tool(name, args):
         return content
     if name.startswith("memory_"):
         return [{"type": "text", "text": memory_tool(name, args)}]
+    if name not in BUILTIN_TOOLS and TOOL_NAME.match(name or ""):
+        # A tool of the game, uih::RegisterTool(): the arguments go as JSON on one line.
+        _, data = request(f"tool {name} {json.dumps(args, ensure_ascii=False)}", payload=text_payload)
+        return [{"type": "text", "text": data.decode("utf-8", "replace")}]
     raise GameError(f"Unknown tool {name}.")
+
+
+def game_tools():
+    """The tools the game registered with uih::RegisterTool(); none when no game answers."""
+    try:
+        _, data = request("tools", payload=text_payload)
+        tools = json.loads(data.decode("utf-8"))
+    except (GameError, ValueError):
+        return []
+    return [tool for tool in tools if isinstance(tool, dict) and TOOL_NAME.match(str(tool.get("name", "")))
+            and tool["name"] not in BUILTIN_TOOLS and isinstance(tool.get("inputSchema"), dict)]
 
 
 def text_payload(answer):
@@ -595,7 +616,7 @@ def serve():
         elif method == "ping":
             reply(message_id, {})
         elif method == "tools/list":
-            reply(message_id, {"tools": TOOLS})
+            reply(message_id, {"tools": TOOLS + game_tools()})
         elif method == "tools/call":
             try:
                 content = call_tool(params.get("name"), params.get("arguments") or {})
@@ -663,7 +684,8 @@ def check():
         text = call_tool("game_info", {})[0]["text"]
     except GameError as error:
         sys.exit(f"No answer on {PIPE_NAME}: {error}")
-    print(f"The game answers on {PIPE_NAME}. {text}.")
+    names = ", ".join(tool["name"] for tool in game_tools())
+    print(f"The game answers on {PIPE_NAME}. {text}, tools of the game: {names or 'none'}.")
 
 
 def valid_pipe(name):

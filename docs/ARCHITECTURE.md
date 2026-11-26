@@ -10,6 +10,7 @@ The internals of Universal-Dear-ImGui-Hook, for contributors and the curious. To
 | `src/uih.cpp`, `src/internal.h` | Platform-independent core: lifecycle, frame, textures, scale |
 | `src/remote.cpp`, `src/memory.cpp` | Remote control commands, and its memory commands |
 | `src/advanced.cpp` | Advanced features: chat, watch list, frozen values, instruction watch, the AI Advanced Features window |
+| `src/tools.cpp` | Tools of the game for the assistant, `uih::RegisterTool()`, and the small JSON reader of `uih::ToolArgument()` |
 | `src/vulkan.cpp` | Vulkan renderer, shared by both platforms |
 | `src/gl_state.h` | OpenGL state saved while the overlay draws, and the frame capture shared by WGL, GLX and EGL |
 | `src/windows/` | MinHook, Direct3D, WGL, Win32 input, DirectInput, XInput, remote control (`remote.cpp`), instruction watch (`breakpoints.cpp`) |
@@ -85,6 +86,8 @@ When `CaptureFrame()` waits, the backend copies its back buffer at the next pres
 With `remoteControl` set, a library thread serves the named pipe with overlapped I/O on Windows, or the Unix socket with `poll()` and an `eventfd` on Linux, so that `Stop()` ends a connection or a command immediately. The [protocol](../remote/PROTOCOL.md) is one text command per line.
 
 Messages are drawn after the `render` callback, in the overlay's frame. Keys and clicks go through `SendInput` (Windows) or XTEST on a dedicated connection to the X server (Linux) when the game has the focus, and as window messages or X11 events otherwise. On Windows, a click also moves the cursor with `SendInput`, since the `SetCursorPos` hook holds it still while the menu is open.
+
+**Tools of the game.** The server thread hands a `tool` command to the next frame of the overlay, which runs it after the `render` callback, and waits up to 10 seconds for its answer: a tool can then use the game's objects on the thread that renders, as the menu does. One request is served at a time, so one tool call waits at most.
 
 With `aiAdvancedFeatures`, `wait` compares frames copied by `uih::CaptureFrame()`, shrunk to 160 pixels. Frozen values are written in the overlay's frame, only when they changed, and their pointer chains are resolved again each time.
 
