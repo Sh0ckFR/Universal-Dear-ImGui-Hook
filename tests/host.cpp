@@ -998,7 +998,16 @@ std::string RemotePipe() { return "uih-host-" + std::to_string(GetCurrentProcess
 
 std::wstring RemotePipePath() { return L"\\\\.\\pipe\\uih-host-" + std::to_wstring(GetCurrentProcessId()); }
 
+// tests/c_api.c, compiled as C.
+extern "C" const char* uih_test_check_c_api(void);
+extern "C" void uih_test_start_c_api(void (*render)(void), void (*setup)(void), float scale);
+
 void StartHook(const Options& options) {
+    if (options.cApi) {
+        g_hookStarted = true;
+        uih_test_start_c_api(DrawTestMenu, [] { g_setupCalled = true; }, options.scale);
+        return;
+    }
     uih::Config config;
     config.scale = options.scale;
     std::string pipe = RemotePipe();
@@ -2469,6 +2478,7 @@ int main(int argc, char** argv) {
         else if (arg == "--ignore-suboptimal") options.ignoreSuboptimal = true;
         else if (arg == "--render-thread") options.renderThread = true;
         else if (arg == "--resubclass") options.resubclass = true;
+        else if (arg == "--c-api") options.cApi = true;
         else if (arg == "--recreate-context") options.recreateContext = true;
         else if (arg == "--switch-api" && i + 1 < argc) options.switchApi = argv[++i];
         else if (arg == "--slow-frame" && i + 1 < argc) options.slowFrameMs = atoi(argv[++i]);
@@ -2487,7 +2497,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--own-hooks before|after] [--fault access|exception|draw] [--second-window [--shared-device]] [--composition] [--capture-frame] [--remote [--remote-memory] [--remote-advanced]] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--own-hooks before|after] [--fault access|exception|draw] [--second-window [--shared-device]] [--composition] [--capture-frame] [--remote [--remote-memory] [--remote-advanced]] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--c-api] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -2520,6 +2530,11 @@ int main(int argc, char** argv) {
             return Fail("the texture limit was not applied");
     }
 
+    if (options.cApi) {
+        if (const char* failure = uih_test_check_c_api())
+            return Fail(failure);
+        printf("C interface: defaults and names checked\n");
+    }
     if (options.injectAt == 0 && options.dll.empty())
         StartHook(options);
 

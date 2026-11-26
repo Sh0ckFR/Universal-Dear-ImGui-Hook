@@ -38,6 +38,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\tests\c_api.c" />
     <ClCompile Include="..\tests\host.cpp" />
     <ClCompile Include="..\tests\host_vulkan.cpp" />
   </ItemGroup>
