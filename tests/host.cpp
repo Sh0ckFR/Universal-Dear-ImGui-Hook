@@ -5,6 +5,7 @@
 
 #include "host.h"
 #include "remote_memory.h"
+#include "remote_advanced.h"
 
 #include <d3d10_1.h>
 #include <d3d11.h>
@@ -291,7 +292,7 @@ struct D3D10Host : Host {
     }
 
     void Frame() override {
-        device->ClearRenderTargetView(target, kClear);
+        device->ClearRenderTargetView(target, ClearColor());
         swapChain->Present(1, 0);
     }
 
@@ -358,7 +359,7 @@ struct D3D11Host : Host {
     }
 
     void Frame() override {
-        context->ClearRenderTargetView(target, kClear);
+        context->ClearRenderTargetView(target, ClearColor());
         swapChain->Present(1, 0);
     }
 
@@ -597,7 +598,7 @@ struct D3D12Host : Host {
         barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
         barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
         commandList->ResourceBarrier(1, &barrier);
-        commandList->ClearRenderTargetView(targets[index], kClear, 0, nullptr);
+        commandList->ClearRenderTargetView(targets[index], ClearColor(), 0, nullptr);
         barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
         barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
         commandList->ResourceBarrier(1, &barrier);
@@ -761,7 +762,7 @@ struct OpenGLHost : Host {
 
     void Frame() override {
         BindForSwap(false);
-        glClearColor(kClear[0], kClear[1], kClear[2], kClear[3]);
+        glClearColor(ClearColor()[0], ClearColor()[1], ClearColor()[2], ClearColor()[3]);
         glClear(GL_COLOR_BUFFER_BIT);
         BindForSwap(true);
         SwapBuffers(hdc);
@@ -859,6 +860,12 @@ void DrawTestMenu() {
     g_buttonX = static_cast<int>((itemMin.x + itemMax.x) * 0.5f);
     g_buttonY = static_cast<int>((itemMin.y + itemMax.y) * 0.5f);
     ImGui::End();
+    // Beside the window of the host, away from the points the remote control clicks.
+    if (uih::AIAdvancedFeaturesEnabled()) {
+        ImGui::SetNextWindowPos(ImVec2(560, 50));
+        ImGui::SetNextWindowSize(ImVec2(230, 300));
+        uih::DrawAIAdvancedFeatures();
+    }
 }
 
 struct Capture {
@@ -997,6 +1004,7 @@ void StartHook(const Options& options) {
     std::string pipe = RemotePipe();
     config.remoteControl = options.remote;
     config.remoteMemory = options.remoteMemory;
+    config.aiAdvancedFeatures = options.remoteAdvanced;
     config.remotePipe = pipe.c_str();
     config.render = DrawTestMenu;
     config.setup = [] { g_setupCalled = true; };
@@ -1069,11 +1077,32 @@ std::atomic<int> g_remoteKeyUps{0};
 std::atomic<int> g_remoteClickDowns{0};
 std::atomic<int> g_remoteClickUps{0};
 constexpr int kRemoteClick[2] = {100, 120};
+// The text typed, the moves to kRemoteMove, and the drag from kDragFrom to
+// kDragTo with the left button, by the advanced commands.
+std::string g_remoteTyped;
+std::atomic<int> g_remoteMoves{0};
+std::atomic<int> g_remoteDragDowns{0};
+std::atomic<int> g_remoteDragMoves{0};
+std::atomic<int> g_remoteDragUps{0};
+constexpr int kRemoteMove[2] = {150, 160};
+constexpr int kDragFrom[2] = {200, 200};
+constexpr int kDragTo[2] = {300, 250};
 WNDPROC g_remoteHostProc = nullptr;
 
 LRESULT CALLBACK CountRemoteKeys(HWND window, UINT msg, WPARAM wParam, LPARAM lParam) {
-    bool atClick = static_cast<short>(LOWORD(lParam)) == kRemoteClick[0] && static_cast<short>(HIWORD(lParam)) == kRemoteClick[1];
-    if (wParam == 'U' && msg == WM_KEYDOWN)
+    auto at = [&](const int (&point)[2]) { return static_cast<short>(LOWORD(lParam)) == point[0] && static_cast<short>(HIWORD(lParam)) == point[1]; };
+    bool atClick = at(kRemoteClick);
+    if (msg == WM_CHAR)
+        g_remoteTyped += static_cast<char>(wParam);
+    else if (msg == WM_MOUSEMOVE && (wParam & MK_LBUTTON))
+        ++g_remoteDragMoves;
+    else if (msg == WM_MOUSEMOVE && at(kRemoteMove))
+        ++g_remoteMoves;
+    else if (msg == WM_LBUTTONDOWN && at(kDragFrom))
+        ++g_remoteDragDowns;
+    else if (msg == WM_LBUTTONUP && at(kDragTo))
+        ++g_remoteDragUps;
+    else if (wParam == 'U' && msg == WM_KEYDOWN)
         ++g_remoteKeyDowns;
     else if (wParam == 'U' && msg == WM_KEYUP)
         ++g_remoteKeyUps;
@@ -1101,12 +1130,13 @@ void WhileRendering(Work&& work, Frame&& frame) {
 // shows the game without the overlay, the message is drawn, and the keys reach
 // the window once the menu is closed.
 template <typename Frame>
-int RemoteScenario(bool memory, Frame&& frame) {
+int RemoteScenario(bool memory, bool advanced, Frame&& frame) {
     std::string info;
     std::string screenshot;
     std::string text;
     std::string unknownKey;
     std::string memoryFailure;
+    std::string advancedFailure;
     std::string click;
     std::string outside;
     std::vector<uint8_t> rgb;
@@ -1129,6 +1159,13 @@ int RemoteScenario(bool memory, Frame&& frame) {
                 memoryFailure = CheckRemoteMemory(client);
             else if (client.Request("read 1000 4").rfind("error memory access is off", 0) != 0)
                 memoryFailure = "the memory commands answer while remoteMemory is off";
+            if (advanced)
+                advancedFailure = CheckRemoteAdvanced(client);
+            else if (client.Request("wait 100").rfind("error the advanced features are off", 0) != 0 ||
+                     client.Request("type x").rfind("error the advanced features are off", 0) != 0 ||
+                     client.Request("chat poll").rfind("error the advanced features are off", 0) != 0 ||
+                     (memory && client.Request("pointer 1000").rfind("error the advanced features are off", 0) != 0))
+                advancedFailure = "the advanced commands answer while aiAdvancedFeatures is off";
             click = client.Request("click " + std::to_string(g_buttonX) + " " + std::to_string(g_buttonY) + " left 100");
             outside = client.Request("click 800 10");
         },
@@ -1157,11 +1194,16 @@ int RemoteScenario(bool memory, Frame&& frame) {
         return Fail("the remote control does not answer its commands");
     if (!memoryFailure.empty())
         return Fail(memoryFailure.c_str());
+    if (!advancedFailure.empty())
+        return Fail(advancedFailure.c_str());
     for (int i = 0; i < 3; ++i)
         frame();
     ImGuiWindow* message = ImGui::FindWindowByName("##uih_remote_message");
     if (!message || !message->Active)
         return Fail("the message of the assistant is not drawn");
+    ImGuiWindow* panel = ImGui::FindWindowByName("AI Advanced Features");
+    if (advanced != (panel && panel->Active))
+        return Fail(advanced ? "the AI Advanced Features window is not drawn" : "the AI Advanced Features window is drawn while aiAdvancedFeatures is off");
 
     uih::SetMenuOpen(false);
     std::string key;
@@ -1191,6 +1233,38 @@ int RemoteScenario(bool memory, Frame&& frame) {
         return Fail("the keys of the remote control did not reach the window");
     if (rightClick.rfind("ok ", 0) != 0 || g_remoteClickDowns == 0 || g_remoteClickUps == 0)
         return Fail("the clicks of the remote control did not reach the window");
+
+    if (advanced) {
+        // Typing, a move and a drag, with the menu closed so the window gets them.
+        uih::SetMenuOpen(false);
+        g_remoteTyped.clear();
+        std::string typed;
+        std::string moved;
+        std::string dragged;
+        WhileRendering(
+            [&] {
+                RemoteClient client;
+                if (client.Open()) {
+                    typed = client.Request("type Hi!");
+                    moved = client.Request("move " + std::to_string(kRemoteMove[0]) + " " + std::to_string(kRemoteMove[1]));
+                    dragged = client.Request("drag " + std::to_string(kDragFrom[0]) + " " + std::to_string(kDragFrom[1]) + " " + std::to_string(kDragTo[0]) +
+                                             " " + std::to_string(kDragTo[1]) + " left 200");
+                }
+            },
+            frame);
+        for (ULONGLONG start = GetTickCount64(); GetTickCount64() - start < 1000 && (g_remoteTyped != "Hi!" || g_remoteDragUps == 0);)
+            frame();
+        uih::SetMenuOpen(true);
+        frame();
+        printf("type: %s, the window got \"%s\"\nmove: %s, %d moves\ndrag: %s, %d down, %d moves, %d up\n", typed.c_str(), g_remoteTyped.c_str(),
+               moved.c_str(), g_remoteMoves.load(), dragged.c_str(), g_remoteDragDowns.load(), g_remoteDragMoves.load(), g_remoteDragUps.load());
+        if (typed.rfind("ok typed 3 characters", 0) != 0 || g_remoteTyped != "Hi!")
+            return Fail("the text typed by the remote control did not reach the window");
+        if (moved.rfind("ok ", 0) != 0 || g_remoteMoves == 0)
+            return Fail("the pointer moved by the remote control did not reach the window");
+        if (dragged.rfind("ok ", 0) != 0 || g_remoteDragDowns == 0 || g_remoteDragMoves < 3 || g_remoteDragUps == 0)
+            return Fail("the drag of the remote control did not reach the window");
+    }
 
     // Another window of the game has the focus: the keys and clicks still go
     // to the window of the overlay.
@@ -2388,6 +2462,7 @@ int main(int argc, char** argv) {
         else if (arg == "--capture-frame") options.captureFrame = true;
         else if (arg == "--remote") options.remote = true;
         else if (arg == "--remote-memory") options.remote = options.remoteMemory = true;
+        else if (arg == "--remote-advanced") options.remote = options.remoteMemory = options.remoteAdvanced = true;
         else if (arg == "--textures" && i + 1 < argc) options.textures = atoi(argv[++i]);
         else if (arg == "--remove-device") options.removeDevice = true;
         else if (arg == "--transfer-only") options.transferOnly = true;
@@ -2412,7 +2487,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--own-hooks before|after] [--fault access|exception|draw] [--second-window [--shared-device]] [--composition] [--capture-frame] [--remote [--remote-memory]] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--own-hooks before|after] [--fault access|exception|draw] [--second-window [--shared-device]] [--composition] [--capture-frame] [--remote [--remote-memory] [--remote-advanced]] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -2623,7 +2698,7 @@ int main(int argc, char** argv) {
                     break;
             }
             if (options.remote) {
-                result = RemoteScenario(options.remoteMemory, [&] {
+                result = RemoteScenario(options.remoteMemory, options.remoteAdvanced, [&] {
                     PumpMessages();
                     host->Frame();
                 });

@@ -35,4 +35,10 @@ void ApplySettings(uih::Config& config) {
     // With remoteControl: the assistant can also read, write and scan the
     // memory of the game, as a memory editor does. Single-player games only.
     config.remoteMemory = false;
+    // With remoteControl: advanced tools for the assistant, and the "AI
+    // Advanced Features" button of the menu, which shows what it does: typing
+    // text, moving the mouse and dragging, waiting for the screen to change.
+    // With remoteMemory too: pointer chains, a watch list with frozen values,
+    // and on Windows the instructions that write a value.
+    config.aiAdvancedFeatures = false;
 }

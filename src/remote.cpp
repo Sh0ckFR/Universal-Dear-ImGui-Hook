@@ -9,7 +9,12 @@
 //   text <seconds> <message>   -> ok         (\n in the message starts a new line)
 //   key <keys> <milliseconds>  -> ok <how the keys were sent>  (keys: space, or left+space held together)
 //   click <x> <y> [left|right|middle] [milliseconds]  -> ok <how the click was sent>  (pixels of the game window)
-// and the memory commands of src/memory.cpp.
+// with Config::aiAdvancedFeatures:
+//   type <text>                -> ok <how the text was sent>  (\n for Enter, \t for Tab, \\ for \)
+//   move <x> <y>               -> ok <how the pointer was moved>
+//   drag <x0> <y0> <x1> <y1> [left|right|middle] [milliseconds]  -> ok <how the drag was sent>
+//   wait <milliseconds> [percent]  -> ok changed|unchanged <milliseconds> <percent of the pixels that changed>
+// and the memory commands of src/memory.cpp and src/advanced.cpp.
 // Failures answer: error <reason>
 #include "internal.h"
 
@@ -26,6 +31,12 @@ namespace {
 constexpr unsigned kMaxHoldMs = 10000;
 constexpr size_t kMaxKeys = 4;
 constexpr uint32_t kCaptureTimeoutMs = 2000;
+constexpr size_t kMaxTyped = 2000;
+constexpr unsigned kMaxWaitMs = 30000;
+// The frames wait compares, at most this many pixels wide or high.
+constexpr uint32_t kWaitSide = 160;
+// A pixel changed when one of its channels moved by more than this.
+constexpr int kPixelChange = 24;
 
 using Clock = std::chrono::steady_clock;
 
@@ -64,14 +75,18 @@ std::vector<uint8_t> Shrink(const std::vector<uint8_t>& rgba, uint32_t width, ui
     return rgb;
 }
 
+std::string CaptureError() {
+    return ActiveBackend() == Backend::None
+               ? "error the overlay is not drawn yet: the game has not presented a frame since the hook started"
+               : "error no frame within 2 seconds: the game may be minimized or loading, or draw in HDR, which cannot be captured";
+}
+
 std::string Screenshot(uint32_t maxSide, std::vector<uint8_t>& payload) {
     std::vector<uint8_t> rgba;
     uint32_t width = 0;
     uint32_t height = 0;
     if (!CaptureFrame(rgba, width, height, kCaptureTimeoutMs))
-        return ActiveBackend() == Backend::None
-                   ? "error the overlay is not drawn yet: the game has not presented a frame since the hook started"
-                   : "error no frame within 2 seconds: the game may be minimized or loading, or draw in HDR, which cannot be captured";
+        return CaptureError();
     uint32_t outWidth = 0;
     uint32_t outHeight = 0;
     payload = Shrink(rgba, width, height, std::clamp<uint32_t>(maxSide, 64, 4096), outWidth, outHeight);
@@ -87,9 +102,7 @@ std::string Text(const std::string& rest) {
     std::string text = *end == ' ' ? end + 1 : "";
     for (size_t at = text.find("\\n"); at != std::string::npos; at = text.find("\\n", at + 1))
         text.replace(at, 2, "\n");
-    std::lock_guard<std::mutex> lock(g_textMutex);
-    g_text = text;
-    g_textUntil = Clock::now() + std::chrono::milliseconds(static_cast<int64_t>(std::clamp(seconds, 0.0, 3600.0) * 1000.0));
+    ShowMessage(text, seconds);
     return "ok";
 }
 
@@ -117,6 +130,31 @@ std::string Keys(const std::string& rest) {
     return HoldKeys(keys, std::clamp<unsigned>(ms, 30, kMaxHoldMs));
 }
 
+int ParseButton(const std::string& name) { return name == "left" ? 1 : name == "middle" ? 2 : name == "right" ? 3 : 0; }
+
+// Parses `count` integers from `text`; false when one is missing or out of range.
+bool ParsePoint(const char*& text, int* values, int count) {
+    for (int i = 0; i < count; ++i) {
+        char* end = nullptr;
+        long value = strtol(text, &end, 10);
+        if (end == text || value < INT32_MIN || value > INT32_MAX)
+            return false;
+        values[i] = static_cast<int>(value);
+        text = end;
+    }
+    return true;
+}
+
+// Empty when x, y is in the game window, the error otherwise.
+std::string OutsideWindow(int x, int y) {
+    uint32_t width = 0;
+    uint32_t height = 0;
+    bool focused = false;
+    if (GameWindow(width, height, focused) && (x < 0 || y < 0 || static_cast<uint32_t>(x) >= width || static_cast<uint32_t>(y) >= height))
+        return "error the point is outside the game window, which is " + std::to_string(width) + "x" + std::to_string(height);
+    return "";
+}
+
 std::string Click(const std::string& rest) {
     const char* start = rest.c_str();
     char* end = nullptr;
@@ -135,33 +173,164 @@ std::string Click(const std::string& rest) {
         if (split != std::string::npos)
             ms = static_cast<unsigned>(strtoul(options.c_str() + split + 1, nullptr, 10));
     }
-    int button = name == "left" ? 1 : name == "middle" ? 2 : name == "right" ? 3 : 0;
+    int button = ParseButton(name);
     if (!button)
         return "error unknown button " + name + ": use left, right or middle";
-    uint32_t width = 0;
-    uint32_t height = 0;
-    bool focused = false;
-    if (GameWindow(width, height, focused) && (x < 0 || y < 0 || static_cast<uint32_t>(x) >= width || static_cast<uint32_t>(y) >= height))
-        return "error the point is outside the game window, which is " + std::to_string(width) + "x" + std::to_string(height);
+    std::string outside = OutsideWindow(static_cast<int>(x), static_cast<int>(y));
+    if (!outside.empty())
+        return outside;
     return ClickAt(static_cast<int>(x), static_cast<int>(y), button, std::clamp<unsigned>(ms, 30, kMaxHoldMs));
 }
 
-} // namespace
+// UTF-8 to code points, with the escapes \n, \t and \\.
+bool DecodeText(const std::string& text, std::vector<uint32_t>& out) {
+    for (size_t i = 0; i < text.size();) {
+        auto c = static_cast<unsigned char>(text[i]);
+        if (c == '\\' && i + 1 < text.size() && (text[i + 1] == 'n' || text[i + 1] == 't' || text[i + 1] == '\\')) {
+            out.push_back(text[i + 1] == 'n' ? '\n' : text[i + 1] == 't' ? '\t' : '\\');
+            i += 2;
+            continue;
+        }
+        int extra = c < 0x80 ? 0 : (c & 0xe0) == 0xc0 ? 1 : (c & 0xf0) == 0xe0 ? 2 : (c & 0xf8) == 0xf0 ? 3 : -1;
+        if (extra < 0 || i + static_cast<size_t>(extra) >= text.size())
+            return false;
+        uint32_t point = extra == 0 ? c : c & (0x3f >> extra);
+        for (int k = 1; k <= extra; ++k) {
+            auto next = static_cast<unsigned char>(text[i + k]);
+            if ((next & 0xc0) != 0x80)
+                return false;
+            point = point << 6 | (next & 0x3f);
+        }
+        if (point < 0x20 && point != '\n' && point != '\t')
+            return false;
+        out.push_back(point);
+        i += static_cast<size_t>(extra) + 1;
+    }
+    return true;
+}
 
-std::string Handle(const std::string& line, std::vector<uint8_t>& payload) {
-    size_t space = line.find(' ');
-    std::string command = line.substr(0, space);
-    std::string rest = space == std::string::npos ? "" : line.substr(space + 1);
+std::string Type(const std::string& rest) {
+    std::vector<uint32_t> text;
+    if (!DecodeText(rest, text) || text.empty())
+        return "error give the text to type, in UTF-8, with \\n for Enter and \\t for Tab";
+    if (text.size() > kMaxTyped)
+        return "error at most 2000 characters at once";
+    return TypeText(text);
+}
+
+std::string Move(const std::string& rest) {
+    const char* text = rest.c_str();
+    int point[2] = {};
+    if (!ParsePoint(text, point, 2))
+        return "error give x and y in pixels of the game window";
+    std::string outside = OutsideWindow(point[0], point[1]);
+    return outside.empty() ? MoveTo(point[0], point[1]) : outside;
+}
+
+std::string Drag(const std::string& rest) {
+    const char* text = rest.c_str();
+    int points[4] = {};
+    if (!ParsePoint(text, points, 4))
+        return "error give x0 y0 x1 y1 in pixels of the game window, then optionally left, right or middle and milliseconds";
+    std::string name = "left";
+    unsigned ms = 300;
+    if (*text == ' ') {
+        std::string options = text + 1;
+        size_t split = options.find(' ');
+        name = options.substr(0, split);
+        if (split != std::string::npos)
+            ms = static_cast<unsigned>(strtoul(options.c_str() + split + 1, nullptr, 10));
+    }
+    int button = ParseButton(name);
+    if (!button)
+        return "error unknown button " + name + ": use left, right or middle";
+    for (int i = 0; i < 4; i += 2) {
+        std::string outside = OutsideWindow(points[i], points[i + 1]);
+        if (!outside.empty())
+            return outside;
+    }
+    return DragTo(points[0], points[1], points[2], points[3], button, std::clamp<unsigned>(ms, 50, kMaxHoldMs));
+}
+
+// Percent of the pixels of `a` and `b`, of the same size, that changed.
+double ChangedPercent(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
+    size_t changed = 0;
+    for (size_t i = 0; i + 2 < a.size(); i += 3) {
+        int most = 0;
+        for (int c = 0; c < 3; ++c)
+            most = std::max(most, std::abs(a[i + c] - b[i + c]));
+        changed += most > kPixelChange;
+    }
+    return a.empty() ? 0.0 : 100.0 * static_cast<double>(changed) / static_cast<double>(a.size() / 3);
+}
+
+// Waits until the frame of the game differs from the first one by at least
+// `percent` of its pixels, or for `ms`: the assistant then looks only once
+// something happened, a menu opened or a loading screen ended.
+std::string Wait(const std::string& rest) {
+    char* end = nullptr;
+    unsigned long ms = strtoul(rest.c_str(), &end, 10);
+    if (end == rest.c_str())
+        ms = 5000;
+    double percent = *end == ' ' ? strtod(end + 1, nullptr) : 1.0;
+    // NaN fails both comparisons.
+    if (!(percent > 0.0) || !(percent <= 100.0))
+        percent = 1.0;
+    ms = std::clamp<unsigned long>(ms, 100, kMaxWaitMs);
+    Clock::time_point start = Clock::now();
+    auto elapsed = [&] { return static_cast<unsigned long>(std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start).count()); };
+    std::vector<uint8_t> rgba;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    if (!CaptureFrame(rgba, width, height, kCaptureTimeoutMs))
+        return CaptureError();
+    uint32_t firstWidth = 0;
+    uint32_t firstHeight = 0;
+    std::vector<uint8_t> first = Shrink(rgba, width, height, kWaitSide, firstWidth, firstHeight);
+    double most = 0.0;
+    char answer[96];
+    while (elapsed() < ms && !StopRequested()) {
+        if (!CaptureFrame(rgba, width, height, std::min<uint32_t>(kCaptureTimeoutMs, static_cast<uint32_t>(ms - std::min(ms, elapsed())) + 1))) {
+            if (ActiveBackend() == Backend::None)
+                break;
+            continue;
+        }
+        uint32_t frameWidth = 0;
+        uint32_t frameHeight = 0;
+        std::vector<uint8_t> frame = Shrink(rgba, width, height, kWaitSide, frameWidth, frameHeight);
+        double changed = frameWidth == firstWidth && frameHeight == firstHeight ? ChangedPercent(first, frame) : 100.0;
+        most = std::max(most, changed);
+        if (changed >= percent) {
+            snprintf(answer, sizeof(answer), "ok changed %lu %.2f", elapsed(), changed);
+            return answer;
+        }
+    }
+    snprintf(answer, sizeof(answer), "ok unchanged %lu %.2f", elapsed(), most);
+    return answer;
+}
+
+bool IsInput(const std::string& command) {
+    return command == "key" || command == "click" || command == "type" || command == "move" || command == "drag";
+}
+
+bool IsAdvanced(const std::string& command) { return command == "type" || command == "move" || command == "drag" || command == "wait"; }
+
+std::string Answer(const std::string& command, const std::string& rest, std::vector<uint8_t>& payload) {
+    const Config& config = GetConfig();
     if (command == "info") {
         uint32_t width = 0;
         uint32_t height = 0;
         bool focused = false;
         GameWindow(width, height, focused);
         char answer[160];
-        snprintf(answer, sizeof(answer), "ok %s %ux%u focused=%d menu=%d memory=%d", BackendName(ActiveBackend()), width, height, focused,
-                 IsMenuOpen(), GetConfig().remoteMemory);
+        snprintf(answer, sizeof(answer), "ok %s %ux%u focused=%d menu=%d memory=%d advanced=%d", BackendName(ActiveBackend()), width, height, focused,
+                 IsMenuOpen(), config.remoteMemory, config.aiAdvancedFeatures);
         return answer;
     }
+    if (IsAdvanced(command) && !config.aiAdvancedFeatures)
+        return "error the advanced features are off: set config.aiAdvancedFeatures in example/config.cpp and rebuild the library";
+    if (IsInput(command) && !InputAllowed())
+        return "error the player paused the input of the assistant in the AI Advanced Features window of the overlay";
     if (command == "screenshot")
         return Screenshot(static_cast<uint32_t>(rest.empty() ? 1280 : strtoul(rest.c_str(), nullptr, 10)), payload);
     if (command == "text")
@@ -170,10 +339,37 @@ std::string Handle(const std::string& line, std::vector<uint8_t>& payload) {
         return Keys(rest);
     if (command == "click")
         return Click(rest);
+    if (command == "type")
+        return Type(rest);
+    if (command == "move")
+        return Move(rest);
+    if (command == "drag")
+        return Drag(rest);
+    if (command == "wait")
+        return Wait(rest);
     std::string answer;
-    if (HandleMemory(command, rest, payload, answer))
+    if (HandleMemory(command, rest, payload, answer) || HandleAdvanced(command, rest, payload, answer))
         return answer;
     return "error unknown command";
+}
+
+} // namespace
+
+std::string Handle(const std::string& line, std::vector<uint8_t>& payload) {
+    size_t space = line.find(' ');
+    std::string command = line.substr(0, space);
+    std::string rest = space == std::string::npos ? "" : line.substr(space + 1);
+    std::string answer = Answer(command, rest, payload);
+    // The chat polls several times a second: its own window shows it.
+    if (GetConfig().aiAdvancedFeatures && command != "info" && command != "chat")
+        RecordActivity(line, answer);
+    return answer;
+}
+
+void ShowMessage(const std::string& text, double seconds) {
+    std::lock_guard<std::mutex> lock(g_textMutex);
+    g_text = text;
+    g_textUntil = Clock::now() + std::chrono::milliseconds(static_cast<int64_t>(std::clamp(seconds, 0.0, 3600.0) * 1000.0));
 }
 
 void ClearText() {

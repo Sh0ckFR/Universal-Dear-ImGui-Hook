@@ -188,6 +188,7 @@ void DrawMenu() {
     Style();
 
     static bool demo = false;
+    static bool ai = false;
     bool open = true;
     ImGui::SetNextWindowSize(ImVec2(480, 640), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos(ImVec2(25, 25), ImGuiCond_FirstUseEver);
@@ -226,10 +227,18 @@ void DrawMenu() {
         Drawing();
     if (ImGui::Button("Show the Dear ImGui demo"))
         demo = true;
+    // With config.remoteControl and config.aiAdvancedFeatures in config.cpp.
+    if (uih::AIAdvancedFeaturesEnabled()) {
+        ImGui::SameLine();
+        if (ImGui::Button("AI Advanced Features"))
+            ai = true;
+    }
     ImGui::End();
 
     if (demo)
         ImGui::ShowDemoWindow(&demo);
+    if (ai)
+        uih::DrawAIAdvancedFeatures(&ai);
     if (!open)
         uih::SetMenuOpen(false);
 }

@@ -218,6 +218,47 @@ bool HasFocus(HWND window) {
     return foreground && (foreground == window || foreground == GetAncestor(window, GA_ROOT));
 }
 
+constexpr DWORD kHoverMs = 50;
+const DWORD kDown[] = {0, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_RIGHTDOWN};
+const DWORD kUp[] = {0, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_RIGHTUP};
+const UINT kDownMessage[] = {0, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_RBUTTONDOWN};
+const UINT kUpMessage[] = {0, WM_LBUTTONUP, WM_MBUTTONUP, WM_RBUTTONUP};
+const WPARAM kHeld[] = {0, MK_LBUTTON, MK_MBUTTON, MK_RBUTTON};
+
+// Moves the cursor to x, y in the client area of `window` with SendInput.
+void SendMove(HWND window, int x, int y) {
+    POINT point{x, y};
+    ClientToScreen(window, &point);
+    int left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    int top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    int width = std::max(2, GetSystemMetrics(SM_CXVIRTUALSCREEN));
+    int height = std::max(2, GetSystemMetrics(SM_CYVIRTUALSCREEN));
+    INPUT input{};
+    input.type = INPUT_MOUSE;
+    input.mi.dx = static_cast<LONG>((static_cast<int64_t>(point.x - left) * 65535 + (width - 1) / 2) / (width - 1));
+    input.mi.dy = static_cast<LONG>((static_cast<int64_t>(point.y - top) * 65535 + (height - 1) / 2) / (height - 1));
+    input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+    SendInput(1, &input, sizeof(INPUT));
+}
+
+void SendButton(DWORD flags) {
+    INPUT input{};
+    input.type = INPUT_MOUSE;
+    input.mi.dwFlags = flags;
+    SendInput(1, &input, sizeof(INPUT));
+}
+
+// One UTF-16 unit, pressed and released, which the window gets as WM_CHAR.
+void SendUnit(wchar_t unit) {
+    INPUT inputs[2] = {};
+    for (int i = 0; i < 2; ++i) {
+        inputs[i].type = INPUT_KEYBOARD;
+        inputs[i].ki.wScan = unit;
+        inputs[i].ki.dwFlags = KEYEVENTF_UNICODE | (i ? KEYEVENTF_KEYUP : 0);
+    }
+    SendInput(2, inputs, sizeof(INPUT));
+}
+
 } // namespace
 
 // SendInput when the game has the focus. Otherwise, as when the player types
@@ -250,35 +291,15 @@ std::string HoldKeys(const std::vector<int>& keys, unsigned ms) {
 // cursor rests on the point for a few frames before the press, as games read
 // it once per frame.
 std::string ClickAt(int x, int y, int button, unsigned ms) {
-    constexpr DWORD kHoverMs = 50;
-    static const DWORD kDown[] = {0, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_RIGHTDOWN};
-    static const DWORD kUp[] = {0, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_RIGHTUP};
-    static const UINT kDownMessage[] = {0, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_RBUTTONDOWN};
-    static const UINT kUpMessage[] = {0, WM_LBUTTONUP, WM_MBUTTONUP, WM_RBUTTONUP};
-    static const WPARAM kHeld[] = {0, MK_LBUTTON, MK_MBUTTON, MK_RBUTTON};
     HWND window = TargetWindow();
     if (!window)
         return "error the game has no visible window";
     if (HasFocus(window)) {
-        POINT point{x, y};
-        ClientToScreen(window, &point);
-        int left = GetSystemMetrics(SM_XVIRTUALSCREEN);
-        int top = GetSystemMetrics(SM_YVIRTUALSCREEN);
-        int width = std::max(2, GetSystemMetrics(SM_CXVIRTUALSCREEN));
-        int height = std::max(2, GetSystemMetrics(SM_CYVIRTUALSCREEN));
-        INPUT inputs[2] = {};
-        inputs[0].type = INPUT_MOUSE;
-        inputs[0].mi.dx = static_cast<LONG>((static_cast<int64_t>(point.x - left) * 65535 + (width - 1) / 2) / (width - 1));
-        inputs[0].mi.dy = static_cast<LONG>((static_cast<int64_t>(point.y - top) * 65535 + (height - 1) / 2) / (height - 1));
-        inputs[0].mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
-        inputs[1].type = INPUT_MOUSE;
-        inputs[1].mi.dwFlags = kDown[button];
-        SendInput(1, inputs, sizeof(INPUT));
+        SendMove(window, x, y);
         WaitForSingleObject(g_stopEvent, kHoverMs);
-        SendInput(1, inputs + 1, sizeof(INPUT));
+        SendButton(kDown[button]);
         WaitForSingleObject(g_stopEvent, ms);
-        inputs[1].mi.dwFlags = kUp[button];
-        SendInput(1, inputs + 1, sizeof(INPUT));
+        SendButton(kUp[button]);
         return "ok sent as mouse input, the game has the focus";
     }
     LPARAM position = MAKELPARAM(x, y);
@@ -289,6 +310,102 @@ std::string ClickAt(int x, int y, int button, unsigned ms) {
     WaitForSingleObject(g_stopEvent, ms);
     PostMessageW(window, WM_MOUSEMOVE, kHeld[button], position);
     PostMessageW(window, kUpMessage[button], 0, position);
+    return "ok sent as window messages, the game does not have the focus: games that read the mouse directly do not see them";
+}
+
+// Unicode input when the game has the focus, which reaches the window as
+// WM_CHAR, as text typed with an input method does. Otherwise WM_CHAR
+// messages. Enter and Tab are keys, for games that read them as keys.
+std::string TypeText(const std::vector<uint32_t>& text) {
+    HWND window = TargetWindow();
+    if (!window)
+        return "error the game has no visible window";
+    bool focused = HasFocus(window);
+    for (uint32_t point : text) {
+        if (Stopping())
+            break;
+        if (point == '\n' || point == '\t') {
+            std::vector<int> key{point == '\n' ? VK_RETURN : VK_TAB};
+            if (focused) {
+                SendKeys(key, false);
+                SendKeys(key, true);
+            } else {
+                PostKeys(window, key, false, false);
+                PostMessageW(window, WM_CHAR, point == '\n' ? '\r' : '\t', 1);
+                PostKeys(window, key, false, true);
+            }
+        } else {
+            wchar_t units[2] = {static_cast<wchar_t>(point), 0};
+            int count = 1;
+            if (point > 0xffff) {
+                units[0] = static_cast<wchar_t>(0xd800 + ((point - 0x10000) >> 10));
+                units[1] = static_cast<wchar_t>(0xdc00 + ((point - 0x10000) & 0x3ff));
+                count = 2;
+            }
+            for (int i = 0; i < count; ++i) {
+                if (focused)
+                    SendUnit(units[i]);
+                else
+                    PostMessageW(window, WM_CHAR, units[i], 1);
+            }
+        }
+        // Games read text once per frame, some only the last character.
+        WaitForSingleObject(g_stopEvent, 10);
+    }
+    std::string count = std::to_string(text.size());
+    return focused ? "ok typed " + count + " characters as keyboard input, the game has the focus: games that read the keys directly see Enter and Tab only"
+                   : "ok typed " + count + " characters as window messages, the game does not have the focus";
+}
+
+// Returns once the cursor rested on the point for a few frames: Windows merges
+// the moves a window has not read yet, so the next command would hide it.
+std::string MoveTo(int x, int y) {
+    HWND window = TargetWindow();
+    if (!window)
+        return "error the game has no visible window";
+    if (HasFocus(window)) {
+        SendMove(window, x, y);
+        WaitForSingleObject(g_stopEvent, kHoverMs);
+        return "ok moved the cursor, the game has the focus";
+    }
+    PostMessageW(window, WM_MOUSEMOVE, 0, MAKELPARAM(x, y));
+    WaitForSingleObject(g_stopEvent, kHoverMs);
+    return "ok sent as a window message, the game does not have the focus: games that read the mouse directly do not see it";
+}
+
+// The button goes down at the start, the cursor moves there once a frame, and
+// the button goes up at the end, after the cursor rested there.
+std::string DragTo(int x0, int y0, int x1, int y1, int button, unsigned ms) {
+    constexpr unsigned kStepMs = 16;
+    HWND window = TargetWindow();
+    if (!window)
+        return "error the game has no visible window";
+    bool focused = HasFocus(window);
+    unsigned steps = std::max(1u, ms / kStepMs);
+    if (focused) {
+        SendMove(window, x0, y0);
+        WaitForSingleObject(g_stopEvent, kHoverMs);
+        SendButton(kDown[button]);
+    } else {
+        PostMessageW(window, WM_MOUSEMOVE, 0, MAKELPARAM(x0, y0));
+        WaitForSingleObject(g_stopEvent, kHoverMs);
+        PostMessageW(window, kDownMessage[button], kHeld[button], MAKELPARAM(x0, y0));
+    }
+    for (unsigned i = 1; i <= steps && !Stopping(); ++i) {
+        WaitForSingleObject(g_stopEvent, ms / steps);
+        int x = x0 + static_cast<int>((static_cast<int64_t>(x1 - x0) * i) / steps);
+        int y = y0 + static_cast<int>((static_cast<int64_t>(y1 - y0) * i) / steps);
+        if (focused)
+            SendMove(window, x, y);
+        else
+            PostMessageW(window, WM_MOUSEMOVE, kHeld[button], MAKELPARAM(x, y));
+    }
+    WaitForSingleObject(g_stopEvent, kHoverMs);
+    if (focused) {
+        SendButton(kUp[button]);
+        return "ok sent as mouse input, the game has the focus";
+    }
+    PostMessageW(window, kUpMessage[button], 0, MAKELPARAM(x1, y1));
     return "ok sent as window messages, the game does not have the focus: games that read the mouse directly do not see them";
 }
 

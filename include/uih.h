@@ -82,6 +82,13 @@ struct Config {
     // Linux, that bypasses the ptrace restrictions of Yama for the user's
     // programs.
     bool remoteMemory = false;
+    // With remoteControl: advanced tools for the assistant, and the "AI
+    // Advanced Features" window that shows them (DrawAIAdvancedFeatures()):
+    // typing text, moving the mouse and dragging, waiting for the screen to
+    // change. With remoteMemory as well: pointer chains and pointer scans, a
+    // watch list with frozen values, and on Windows the instructions that
+    // write an address.
+    bool aiAdvancedFeatures = false;
     // Called every frame between ImGui::NewFrame() and ImGui::Render().
     void (*render)() = nullptr;
     // Called when the ImGui context is created, before its first frame: load
@@ -122,5 +129,14 @@ void DestroyTexture(ImTextureData* texture);
 // channel, such as the floating-point one of HDR output. Any thread but the
 // render callback's.
 bool CaptureFrame(std::vector<uint8_t>& pixels, uint32_t& width, uint32_t& height, uint32_t timeoutMs = 1000);
+
+// True when the hook was started with remoteControl and aiAdvancedFeatures.
+bool AIAdvancedFeaturesEnabled();
+// Draws the "AI Advanced Features" window: what the assistant does, switches
+// that pause its input or its memory tools, the watch list and its frozen
+// values, pointers, and the instructions that write an address. Call it from
+// the render callback; the close button of the window clears `open`. Draws
+// nothing unless AIAdvancedFeaturesEnabled().
+void DrawAIAdvancedFeatures(bool* open = nullptr);
 
 } // namespace uih

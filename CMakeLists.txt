@@ -79,7 +79,7 @@ else()
 endif()
 add_library(uih::imgui ALIAS uih_imgui)
 
-add_library(uih STATIC src/uih.cpp src/vulkan.cpp src/remote.cpp src/memory.cpp)
+add_library(uih STATIC src/uih.cpp src/vulkan.cpp src/remote.cpp src/memory.cpp src/advanced.cpp)
 target_include_directories(uih PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 if(WIN32)
     target_sources(uih PRIVATE
@@ -87,6 +87,7 @@ if(WIN32)
         src/windows/input.cpp
         src/windows/dinput.cpp
         src/windows/remote.cpp
+        src/windows/breakpoints.cpp
         src/windows/xinput.cpp
         src/windows/d3d9.cpp
         src/windows/dxgi.cpp
@@ -106,7 +107,8 @@ else()
         src/linux/x11.cpp
         src/linux/events.cpp
         src/linux/opengl.cpp
-        src/linux/remote.cpp)
+        src/linux/remote.cpp
+        src/linux/breakpoints.cpp)
     target_link_libraries(uih PUBLIC uih_imgui PRIVATE PkgConfig::UIH_XCB Threads::Threads ${CMAKE_DL_LIBS})
     # Only the functions the hook stands for are visible to the target process.
     target_link_options(uih INTERFACE LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/src/linux/exports.map)

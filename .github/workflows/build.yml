@@ -256,6 +256,10 @@ jobs:
         run: |
           readelf -d build/linux/Universal-ImGui-Hook.so | grep NEEDED
           if readelf -d build/linux/Universal-ImGui-Hook.so | grep -E 'libstdc\+\+|libgcc_s'; then exit 1; fi
+      # Ubuntu refuses perf events to unprivileged processes: the instruction
+      # watch of the remote_advanced tests needs them on its own threads.
+      - name: Allow perf events
+        run: sudo sysctl -w kernel.perf_event_paranoid=2
       - name: Test
         shell: bash
         run: |
@@ -292,6 +296,10 @@ jobs:
         run: cmake --preset linux -DUIH_BUILD_TESTS=ON -DUIH_SANITIZE=ON
       - name: Build
         run: cmake --build --preset linux
+      # Ubuntu refuses perf events to unprivileged processes: the instruction
+      # watch of the remote_advanced tests needs them on its own threads.
+      - name: Allow perf events
+        run: sudo sysctl -w kernel.perf_event_paranoid=2
       - name: Test
         shell: bash
         run: |

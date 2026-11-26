@@ -7,8 +7,12 @@
 //   next <value>|changed|unchanged|increased|decreased -> ok <matches>  (narrows the last scan)
 //   results <count>             -> ok <bytes>, then lines: <address> <value> <module+offset>
 //   pattern <bytes> [module]    -> ok <bytes>, then lines: <address> <module+offset>  (?? for any byte)
-// Addresses: hexadecimal, or <module>+<hex offset>. Types: i8, i16, i32, i64,
-// f32, f64. Values of floating-point types match when they round to the
+// and with Config::aiAdvancedFeatures:
+//   pointer <address>           -> ok <bytes>, then a line per pointer read and: address <address> <module+offset>
+//   pointers <address> [max offset] -> ok <bytes>, then lines: <location> <module+offset> +<offset>  (those in a module first)
+// Addresses: hexadecimal, <module>+<hex offset>, and [<address>] for the
+// pointer stored there, such as [[game.exe+1a2b]+10]+8. Types: i8, i16, i32,
+// i64, f32, f64. Values of floating-point types match when they round to the
 // value given, to as many decimals as it has.
 #include "internal.h"
 
@@ -29,8 +33,10 @@ constexpr size_t kChunk = 1 << 20;
 // Matches a scan keeps, 16 bytes each.
 constexpr size_t kMaxMatches = size_t{1} << 21;
 constexpr size_t kMaxListed = 1000;
+// Pointers a pointer scan keeps before it sorts them.
+constexpr size_t kMaxPointerHits = 1 << 16;
 
-enum class Type { I8, I16, I32, I64, F32, F64 };
+using Type = ValueType;
 
 struct Match {
     uintptr_t address;
@@ -174,12 +180,6 @@ std::vector<MemoryRegion> OutsideScanMemory(const MemoryRegion& region) {
     return parts;
 }
 
-std::vector<LoadedModule> SortedModules() {
-    std::vector<LoadedModule> modules = LoadedModules();
-    std::sort(modules.begin(), modules.end(), [](const LoadedModule& a, const LoadedModule& b) { return a.base < b.base; });
-    return modules;
-}
-
 std::string Locate(uintptr_t address, const std::vector<LoadedModule>& modules) {
     auto it = std::upper_bound(modules.begin(), modules.end(), address, [](uintptr_t a, const LoadedModule& m) { return a < m.base; });
     if (it == modules.begin())
@@ -209,22 +209,131 @@ const LoadedModule* FindModule(const std::vector<LoadedModule>& modules, const s
     return nullptr;
 }
 
-bool ParseAddress(const std::string& text, uintptr_t& address) {
-    size_t plus = text.rfind('+');
-    std::string number = plus == std::string::npos ? text : text.substr(plus + 1);
-    uintptr_t base = 0;
-    if (plus != std::string::npos) {
-        std::vector<LoadedModule> modules = LoadedModules();
-        const LoadedModule* module = FindModule(modules, text.substr(0, plus));
-        if (!module)
-            return false;
-        base = module->base;
-    }
-    if (number.empty())
+// Hexadecimal, with or without 0x.
+bool IsHex(const std::string& text) {
+    size_t start = text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X') ? 2 : 0;
+    if (start == text.size())
         return false;
-    char* end = nullptr;
-    address = base + static_cast<uintptr_t>(strtoull(number.c_str(), &end, 16));
-    return !*end;
+    for (size_t i = start; i < text.size(); ++i)
+        if (!isxdigit(static_cast<unsigned char>(text[i])))
+            return false;
+    return true;
+}
+
+// expression := term (('+' | '-') term)*
+// term       := '[' expression ']' | module | hexadecimal number
+// Module names may hold '-', as libSDL2-2.0.so.0 does: a '-' ends a term
+// after a number, or when the term is no module but what comes before the '-' is.
+class AddressParser {
+public:
+    AddressParser(const std::string& text, const std::vector<LoadedModule>& modules, std::vector<std::string>* steps)
+        : text_(text), modules_(modules), steps_(steps) {}
+
+    bool Parse(uintptr_t& address, std::string& error) {
+        if (!Expression(address, 0)) {
+            error = error_;
+            return false;
+        }
+        SkipSpaces();
+        if (at_ != text_.size()) {
+            error = "unexpected " + text_.substr(at_, 1) + " in the address";
+            return false;
+        }
+        return true;
+    }
+
+private:
+    bool Fail(const std::string& reason) {
+        if (error_.empty())
+            error_ = reason;
+        return false;
+    }
+
+    void SkipSpaces() {
+        while (at_ < text_.size() && isspace(static_cast<unsigned char>(text_[at_])))
+            ++at_;
+    }
+
+    bool Expression(uintptr_t& value, int depth) {
+        if (!Term(value, depth))
+            return false;
+        for (;;) {
+            SkipSpaces();
+            if (at_ >= text_.size() || (text_[at_] != '+' && text_[at_] != '-'))
+                return true;
+            char sign = text_[at_++];
+            uintptr_t operand = 0;
+            if (!Term(operand, depth))
+                return false;
+            value = sign == '+' ? value + operand : value - operand;
+        }
+    }
+
+    bool Term(uintptr_t& value, int depth) {
+        SkipSpaces();
+        if (at_ < text_.size() && text_[at_] == '[') {
+            if (depth >= 16)
+                return Fail("at most 16 pointers in an address");
+            ++at_;
+            uintptr_t location = 0;
+            if (!Expression(location, depth + 1))
+                return false;
+            SkipSpaces();
+            if (at_ >= text_.size() || text_[at_] != ']')
+                return Fail("missing ] in the address");
+            ++at_;
+            char where[32];
+            snprintf(where, sizeof(where), "0x%" PRIxPTR, location);
+            if (!ReadMemory(location, &value, sizeof(value)))
+                return Fail(std::string("the pointer at ") + where + " is not readable");
+            if (steps_) {
+                char line[96];
+                snprintf(line, sizeof(line), "[0x%" PRIxPTR "] = 0x%" PRIxPTR, location, value);
+                steps_->push_back(line + std::string(" (") + Locate(location, modules_) + ")");
+            }
+            return true;
+        }
+        size_t start = at_;
+        while (at_ < text_.size()) {
+            char c = text_[at_];
+            if (c == '+' || c == '[' || c == ']' || isspace(static_cast<unsigned char>(c)) || (c == '-' && IsHex(text_.substr(start, at_ - start))))
+                break;
+            ++at_;
+        }
+        std::string token = text_.substr(start, at_ - start);
+        if (token.empty())
+            return Fail("give an address, hexadecimal or module+offset");
+        if (const LoadedModule* module = FindModule(modules_, token)) {
+            value = module->base;
+            return true;
+        }
+        if (IsHex(token)) {
+            value = static_cast<uintptr_t>(strtoull(token.c_str(), nullptr, 16));
+            return true;
+        }
+        size_t dash = token.rfind('-');
+        if (dash != std::string::npos && dash > 0 && IsHex(token.substr(dash + 1))) {
+            if (const LoadedModule* module = FindModule(modules_, token.substr(0, dash))) {
+                value = module->base - static_cast<uintptr_t>(strtoull(token.c_str() + dash + 1, nullptr, 16));
+                return true;
+            }
+        }
+        return Fail("no module named " + token + ": list them with modules");
+    }
+
+    const std::string& text_;
+    const std::vector<LoadedModule>& modules_;
+    std::vector<std::string>* steps_;
+    size_t at_ = 0;
+    std::string error_;
+};
+
+bool ParseAddress(const std::string& text, uintptr_t& address) {
+    // Only names need the modules.
+    bool names = false;
+    for (char c : text)
+        names |= !isxdigit(static_cast<unsigned char>(c)) && c != 'x' && c != 'X' && c != '[' && c != ']' && c != '+' && c != '-';
+    return ResolveAddress(text, names ? SortedModules() : std::vector<LoadedModule>(), address);
 }
 
 std::string WithPayload(std::string text, std::vector<uint8_t>& payload) {
@@ -385,6 +494,43 @@ std::string Results(const std::string& rest, std::vector<uint8_t>& payload) {
     return WithPayload(text, payload);
 }
 
+std::string Pointer(const std::string& rest, std::vector<uint8_t>& payload) {
+    std::vector<LoadedModule> modules = SortedModules();
+    std::vector<std::string> steps;
+    uintptr_t address = 0;
+    std::string error;
+    if (!ResolveAddress(rest, modules, address, &error, &steps))
+        return "error " + error;
+    std::string text;
+    for (const std::string& step : steps)
+        text += step + "\n";
+    char line[64];
+    snprintf(line, sizeof(line), "address 0x%" PRIxPTR " ", address);
+    text += line + Locate(address, modules) + "\n";
+    return WithPayload(text, payload);
+}
+
+std::string Pointers(const std::string& rest, std::vector<uint8_t>& payload) {
+    size_t space = rest.find(' ');
+    uintptr_t target = 0;
+    if (!ParseAddress(rest.substr(0, space), target))
+        return "error give the address the pointers point to, then optionally how far before it they may point, in hexadecimal, 0x1000 by default";
+    size_t maxOffset = space == std::string::npos ? 0x1000 : static_cast<size_t>(strtoull(rest.c_str() + space + 1, nullptr, 16));
+    std::vector<PointerHit> hits;
+    if (!ScanPointers(target, std::min<size_t>(maxOffset, 1 << 20), kMaxListed, StopRequested, hits))
+        return "error the remote control is stopping";
+    std::vector<LoadedModule> modules = SortedModules();
+    std::string text;
+    char line[48];
+    for (const PointerHit& hit : hits) {
+        snprintf(line, sizeof(line), "0x%" PRIxPTR " ", hit.location);
+        text += line + Locate(hit.location, modules);
+        snprintf(line, sizeof(line), " +0x%" PRIxPTR "\n", hit.delta);
+        text += line;
+    }
+    return WithPayload(text, payload);
+}
+
 std::string Pattern(const std::string& rest, std::vector<uint8_t>& payload) {
     std::vector<int> pattern;
     std::string moduleName;
@@ -455,15 +601,123 @@ std::string Pattern(const std::string& rest, std::vector<uint8_t>& payload) {
 
 } // namespace
 
+std::vector<LoadedModule> SortedModules() {
+    std::vector<LoadedModule> modules = LoadedModules();
+    std::sort(modules.begin(), modules.end(), [](const LoadedModule& a, const LoadedModule& b) { return a.base < b.base; });
+    return modules;
+}
+
+bool ParseValueType(std::string name, ValueType& type) { return ParseType(std::move(name), type); }
+
+const char* ValueTypeName(ValueType type) {
+    static const char* const kNames[] = {"i8", "i16", "i32", "i64", "f32", "f64"};
+    return kNames[static_cast<int>(type)];
+}
+
+size_t ValueSize(ValueType type) { return Size(type); }
+
+std::string FormatValue(const uint8_t* bytes, ValueType type) { return Format(Load(bytes, type), type); }
+
+bool EncodeValue(const std::string& text, ValueType type, uint8_t* bytes) {
+    if (text.empty())
+        return false;
+    char* end = nullptr;
+    if (IsFloat(type)) {
+        double value = strtod(text.c_str(), &end);
+        if (*end || !std::isfinite(value))
+            return false;
+        if (type == Type::F32) {
+            float single = static_cast<float>(value);
+            memcpy(bytes, &single, sizeof(single));
+        } else {
+            memcpy(bytes, &value, sizeof(value));
+        }
+        return true;
+    }
+    uint64_t bits = text[0] == '-' ? static_cast<uint64_t>(strtoll(text.c_str(), &end, 0)) : strtoull(text.c_str(), &end, 0);
+    if (*end)
+        return false;
+    memcpy(bytes, &bits, Size(type));
+    return true;
+}
+
+std::string LocateAddress(uintptr_t address, const std::vector<LoadedModule>& sortedModules) { return Locate(address, sortedModules); }
+
+bool ResolveAddress(const std::string& text, const std::vector<LoadedModule>& modules, uintptr_t& address, std::string* error,
+                    std::vector<std::string>* steps) {
+    std::string reason;
+    AddressParser parser(text, modules, steps);
+    if (parser.Parse(address, reason))
+        return true;
+    if (error)
+        *error = reason;
+    return false;
+}
+
+bool ScanPointers(uintptr_t target, size_t maxOffset, size_t limit, bool (*cancelled)(), std::vector<PointerHit>& hits) {
+    hits.clear();
+    std::vector<LoadedModule> modules = SortedModules();
+    std::vector<PointerHit> found;
+    found.reserve(1024);
+    {
+        std::lock_guard<std::mutex> lock(g_scanMutex);
+        if (!EnsureScanMemory())
+            return true;
+        std::vector<MemoryRegion> regions;
+        for (const MemoryRegion& region : MemoryRegions())
+            if (region.writable)
+                for (const MemoryRegion& part : OutsideScanMemory(region))
+                    regions.push_back(part);
+        uintptr_t low = target >= maxOffset ? target - maxOffset : 0;
+        for (const MemoryRegion& region : regions) {
+            if (cancelled && cancelled())
+                return false;
+            for (size_t offset = 0; offset < region.size && found.size() < kMaxPointerHits; offset += kChunk) {
+                size_t length = std::min(kChunk, region.size - offset);
+                uintptr_t base = region.base + offset;
+                if (!ReadMemory(base, g_memory.chunk, length))
+                    continue;
+                for (size_t at = 0; at + sizeof(uintptr_t) <= length && found.size() < kMaxPointerHits; at += sizeof(uintptr_t)) {
+                    uintptr_t value = 0;
+                    memcpy(&value, g_memory.chunk + at, sizeof(value));
+                    if (value >= low && value <= target)
+                        found.push_back({base + at, target - value, false});
+                }
+            }
+        }
+    }
+    for (PointerHit& hit : found)
+        hit.inModule = Locate(hit.location, modules) != "-";
+    // Those in a module first, then the closest to the target.
+    std::stable_sort(found.begin(), found.end(),
+                     [](const PointerHit& a, const PointerHit& b) { return a.inModule != b.inModule ? a.inModule : a.delta < b.delta; });
+    if (found.size() > limit)
+        found.resize(limit);
+    hits.swap(found);
+    return true;
+}
+
 bool HandleMemory(const std::string& command, const std::string& rest, std::vector<uint8_t>& payload, std::string& answer) {
-    static const char* const kCommands[] = {"modules", "read", "write", "find", "next", "results", "pattern"};
+    static const char* const kCommands[] = {"modules", "read", "write", "find", "next", "results", "pattern", "pointer", "pointers"};
     if (std::find_if(std::begin(kCommands), std::end(kCommands), [&](const char* name) { return command == name; }) == std::end(kCommands))
         return false;
     if (!GetConfig().remoteMemory) {
         answer = "error memory access is off: set config.remoteMemory in example/config.cpp and rebuild the library";
         return true;
     }
-    if (command == "modules")
+    if ((command == "pointer" || command == "pointers") && !GetConfig().aiAdvancedFeatures) {
+        answer = "error the advanced features are off: set config.aiAdvancedFeatures in example/config.cpp and rebuild the library";
+        return true;
+    }
+    if (!MemoryAllowed()) {
+        answer = "error the player paused the memory tools in the AI Advanced Features window of the overlay";
+        return true;
+    }
+    if (command == "pointer")
+        answer = Pointer(rest, payload);
+    else if (command == "pointers")
+        answer = Pointers(rest, payload);
+    else if (command == "modules")
         answer = Modules(payload);
     else if (command == "read")
         answer = Read(rest, payload);

@@ -563,6 +563,7 @@ ImDrawData* Frame() {
         g_config.render();
     t_inRenderCallback = false;
     remote::Draw();
+    remote::Tick();
     ImGui::Render();
     ImDrawData* drawData = ImGui::GetDrawData();
     GuardCallbacks(drawData);
@@ -654,6 +655,8 @@ void Stop() {
     remote::Stop();
 
     platform::Stop();
+    // No frame runs any more: the debug registers and the scan of the window go.
+    remote::StopAdvanced();
 
     g_activeBackend = Backend::None;
     g_state = State::Stopped;

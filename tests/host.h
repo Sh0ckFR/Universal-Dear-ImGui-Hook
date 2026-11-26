@@ -7,6 +7,7 @@
 #include <X11/Xlib.h>
 #endif
 
+#include <atomic>
 #include <chrono>
 #include <memory>
 #include <string>
@@ -14,6 +15,11 @@
 
 constexpr int kSkip = 77;
 constexpr float kClear[4] = {0.1f, 0.2f, 0.3f, 1.0f};
+// The color the host clears to while g_flashClear is set, for the wait
+// command of the remote control, which waits for the screen to change.
+constexpr float kFlashClear[4] = {0.9f, 0.6f, 0.1f, 1.0f};
+inline std::atomic<bool> g_flashClear{false};
+inline const float* ClearColor() { return g_flashClear ? kFlashClear : kClear; }
 constexpr int kWidth = 800;
 constexpr int kHeight = 600;
 
@@ -77,6 +83,9 @@ struct Options {
     bool remote = false;
     // With remote: the memory commands too, on values of the host.
     bool remoteMemory = false;
+    // With remote and remoteMemory: the advanced features, typing, mouse
+    // moves and drags, wait, pointers, the watch list and the instruction watch.
+    bool remoteAdvanced = false;
     // Images created with uih::CreateTexture() and drawn every frame.
     int textures = 0;
     // Removes the device of the host while the menu is open, then creates a

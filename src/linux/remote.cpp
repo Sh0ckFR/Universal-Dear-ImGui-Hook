@@ -350,9 +350,8 @@ void SendKeys(xcb_window_t window, const std::vector<uint8_t>& keycodes, bool up
     xcb_flush(g_x);
 }
 
-// A move to x, y in `window`, then the press or the release of `button`, as
-// events sent to the window.
-void SendButton(xcb_window_t window, int16_t x, int16_t y, uint8_t button, bool up) {
+// A move to x, y in `window` with the buttons of `state` held, as an event sent to the window.
+void SendMotion(xcb_window_t window, int16_t x, int16_t y, uint16_t state) {
     xcb_motion_notify_event_t motion{};
     motion.response_type = XCB_MOTION_NOTIFY;
     motion.time = XCB_CURRENT_TIME;
@@ -360,9 +359,15 @@ void SendButton(xcb_window_t window, int16_t x, int16_t y, uint8_t button, bool 
     motion.event = window;
     motion.event_x = x;
     motion.event_y = y;
-    motion.state = up ? static_cast<uint16_t>(XCB_BUTTON_MASK_1 << (button - 1)) : 0;
+    motion.state = state;
     motion.same_screen = 1;
     xcb_send_event(g_x, 1, window, XCB_EVENT_MASK_POINTER_MOTION, reinterpret_cast<const char*>(&motion));
+}
+
+// A move to x, y in `window`, then the press or the release of `button`, as
+// events sent to the window.
+void SendButton(xcb_window_t window, int16_t x, int16_t y, uint8_t button, bool up) {
+    SendMotion(window, x, y, up ? static_cast<uint16_t>(XCB_BUTTON_MASK_1 << (button - 1)) : 0);
     xcb_button_press_event_t event{};
     event.response_type = up ? XCB_BUTTON_RELEASE : XCB_BUTTON_PRESS;
     event.detail = button;
@@ -371,9 +376,67 @@ void SendButton(xcb_window_t window, int16_t x, int16_t y, uint8_t button, bool 
     event.event = window;
     event.event_x = x;
     event.event_y = y;
-    event.state = motion.state;
+    event.state = up ? static_cast<uint16_t>(XCB_BUTTON_MASK_1 << (button - 1)) : 0;
     event.same_screen = 1;
     xcb_send_event(g_x, 1, window, up ? XCB_EVENT_MASK_BUTTON_RELEASE : XCB_EVENT_MASK_BUTTON_PRESS, reinterpret_cast<const char*>(&event));
+    xcb_flush(g_x);
+}
+
+// The press or the release of `keycode` with the modifiers of `state`, as an event sent to `window`.
+void SendKey(xcb_window_t window, uint8_t keycode, uint16_t state, bool up) {
+    xcb_key_press_event_t event{};
+    event.response_type = up ? XCB_KEY_RELEASE : XCB_KEY_PRESS;
+    event.detail = keycode;
+    event.time = XCB_CURRENT_TIME;
+    event.root = g_root;
+    event.event = window;
+    event.child = XCB_NONE;
+    event.state = state;
+    event.same_screen = 1;
+    xcb_send_event(g_x, 1, window, up ? XCB_EVENT_MASK_KEY_RELEASE : XCB_EVENT_MASK_KEY_PRESS, reinterpret_cast<const char*>(&event));
+}
+
+// X11/keysymdef.h: Latin-1 keysyms are the code points, others 0x01000000 + the code point.
+uint32_t KeysymOf(uint32_t point) {
+    if (point == '\n')
+        return 0xff0d;
+    if (point == '\t')
+        return 0xff09;
+    if ((point >= 0x20 && point <= 0x7e) || (point >= 0xa0 && point <= 0xff))
+        return point;
+    return 0x01000000 | point;
+}
+
+// The keycode that types `keysym`, without or with Shift; 0 when the layout has none.
+uint8_t KeycodeFor(uint32_t keysym, bool& shift) {
+    for (size_t i = 0; g_keysymsPerKeycode && i < g_keysyms.size(); ++i) {
+        if (g_keysyms[i] == keysym && i % g_keysymsPerKeycode < 2) {
+            shift = i % g_keysymsPerKeycode == 1;
+            return static_cast<uint8_t>(g_minKeycode + i / g_keysymsPerKeycode);
+        }
+    }
+    return 0;
+}
+
+// A keycode without keysyms, for the characters the layout does not type.
+uint8_t SpareKeycode() {
+    for (size_t keycode = g_keysyms.size() / std::max<size_t>(1, g_keysymsPerKeycode); keycode-- > 0;) {
+        bool empty = true;
+        for (size_t i = 0; i < g_keysymsPerKeycode; ++i)
+            empty = empty && g_keysyms[keycode * g_keysymsPerKeycode + i] == 0;
+        if (empty)
+            return static_cast<uint8_t>(g_minKeycode + keycode);
+    }
+    return 0;
+}
+
+// Gives `keycode` the keysym, or none, for every client of the X server.
+void MapKeycode(uint8_t keycode, uint32_t keysym) {
+    std::vector<xcb_keysym_t> keysyms(g_keysymsPerKeycode, keysym);
+    xcb_change_keyboard_mapping(g_x, 1, keycode, g_keysymsPerKeycode, keysyms.data());
+    size_t at = static_cast<size_t>(keycode - g_minKeycode) * g_keysymsPerKeycode;
+    for (size_t i = 0; i < g_keysymsPerKeycode && at + i < g_keysyms.size(); ++i)
+        g_keysyms[at + i] = keysym;
     xcb_flush(g_x);
 }
 
@@ -503,6 +566,144 @@ std::string ClickAt(int x, int y, int button, unsigned ms) {
     SendButton(window, static_cast<int16_t>(x), static_cast<int16_t>(y), detail, true);
     return g_hasXTest ? "ok sent as window events, the game does not have the focus: the overlay menu and games that read the mouse directly do not see them"
                       : "ok sent as window events, the X server lacks XTEST: the overlay menu and games that read the mouse directly do not see them";
+}
+
+// XTEST when the game has the keyboard, events sent to its window otherwise.
+// A character the layout lacks goes to a free keycode for the time of the
+// text, as xdotool does: the other clients of the X server see the change.
+std::string TypeText(const std::vector<uint32_t>& text) {
+    xcb_window_t window = XCB_NONE;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    if (!FindWindow(window, width, height))
+        return "error the game has no X11 window: text reaches X11 and XWayland games only";
+    bool fake = g_hasXTest && HasKeyboard(window, width, height);
+    uint8_t shiftKeycode = Keycode(0xffe1);
+    uint8_t spare = 0;
+    uint32_t spareKeysym = 0;
+    size_t typed = 0;
+    for (uint32_t point : text) {
+        if (StopRequested())
+            break;
+        uint32_t keysym = KeysymOf(point);
+        bool shift = false;
+        uint8_t keycode = KeycodeFor(keysym, shift);
+        if (!keycode) {
+            if (!spare && !(spare = SpareKeycode()))
+                continue;
+            if (spareKeysym != keysym) {
+                MapKeycode(spare, keysym);
+                spareKeysym = keysym;
+                // The clients read the new mapping before the key.
+                Sleep(20);
+            }
+            keycode = spare;
+            shift = false;
+        }
+        if (fake) {
+            if (shift && shiftKeycode)
+                FakeInput(XCB_KEY_PRESS, shiftKeycode);
+            FakeInput(XCB_KEY_PRESS, keycode);
+            FakeInput(XCB_KEY_RELEASE, keycode);
+            if (shift && shiftKeycode)
+                FakeInput(XCB_KEY_RELEASE, shiftKeycode);
+        } else {
+            uint16_t state = shift ? XCB_MOD_MASK_SHIFT : 0;
+            SendKey(window, keycode, state, false);
+            SendKey(window, keycode, state, true);
+        }
+        xcb_flush(g_x);
+        ++typed;
+        // Games read text once per frame, some only the last character.
+        Sleep(10);
+    }
+    if (spare)
+        MapKeycode(spare, 0);
+    DrainEvents();
+    std::string count = std::to_string(typed);
+    if (typed < text.size())
+        return "ok typed " + count + " of " + std::to_string(text.size()) + " characters: the keyboard layout has no free keycode for the others";
+    return fake ? "ok typed " + count + " characters as keyboard input, the game has the focus"
+                : "ok typed " + count + " characters as window events, the game does not have the keyboard: games that read the keyboard state directly do not see them";
+}
+
+namespace {
+
+// Root coordinates of x, y in `window`.
+bool ToRoot(xcb_window_t window, int x, int y, int16_t& rootX, int16_t& rootY) {
+    Reply<xcb_translate_coordinates_reply_t> root(
+        xcb_translate_coordinates_reply(g_x, xcb_translate_coordinates(g_x, window, g_root, static_cast<int16_t>(x), static_cast<int16_t>(y)), nullptr));
+    if (!root)
+        return false;
+    rootX = root->dst_x;
+    rootY = root->dst_y;
+    return true;
+}
+
+} // namespace
+
+std::string MoveTo(int x, int y) {
+    xcb_window_t window = XCB_NONE;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    if (!FindWindow(window, width, height))
+        return "error the game has no X11 window: the pointer moves in X11 and XWayland games only";
+    int16_t rootX = 0;
+    int16_t rootY = 0;
+    if (g_hasXTest && HasKeyboard(window, width, height) && ToRoot(window, x, y, rootX, rootY)) {
+        FakeInput(XCB_MOTION_NOTIFY, 0, rootX, rootY);
+        xcb_flush(g_x);
+        // Games read the pointer once per frame.
+        Sleep(50);
+        return "ok moved the pointer, the game has the focus";
+    }
+    SendMotion(window, static_cast<int16_t>(x), static_cast<int16_t>(y), 0);
+    xcb_flush(g_x);
+    Sleep(50);
+    return "ok sent as a window event, the game does not have the focus: the overlay menu and games that read the mouse directly do not see it";
+}
+
+std::string DragTo(int x0, int y0, int x1, int y1, int button, unsigned ms) {
+    constexpr unsigned kStepMs = 16;
+    xcb_window_t window = XCB_NONE;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    if (!FindWindow(window, width, height))
+        return "error the game has no X11 window: drags reach X11 and XWayland games only";
+    uint8_t detail = static_cast<uint8_t>(button == 2 ? 2 : button == 3 ? 3 : 1);
+    auto held = static_cast<uint16_t>(XCB_BUTTON_MASK_1 << (detail - 1));
+    unsigned steps = std::max(1u, ms / kStepMs);
+    int16_t rootX = 0;
+    int16_t rootY = 0;
+    bool fake = g_hasXTest && HasKeyboard(window, width, height) && ToRoot(window, x0, y0, rootX, rootY);
+    if (fake) {
+        FakeInput(XCB_MOTION_NOTIFY, 0, rootX, rootY);
+        xcb_flush(g_x);
+        Sleep(50);
+        FakeInput(XCB_BUTTON_PRESS, detail);
+    } else {
+        SendButton(window, static_cast<int16_t>(x0), static_cast<int16_t>(y0), detail, false);
+    }
+    xcb_flush(g_x);
+    for (unsigned i = 1; i <= steps; ++i) {
+        if (!Sleep(static_cast<int>(ms / steps)))
+            break;
+        int x = x0 + static_cast<int>((static_cast<int64_t>(x1 - x0) * i) / steps);
+        int y = y0 + static_cast<int>((static_cast<int64_t>(y1 - y0) * i) / steps);
+        if (fake && ToRoot(window, x, y, rootX, rootY))
+            FakeInput(XCB_MOTION_NOTIFY, 0, rootX, rootY);
+        else if (!fake)
+            SendMotion(window, static_cast<int16_t>(x), static_cast<int16_t>(y), held);
+        xcb_flush(g_x);
+    }
+    Sleep(50);
+    if (fake) {
+        FakeInput(XCB_BUTTON_RELEASE, detail);
+        xcb_flush(g_x);
+        return "ok sent as mouse input, the game has the focus";
+    }
+    SendButton(window, static_cast<int16_t>(x1), static_cast<int16_t>(y1), detail, true);
+    return "ok sent as window events, the game does not have the focus: the overlay menu and games that read the mouse directly do not see them";
 }
 
 bool GameWindow(uint32_t& width, uint32_t& height, bool& focused) {
