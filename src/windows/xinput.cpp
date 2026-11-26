@@ -15,6 +15,19 @@ constexpr DWORD kBlockedPacket = 0x80000000;
 
 constexpr const wchar_t* kModules[] = {L"xinput1_4.dll", L"xinput1_3.dll", L"xinput9_1_0.dll"};
 
+// Looked up through ntdll rather than GetProcAddress(): Godot 4.7 replaces
+// GetProcAddress in the import table of dinput8.dll, which this DLL is when
+// loaded as dinput8.dll, with a function that reads every name as a string,
+// and crashed on the ordinal.
+void* ProcByOrdinal(HMODULE module, WORD ordinal) {
+    using LdrGetProcedureAddressFn = LONG(NTAPI*)(HMODULE, const void*, ULONG, void**);
+    static const auto getProcedureAddress = GetProc<LdrGetProcedureAddressFn>(GetModuleHandleW(L"ntdll.dll"), "LdrGetProcedureAddress");
+    void* address = nullptr;
+    if (!getProcedureAddress || getProcedureAddress(module, nullptr, ordinal, &address) < 0)
+        return nullptr;
+    return address;
+}
+
 template <int N>
 struct XInputHooks {
     static inline HMODULE handle = nullptr;
@@ -46,7 +59,7 @@ struct XInputHooks {
         bool hooked = false;
         if (void* target = GetProc<void*>(handle, "XInputGetState"))
             hooked = CreateHook("XInputGetState", target, reinterpret_cast<void*>(HookGetState), reinterpret_cast<void**>(&getState));
-        if (void* target = GetProc<void*>(handle, MAKEINTRESOURCEA(kGetStateExOrdinal)))
+        if (void* target = ProcByOrdinal(handle, kGetStateExOrdinal))
             CreateHook("XInputGetStateEx", target, reinterpret_cast<void*>(HookGetStateEx), reinterpret_cast<void**>(&getStateEx));
         return hooked;
     }
