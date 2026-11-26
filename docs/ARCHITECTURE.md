@@ -10,6 +10,7 @@ The internals of Universal-Dear-ImGui-Hook, for contributors and the curious. To
 | `src/uih.cpp`, `src/internal.h` | Platform-independent core: lifecycle, frame, textures, scale |
 | `src/remote.cpp`, `src/memory.cpp` | Remote control commands, and its memory commands |
 | `src/advanced.cpp` | Advanced features: chat, watch list, frozen values, instruction watch, the AI Advanced Features window |
+| `src/tools.cpp` | Tools of the game for the assistant, `uih::RegisterTool()`, and the small JSON reader of `uih::ToolArgument()` |
 | `src/vulkan.cpp` | Vulkan renderer, shared by both platforms |
 | `src/gl_state.h` | OpenGL state saved while the overlay draws, and the frame capture shared by WGL, GLX and EGL |
 | `src/windows/` | MinHook, Direct3D, WGL, Win32 input, DirectInput, XInput, remote control (`remote.cpp`), instruction watch (`breakpoints.cpp`) |
@@ -42,7 +43,7 @@ On Linux, the library exports the hooked functions under their own names and ove
 
 `uih::Frame()` registers new textures, polls the hotkeys, applies the DPI scale and runs `render`. The backend then draws the ImGui data on the back buffer, uploading textures as needed, and the game's present continues.
 
-Vertex colors are converted to linear for back buffers that store linear values; OpenGL and D3D9 turn sRGB writes off instead. Vulkan submits its own command buffer, which waits on the game's semaphores and signals the one the present waits on.
+Vertex colors are converted to linear for back buffers that store linear values; OpenGL and D3D9 turn sRGB writes off instead. On HDR10 swap chains (`IDXGISwapChain3::SetColorSpace1` with `DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020`, which is hooked, or `VK_COLOR_SPACE_HDR10_ST2084_EXT`), they are converted to BT.2020 and encoded with the PQ curve, white being the SDR content brightness of the display (`DisplayConfigGetDeviceInfo`, 203 nits on Linux). Vulkan submits its own command buffer, which waits on the game's semaphores and signals the one the present waits on.
 
 **Resolution changes** are followed on every API: D3D9 `Reset`/`ResetEx`, DXGI `ResizeBuffers`, a new Vulkan swap chain, or a new size of the OpenGL window. The overlay takes the new size on the next frame.
 
@@ -50,7 +51,7 @@ Vertex colors are converted to linear for back buffers that store linear values;
 
 How the game is kept from seeing input while the menu is open.
 
-**Windows.** The game window is subclassed to feed ImGui, and its input messages are swallowed while the menu is open, except key and button releases, keyboard and mouse raw input (filtered below) and Alt+F4. `GetRawInputData`, `GetRawInputBuffer`, `GetAsyncKeyState`, `GetKeyState`, `GetKeyboardState`, DirectInput and XInput then report no input to the game, and `GetCursorPos` a frozen position. The cursor is released from the game's `ClipCursor` rectangle, which is applied again when the menu closes. Releases always go through, so no key gets stuck; calls made by the hook itself see the real state.
+**Windows.** The game window is subclassed to feed ImGui, through a stub allocated outside the library that jumps to its window procedure. When the game, or another overlay, subclasses the window after the hook, removing the overlay points the stub at the window's original procedure instead, so the DLL can still be unloaded and injected again. Its input messages are swallowed while the menu is open, except key and button releases, keyboard and mouse raw input (filtered below) and Alt+F4. `GetRawInputData`, `GetRawInputBuffer`, `GetAsyncKeyState`, `GetKeyState`, `GetKeyboardState`, DirectInput and XInput then report no input to the game, and `GetCursorPos` a frozen position. The cursor is released from the game's `ClipCursor` rectangle, which is applied again when the menu closes. Releases always go through, so no key gets stuck; calls made by the hook itself see the real state.
 
 **Linux.** The pointer and the keyboard are polled from the X server on a separate XCB connection. The game reads its events with `xcb_wait_for_event`, `xcb_poll_for_event` or `xcb_poll_for_queued_event`, which Xlib (and so SDL and GLFW) also calls. The library replaces these functions, and while the menu is open it drops key presses, button presses and motion, core or XInput 2, raw events included. Releases still reach the game, so no key stays down. Presses of the wheel buttons (4 to 7) scroll the menu instead.
 
@@ -85,6 +86,8 @@ When `CaptureFrame()` waits, the backend copies its back buffer at the next pres
 With `remoteControl` set, a library thread serves the named pipe with overlapped I/O on Windows, or the Unix socket with `poll()` and an `eventfd` on Linux, so that `Stop()` ends a connection or a command immediately. The [protocol](../remote/PROTOCOL.md) is one text command per line.
 
 Messages are drawn after the `render` callback, in the overlay's frame. Keys and clicks go through `SendInput` (Windows) or XTEST on a dedicated connection to the X server (Linux) when the game has the focus, and as window messages or X11 events otherwise. On Windows, a click also moves the cursor with `SendInput`, since the `SetCursorPos` hook holds it still while the menu is open.
+
+**Tools of the game.** The server thread hands a `tool` command to the next frame of the overlay, which runs it after the `render` callback, and waits up to 10 seconds for its answer: a tool can then use the game's objects on the thread that renders, as the menu does. One request is served at a time, so one tool call waits at most.
 
 With `aiAdvancedFeatures`, `wait` compares frames copied by `uih::CaptureFrame()`, shrunk to 160 pixels. Frozen values are written in the overlay's frame, only when they changed, and their pointer chains are resolved again each time.
 

@@ -125,6 +125,7 @@ struct SwapchainInfo {
     VkFormat format = VK_FORMAT_UNDEFINED;
     VkExtent2D extent{};
     NativeWindow window{};
+    VkColorSpaceKHR colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     // The images can be copied, for CaptureFrame().
     bool copyable = false;
 };
@@ -158,6 +159,8 @@ struct VulkanState {
     VkSwapchainKHR swapchain = VK_NULL_HANDLE;
     VkExtent2D extent{};
     bool copyable = false;
+    // HDR10: BT.2020 colors encoded with the PQ curve.
+    bool pq = false;
     std::vector<VkImage> images;
     std::vector<VkImageView> views;
     std::vector<VkFramebuffer> framebuffers;
@@ -631,6 +634,8 @@ bool Setup(VkDevice device, VkQueue queue, VkSwapchainKHR swapchain) {
         ++g_setupFailures;
         return false;
     }
+    r.pq = swapchainInfo.colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT &&
+           (swapchainInfo.format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 || swapchainInfo.format == VK_FORMAT_A2R10G10B10_UNORM_PACK32);
     if (!CreateSwapchainResources(swapchain, swapchainInfo.extent, swapchainInfo.copyable)) {
         Log("Vulkan swap chain resource creation failed");
         ReleaseSwapchainResources();
@@ -773,6 +778,8 @@ const VkPresentInfoKHR* Render(VkQueue queue, VkDevice device, const VkPresentIn
     ImDrawData* drawData = Frame();
     if (StoresLinear(r.format))
         LinearizeColors(drawData);
+    else if (r.pq)
+        EncodePqColors(drawData, platform::SdrWhiteNits());
 
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -852,7 +859,8 @@ void OnSwapchainCreated(VkDevice device, const VkSwapchainCreateInfoKHR& info, V
     if (!known)
         window = input::FindProcessWindow(info.imageExtent.width, info.imageExtent.height);
     std::lock_guard<std::mutex> lock(g_mutex);
-    g_swapchains[swapchain] = {device, info.imageFormat, info.imageExtent, window, (info.imageUsage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0};
+    g_swapchains[swapchain] = {device, info.imageFormat, info.imageExtent, window, info.imageColorSpace,
+                               (info.imageUsage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0};
     g_setupFailures = 0;
 }
 

@@ -41,4 +41,12 @@ void ApplySettings(uih::Config& config) {
     // With remoteMemory too: pointer chains, a watch list with frozen values,
     // and on Windows the instructions that write a value.
     config.aiAdvancedFeatures = false;
+
+#ifdef UIH_EXAMPLE_AI
+    // The -ai libraries of the releases, built with cmake -DUIH_EXAMPLE_AI=ON:
+    // the chat with Claude and every tool of the assistant, ready to use.
+    config.remoteControl = true;
+    config.remoteMemory = true;
+    config.aiAdvancedFeatures = true;
+#endif
 }

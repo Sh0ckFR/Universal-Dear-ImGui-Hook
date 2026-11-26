@@ -36,6 +36,17 @@ jobs:
         with:
           name: Universal-ImGui-Hook-msvc-${{ matrix.arch }}
           path: build/Release/Universal-ImGui-Hook.dll
+      # The same library with the chat with Claude and every tool on, released as -ai.
+      - name: Build the AI library
+        run: |
+          cmake -S . -B build-ai -A ${{ matrix.arch }} -DUIH_EXAMPLE_AI=ON
+          cmake --build build-ai --config Release --target uih_example
+      - name: Proxy test of the AI library
+        run: build\tests\Release\uih_host.exe --proxy build-ai\Release\Universal-ImGui-Hook.dll
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Universal-ImGui-Hook-msvc-${{ matrix.arch }}-ai
+          path: build-ai/Release/Universal-ImGui-Hook.dll
 
   # The CTest suite on a runner without GPU: WARP for Direct3D, Mesa's
   # llvmpipe and lavapipe for OpenGL and Vulkan.
@@ -349,6 +360,16 @@ jobs:
         with:
           name: Universal-ImGui-Hook-linux-${{ matrix.arch }}
           path: build/linux/Universal-ImGui-Hook.so
+      # The same library with the chat with Claude and every tool on, released as -ai.
+      - name: Build the AI library
+        run: |
+          cmake --preset linux -B build/linux-ai -DUIH_EXAMPLE_AI=ON
+          cmake --build build/linux-ai --target uih_example
+          if readelf -d build/linux-ai/Universal-ImGui-Hook.so | grep -E 'libstdc\+\+|libgcc_s'; then exit 1; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Universal-ImGui-Hook-linux-${{ matrix.arch }}-ai
+          path: build/linux-ai/Universal-ImGui-Hook.so
       # The library with the remote control on, for games-linux: not released.
       - uses: actions/upload-artifact@v4
         with:

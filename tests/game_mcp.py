@@ -104,9 +104,15 @@ def play(game, assistant, backend, screenshot):
     tools = sorted(tool["name"] for tool in assistant.request("tools/list", {})["tools"])
     expected = sorted(["click", "drag", "game_info", "memory_find", "memory_freeze", "memory_modules", "memory_next", "memory_pattern",
                        "memory_pointer", "memory_pointer_scan", "memory_read", "memory_results", "memory_watch", "memory_what_writes",
-                       "memory_write", "mouse_move", "press_key", "screenshot", "show_text", "type_text", "wait_for_change"])
+                       "memory_write", "mouse_move", "press_key", "screenshot", "show_text", "type_text", "wait_for_change",
+                       # Registered by tests/remote_preload.cpp with uih::RegisterTool().
+                       "test_add", "test_fail"])
     if tools != expected:
         raise Failure(f"unexpected tools {tools}")
+    # A tool of the game, run in the frame of the overlay.
+    _, text = assistant.call("test_add", {"a": 40, "b": 2, "label": "answer"})
+    if text != "answer = 42\nnested: ":
+        raise Failure(f"test_add answered {text!r}")
 
     _, text = assistant.call("game_info")
     if not text.startswith(f"Graphics API: {backend}, window ") or "keyboard focus: True" not in text or "menu open: False" not in text:

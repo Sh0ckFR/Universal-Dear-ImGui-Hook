@@ -126,6 +126,9 @@ std::vector<uint8_t> ToRgba(const void* texels, size_t pitch, uint32_t width, ui
 // Dear ImGui produces sRGB vertex colors. Render targets that store linear
 // values (sRGB and floating-point formats) need them converted.
 void LinearizeColors(ImDrawData* drawData);
+// HDR10 swap chains store BT.2020 colors encoded with the PQ curve (SMPTE
+// ST 2084): sRGB vertex colors are converted to it, white being `whiteNits`.
+void EncodePqColors(ImDrawData* drawData, float whiteNits);
 // Detaches the platform backend and destroys the ImGui context.
 void UnbindWindow();
 // Detaches the renderer backend without a call to the graphics API, when its
@@ -153,6 +156,9 @@ bool IsKeyDown(int key);
 bool IsFocused();
 // DPI scale of the bound window, 1 when unknown.
 float WindowScale();
+// Brightness of white in SDR content on the display of the bound window, in
+// nits: the overlay is drawn as bright on an HDR10 swap chain.
+float SdrWhiteNits();
 void Unload();
 // While the hook is stopped: true when the menu key or buttons of `config`
 // are held and the application has the focus.
@@ -277,6 +283,11 @@ void RecordActivity(const std::string& line, const std::string& answer);
 bool HandleAdvanced(const std::string& command, const std::string& rest, std::vector<uint8_t>& payload, std::string& answer);
 // Every frame of the overlay: writes the frozen values, watches new threads.
 void Tick();
+// The tools of the game, uih::RegisterTool(), src/tools.cpp: false when
+// `command` is not tools or tool.
+bool HandleTools(const std::string& command, const std::string& rest, std::vector<uint8_t>& payload, std::string& answer);
+// Every frame of the overlay: runs the tool the assistant called, if any.
+void RunTools();
 // Once the overlay is gone: ends the instruction watch and the scan of the window.
 void StopAdvanced();
 // Implemented once per platform: the instructions that write `size` bytes at

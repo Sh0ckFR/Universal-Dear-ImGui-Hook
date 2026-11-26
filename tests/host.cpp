@@ -6,6 +6,8 @@
 #include "host.h"
 #include "remote_memory.h"
 #include "remote_advanced.h"
+#define UIH_TEST_TOOLS_HOOK
+#include "remote_tools.h"
 
 #include <d3d10_1.h>
 #include <d3d11.h>
@@ -170,6 +172,8 @@ DXGI_FORMAT BackBufferFormat(const Options& options) {
         return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
     if (options.format == "float")
         return DXGI_FORMAT_R16G16B16A16_FLOAT;
+    if (options.format == "hdr10")
+        return DXGI_FORMAT_R10G10B10A2_UNORM;
     return DXGI_FORMAT_R8G8B8A8_UNORM;
 }
 
@@ -430,6 +434,8 @@ struct D3D12Host : Host {
     ID3D12Device* device = nullptr;
     ID3D12CommandQueue* queue = nullptr;
     IDXGISwapChain3* swapChain = nullptr;
+    bool hdr10 = false;
+    int framesSinceColorSpace = 0;
     ID3D12DescriptorHeap* heap = nullptr;
     ID3D12Resource* buffers[kBuffers] = {};
     D3D12_CPU_DESCRIPTOR_HANDLE targets[kBuffers] = {};
@@ -526,6 +532,10 @@ struct D3D12Host : Host {
             return false;
         swapChain1->QueryInterface(IID_PPV_ARGS(&swapChain));
         swapChain1->Release();
+        // As an HDR game does: the overlay must then draw its colors with the PQ curve.
+        hdr10 = options.format == "hdr10";
+        if (hdr10 && FAILED(swapChain->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)))
+            return false;
 
         D3D12_DESCRIPTOR_HEAP_DESC heapDesc{};
         heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
@@ -599,6 +609,9 @@ struct D3D12Host : Host {
         barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
         commandList->ResourceBarrier(1, &barrier);
         commandList->ClearRenderTargetView(targets[index], ClearColor(), 0, nullptr);
+        // Set again once the hook runs, as a game does when the player turns HDR on.
+        if (hdr10 && ++framesSinceColorSpace == 60)
+            swapChain->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020);
         barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
         barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
         commandList->ResourceBarrier(1, &barrier);
@@ -1009,6 +1022,8 @@ void StartHook(const Options& options) {
     config.render = DrawTestMenu;
     config.setup = [] { g_setupCalled = true; };
     config.debugLog = true;
+    if (options.remote && !RegisterTestTools())
+        printf("uih::RegisterTool() refused a valid tool or accepted an invalid one: the remote scenario fails\n");
     g_hookStarted = true;
     uih::Start(config);
 }
@@ -1137,6 +1152,7 @@ int RemoteScenario(bool memory, bool advanced, Frame&& frame) {
     std::string unknownKey;
     std::string memoryFailure;
     std::string advancedFailure;
+    std::string toolsFailure;
     std::string click;
     std::string outside;
     std::vector<uint8_t> rgb;
@@ -1155,6 +1171,7 @@ int RemoteScenario(bool memory, bool advanced, Frame&& frame) {
             }
             text = client.Request("text 60 hello\\nworld");
             unknownKey = client.Request("key nokey 50");
+            toolsFailure = CheckRemoteTools(client, [] { return ImGui::GetFrameCount(); });
             if (memory)
                 memoryFailure = CheckRemoteMemory(client);
             else if (client.Request("read 1000 4").rfind("error memory access is off", 0) != 0)
@@ -1196,6 +1213,8 @@ int RemoteScenario(bool memory, bool advanced, Frame&& frame) {
         return Fail(memoryFailure.c_str());
     if (!advancedFailure.empty())
         return Fail(advancedFailure.c_str());
+    if (!toolsFailure.empty())
+        return Fail(toolsFailure.c_str());
     for (int i = 0; i < 3; ++i)
         frame();
     ImGuiWindow* message = ImGui::FindWindowByName("##uih_remote_message");
@@ -1406,8 +1425,9 @@ int RunPreviewMode(HWND window, Host& host, const Options& options) {
 // loaded the way a game loads a proxy: F11 only removes the overlay, and
 // INSERT brings it back. Otherwise F11 unloads the DLL, and --reload injects
 // it again.
-// With --resubclass, the host subclasses the window after the overlay: the
-// DLL stays loaded after F11, as the host's procedure still calls its own.
+// With --resubclass, the host subclasses the window after the overlay: F11
+// unloads the DLL all the same, and the host's procedure still reaches the
+// window's own through what the DLL left.
 int RunDllMode(HWND window, Host& host, const Options& options) {
     const int menuKey = options.menuKey ? options.menuKey : VK_INSERT;
     const int unloadKey = options.unloadKey ? options.unloadKey : VK_F11;
@@ -1460,13 +1480,14 @@ int RunDllMode(HWND window, Host& host, const Options& options) {
         if (pixels < visible)
             return Fail("overlay is not visible on screen");
 
-        if (options.resubclass)
+        // Once: the host's procedure calls the procedure it replaced, the DLL's of the first cycle.
+        if (options.resubclass && cycle == 0)
             SubclassWindow(window);
         if (!PressKey(window, unloadKey))
             return Skip("the host window lost the focus");
         run(5);
         HoldKey(unloadKey, false);
-        if (proxy || options.resubclass) {
+        if (proxy) {
             for (ULONGLONG start = GetTickCount64(); pixels >= visible && GetTickCount64() - start < 10000;) {
                 run(15);
                 pixels = overlayPixels();
@@ -1474,14 +1495,14 @@ int RunDllMode(HWND window, Host& host, const Options& options) {
             printf("cycle %d: %d overlay pixels after the unload key\n", cycle + 1, pixels);
             if (pixels >= visible)
                 return Fail("overlay is still visible after the unload key");
-            run(30);
-            if (options.resubclass && !ProcedureChainWorks(window))
-                return Fail("the procedures of the window no longer chain");
         } else {
             for (ULONGLONG start = GetTickCount64(); GetModuleHandleW(name.c_str()) && GetTickCount64() - start < 10000;)
                 run(1);
             if (GetModuleHandleW(name.c_str()))
                 return Fail("DLL did not unload");
+            run(30);
+            if (options.resubclass && !ProcedureChainWorks(window))
+                return Fail("the procedures of the window no longer chain");
         }
     }
     printf("PASS: %s via %s\n", options.api.c_str(), options.dll.c_str());
@@ -2487,7 +2508,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--own-hooks before|after] [--fault access|exception|draw] [--second-window [--shared-device]] [--composition] [--capture-frame] [--remote [--remote-memory] [--remote-advanced]] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--own-hooks before|after] [--fault access|exception|draw] [--second-window [--shared-device]] [--composition] [--capture-frame] [--remote [--remote-memory] [--remote-advanced]] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float|hdr10] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 

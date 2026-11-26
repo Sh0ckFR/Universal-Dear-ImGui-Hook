@@ -466,8 +466,7 @@ void Render(IDXGISwapChain* swapChain) {
     // Before any reference to the back buffer, which an exception in the frame would leak.
     ImGui_ImplDX12_NewFrame();
     ImDrawData* drawData = Frame();
-    if (StoresLinear(g_format))
-        LinearizeColors(drawData);
+    EncodeColors(swapChain, g_format, drawData);
 
     ID3D12Resource* buffer = nullptr;
     if (FAILED(swapChain->GetBuffer(index, IID_PPV_ARGS(&buffer))))
