@@ -105,7 +105,7 @@ if(WIN32)
         uih_add_host_test(dll_d3d9 --api d3d9 --dll $<TARGET_FILE:uih_example>)
         uih_add_host_test(dll_proxy --proxy $<TARGET_FILE:uih_example>)
         uih_add_host_test(dll_reload --api d3d11 --dll $<TARGET_FILE:uih_example> --reload)
-        uih_add_host_test(dll_resubclass --api d3d11 --dll $<TARGET_FILE:uih_example> --resubclass)
+        uih_add_host_test(dll_resubclass --api d3d11 --dll $<TARGET_FILE:uih_example> --resubclass --reload)
 
         # The DLL under the name a game loads it as a proxy.
         set(UIH_PROXY_DLL ${CMAKE_CURRENT_BINARY_DIR}/proxy/dinput8.dll)

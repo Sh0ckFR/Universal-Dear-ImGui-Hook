@@ -1,5 +1,6 @@
 #include "internal.h"
 
+#include <cstring>
 #include <vector>
 
 #include "imgui_impl_win32.h"
@@ -36,6 +37,11 @@ struct Subclass {
     bool unicode;
     // WndProc is still in the chain of procedures of the window.
     bool chained;
+    // The procedure installed on the window, which jumps to WndProc (CreateStub()).
+    WNDPROC stub;
+    // The stub calls the original procedure: the application subclassed the
+    // window after it, so it stays in the chain.
+    bool forwarded;
 };
 std::vector<Subclass> g_subclasses;
 // Window whose input feeds the overlay.
@@ -229,12 +235,86 @@ Subclass* FindSubclass(HWND window) {
     return nullptr;
 }
 
-// The procedure the application installed after WndProc calls it: the code
-// of WndProc must stay in memory after the library is unloaded.
-void PinModule() {
-    HMODULE module = nullptr;
-    if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN, reinterpret_cast<LPCWSTR>(&WndProc), &module))
-        Log("The library stays loaded: unloading it is ignored, and loading it again does not start it");
+// The window procedure installed on a window is a stub outside the library,
+// which jumps to the address in its first 8 bytes: WndProc, until Detach().
+// When the application subclassed the window after it, its procedure keeps
+// calling the stub, which then calls the window's original procedure: the
+// library can be unloaded. A stub is never freed, since a message may be
+// running it; one page per window the overlay was bound to.
+constexpr size_t kStubSize = 128;
+constexpr size_t kStubEntry = 16;
+constexpr size_t kStubForward = 64;
+
+WNDPROC CreateStub() {
+    auto* page = static_cast<uint8_t*>(VirtualAlloc(nullptr, kStubSize, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
+    if (!page)
+        return nullptr;
+    void* target = reinterpret_cast<void*>(&WndProc);
+    memcpy(page, &target, sizeof(target));
+    uint8_t* code = page + kStubEntry;
+    void* slot = page;
+#ifdef _WIN64
+    // mov rax, slot; jmp [rax]
+    code[0] = 0x48;
+    code[1] = 0xB8;
+    memcpy(code + 2, &slot, 8);
+    code[10] = 0xFF;
+    code[11] = 0x20;
+#else
+    // jmp [slot]
+    code[0] = 0xFF;
+    code[1] = 0x25;
+    memcpy(code + 2, &slot, 4);
+#endif
+    FlushInstructionCache(GetCurrentProcess(), page, kStubSize);
+    return reinterpret_cast<WNDPROC>(code);
+}
+
+// Points the stub at code that calls CallWindowProc(original, ...), for once WndProc is gone.
+void ForwardStub(WNDPROC stub, WNDPROC original, bool unicode) {
+    uint8_t* page = reinterpret_cast<uint8_t*>(stub) - kStubEntry;
+    uint8_t* code = page + kStubForward;
+    void* call = reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"user32.dll"), unicode ? "CallWindowProcW" : "CallWindowProcA"));
+    void* previous = reinterpret_cast<void*>(original);
+#ifdef _WIN64
+    // The arguments move one register, or the stack, to the right:
+    // sub rsp, 38h; mov [rsp+20h], r9; mov r9, r8; mov r8d, edx; mov rdx, rcx;
+    // mov rcx, original; mov rax, CallWindowProc; call rax; add rsp, 38h; ret
+    const uint8_t head[] = {0x48, 0x83, 0xEC, 0x38, 0x4C, 0x89, 0x4C, 0x24, 0x20, 0x4D, 0x89, 0xC1, 0x41, 0x89, 0xD0, 0x48, 0x89, 0xCA, 0x48, 0xB9};
+    const uint8_t middle[] = {0x48, 0xB8};
+    const uint8_t tail[] = {0xFF, 0xD0, 0x48, 0x83, 0xC4, 0x38, 0xC3};
+    size_t at = 0;
+    memcpy(code + at, head, sizeof(head));
+    at += sizeof(head);
+    memcpy(code + at, &previous, 8);
+    at += 8;
+    memcpy(code + at, middle, sizeof(middle));
+    at += sizeof(middle);
+    memcpy(code + at, &call, 8);
+    at += 8;
+    memcpy(code + at, tail, sizeof(tail));
+#else
+    // The original procedure goes in as the first argument, under the return
+    // address; CallWindowProc removes it with the others:
+    // pop eax; push original; push eax; mov eax, CallWindowProc; jmp eax
+    code[0] = 0x58;
+    code[1] = 0x68;
+    memcpy(code + 2, &previous, 4);
+    code[6] = 0x50;
+    code[7] = 0xB8;
+    memcpy(code + 8, &call, 4);
+    code[12] = 0xFF;
+    code[13] = 0xE0;
+#endif
+    FlushInstructionCache(GetCurrentProcess(), code, kStubSize - kStubForward);
+    void* forward = code;
+    InterlockedExchangePointer(reinterpret_cast<void* volatile*>(page), forward);
+}
+
+// Points a forwarded stub at WndProc again, when the overlay comes back.
+void RestoreStub(WNDPROC stub) {
+    void* target = reinterpret_cast<void*>(&WndProc);
+    InterlockedExchangePointer(reinterpret_cast<void* volatile*>(reinterpret_cast<uint8_t*>(stub) - kStubEntry), target);
 }
 
 struct WindowSearch {
@@ -318,16 +398,25 @@ void Attach(HWND window) {
         g_window = window;
         return;
     }
+    // Still in the chain, below the application's procedure.
+    if (entry && entry->forwarded) {
+        RestoreStub(entry->stub);
+        entry->chained = true;
+        entry->forwarded = false;
+        g_window = window;
+        return;
+    }
     bool unicode = IsWindowUnicode(window) != FALSE;
-    WNDPROC original = SetProc(window, unicode, WndProc);
+    WNDPROC stub = CreateStub();
+    WNDPROC original = stub ? SetProc(window, unicode, stub) : nullptr;
     if (!original) {
         Log("SetWindowLongPtr failed on %p: %lu", window, GetLastError());
         return;
     }
     if (entry)
-        *entry = {window, original, unicode, true};
+        *entry = {window, original, unicode, true, stub, false};
     else
-        g_subclasses.push_back({window, original, unicode, true});
+        g_subclasses.push_back({window, original, unicode, true, stub, false});
     g_window = window;
 }
 
@@ -337,12 +426,14 @@ void Detach() {
     Subclass* entry = FindSubclass(g_window);
     if (!IsWindow(g_window)) {
         entry->chained = false;
-    } else if (CurrentProc(g_window, entry->unicode) == WndProc) {
+    } else if (CurrentProc(g_window, entry->unicode) == entry->stub) {
         SetProc(g_window, entry->unicode, entry->original);
         entry->chained = false;
     } else {
-        Log("Window %p was subclassed again by the application, WndProc stays in its chain", g_window);
-        PinModule();
+        Log("Window %p was subclassed again by the application: its procedure now calls the original one directly", g_window);
+        ForwardStub(entry->stub, entry->original, entry->unicode);
+        entry->chained = false;
+        entry->forwarded = true;
     }
     g_window = nullptr;
 }
