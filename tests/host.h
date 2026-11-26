@@ -109,6 +109,8 @@ struct Options {
     bool renderThread = false;
     // The host subclasses its window after the overlay did.
     bool resubclass = false;
+    // Starts the hook through the C interface of include/uih_c.h (tests/c_api.c).
+    bool cApi = false;
     // Deletes the OpenGL context while the menu is open and renders with a
     // new one, as games do when the video settings change.
     bool recreateContext = false;

@@ -7,6 +7,7 @@ The internals of Universal-Dear-ImGui-Hook, for contributors and the curious. To
 | Path | Content |
 | --- | --- |
 | `include/uih.h` | Public API |
+| `include/uih_c.h`, `src/c_api.cpp` | The same API for C and the languages that call C |
 | `src/uih.cpp`, `src/internal.h` | Platform-independent core: lifecycle, frame, textures, scale |
 | `src/remote.cpp`, `src/memory.cpp` | Remote control commands, and its memory commands |
 | `src/advanced.cpp` | Advanced features: chat, watch list, frozen values, instruction watch, the AI Advanced Features window |

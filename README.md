@@ -447,6 +447,25 @@ Everything is in `include/uih.h`, in the `uih` namespace.
 
 </details>
 
+### From C and other languages
+
+`include/uih_c.h` has the same functions for C, and for languages that call C, such as Rust, Zig or Python's `ctypes`. They are compiled into the same library, so it is still one DLL or `.so`. Draw your menu from the render callback with Dear ImGui's C bindings, such as [cimgui](https://github.com/cimgui/cimgui):
+
+```c
+#include "uih_c.h"
+
+static void render(void) { /* your menu, with cimgui */ }
+
+void start_overlay(void) {
+    uih_config config;
+    uih_config_init(&config);  // the defaults of uih::Config
+    config.render = render;
+    uih_start(&config);
+}
+```
+
+`uih_capture_frame()` hands the pixels to a callback instead of filling a `std::vector`, and `uih_create_texture()` returns the `ImTextureData*` as a `void*`. No exception leaves these functions.
+
 ## How it works
 
 In short: `Start()` hooks the present function of each graphics API (`Present`, `vkQueuePresentKHR`, `*SwapBuffers`), found through dummy objects with MinHook on Windows and by symbol interposition on Linux. In each present, the overlay runs your `render` callback and draws the ImGui data on the game's back buffer. While the menu is open, the game's input functions report nothing, and faults in the overlay are caught so they remove the overlay instead of crashing the game.
