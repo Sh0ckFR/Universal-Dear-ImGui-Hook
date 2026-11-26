@@ -99,6 +99,7 @@ void ApplySettings(uih::Config& config) {
     config.scale = 0.0f;                                     // interface size, 0 follows the DPI
     config.remoteControl = false;                            // remote control by an AI assistant
     config.remotePipe = "universal-imgui-hook";              // name of its pipe (Windows) or socket (Linux)
+    config.remoteMemory = false;                             // memory tools of the remote control
 }
 ```
 
@@ -112,6 +113,7 @@ void ApplySettings(uih::Config& config) {
 | `backend` | `uih::Backend::None` detects the API from the first one that presents a frame, which is right for nearly every game. `D3D9`, `D3D10`, `D3D11`, `D3D12`, `Vulkan` or `OpenGL` forces one, for a game that uses several. |
 | `scale` | `0` follows the DPI of the game window; `1.5` draws the interface at 150%. |
 | `remoteControl`, `remotePipe` | `true` serves the [remote control](#remote-control-by-an-ai-assistant) on the named pipe `\\.\pipe\<remotePipe>` on Windows, on the Unix socket `$XDG_RUNTIME_DIR/<remotePipe>` on Linux. |
+| `remoteMemory` | `true`, with `remoteControl`, also gives the assistant the [memory tools](#remote-control-by-an-ai-assistant): modules, read, write, value and pattern scans. |
 
 </details>
 
@@ -165,6 +167,7 @@ flowchart LR
 ```cpp
 config.remoteControl = true;
 config.remotePipe = "universal-imgui-hook";   // \\.\pipe\universal-imgui-hook, or $XDG_RUNTIME_DIR/universal-imgui-hook on Linux
+config.remoteMemory = true;                   // optional: the memory tools
 ```
 
 **2. Load it into the game**, with any injector, as `dinput8.dll`, or with the script, which needs [Python](https://www.python.org) 3.8 or newer and nothing else:
@@ -197,6 +200,7 @@ On Linux, the same with `python3 /path/to/Universal-Dear-ImGui-Hook/remote/uih_m
 - *Write "Well done!" in the game for 5 seconds.*
 - *Walk right to the edge of the platform, then jump.*
 - *Open the overlay menu and describe it.*
+- *Find my money in memory and set it to 99999.* (with `remoteMemory`)
 
 The assistant gets these tools:
 
@@ -206,6 +210,17 @@ The assistant gets these tools:
 | `show_text` | A message to the player at the top of the screen, drawn by the overlay, for 10 seconds by default |
 | `press_key` | Holds keys for a duration, 150 ms by default; `right+space` holds them together |
 | `game_info` | Graphics API, window size, keyboard focus, menu state |
+
+With `remoteMemory`, it also gets memory tools, as a memory editor such as Cheat Engine has:
+
+| Tool | Does |
+| --- | --- |
+| `memory_find`, `memory_next`, `memory_results` | Value scan of the writable memory (`i8` to `i64`, `f32`, `f64`), narrowed by a new value or by `changed`, `unchanged`, `increased`, `decreased`, with module+offset of each address |
+| `memory_read`, `memory_write` | Hexadecimal dump with the first bytes as numbers and a pointer; writes a value or bytes, code included |
+| `memory_pattern` | Byte pattern with `??` wildcards in a module, the executable by default |
+| `memory_modules` | Modules of the game with their base address and size |
+
+Addresses are hexadecimal or `module+offset`, such as `game.exe+1a2b3c`.
 
 <details>
 <summary>Good to know: security, focus, limits</summary>
@@ -217,6 +232,7 @@ The assistant gets these tools:
 - On Linux, keys go through the XTEST extension of the X server; without it, they are sent as events to the window. Native Wayland games get no keys.
 - One game per pipe or socket name: a second game started with the same name logs that the remote control is unavailable.
 - `unloadKey` stops the remote control with the overlay.
+- With `remoteMemory`, any program you run can also read and write the memory of the game through the pipe or the socket; on Linux, that goes around the ptrace restrictions of Yama for programs of your user. A value scan finds copies of the value too: change it in the game and narrow the scan until one address is left.
 - Screenshots of HDR back buffers, with more than 10 bits per channel, fail.
 
 </details>
@@ -228,12 +244,19 @@ The assistant gets these tools:
 
 | Command | Answer |
 | --- | --- |
-| `info` | `ok <API> <width>x<height> focused=0\|1 menu=0\|1` |
+| `info` | `ok <API> <width>x<height> focused=0\|1 menu=0\|1 memory=0\|1` |
 | `screenshot <max size>` | `ok <width> <height>`, then the RGB pixels, rows from the top |
 | `text <seconds> <message>` | `ok`; `\n` in the message starts a new line, `0` seconds removes it |
 | `key <keys> <milliseconds>` | `ok <how the keys were sent>` once they are released |
+| `modules` | `ok <bytes>`, then lines `<base> <size> <name>` |
+| `read <address> <size>` | `ok <size>`, then the bytes, at most 65536 |
+| `write <address> <hex bytes>` | `ok` |
+| `find <type> <value>` | `ok <matches>`, `ok <matches> kept <count>` beyond 2097152; a new scan |
+| `next <value>\|changed\|unchanged\|increased\|decreased` | `ok <matches>`, narrowing the last scan |
+| `results <count>` | `ok <bytes>`, then lines `<address> <value> <module+offset>` |
+| `pattern <bytes> [module]` | `ok <bytes>`, then lines `<address> <module+offset>`, at most 1000 |
 
-Failures answer `error <reason>`. The screenshots come from `uih::CaptureFrame()`; the keys go through `SendInput` on Windows and XTEST on Linux when the game has the focus.
+The memory commands (`src/memory.cpp`) answer only with `remoteMemory`; types are `i8`, `i16`, `i32`, `i64`, `f32` and `f64`, and floating-point values match when they round to the value given, to as many decimals as it has. Failures answer `error <reason>`. The screenshots come from `uih::CaptureFrame()`; the keys go through `SendInput` on Windows and XTEST on Linux when the game has the focus.
 
 </details>
 
@@ -266,6 +289,7 @@ Everything is in `include/uih.h`, namespace `uih`.
 | `debugLog` | `false` | `OutputDebugString` on Windows, stderr on Linux |
 | `remoteControl` | `false` | Serves the [remote control](#remote-control-by-an-ai-assistant) on a named pipe for local processes (Windows), or a Unix socket for the user's processes (Linux) |
 | `remotePipe` | `"universal-imgui-hook"` | Name of that pipe, `\\.\pipe\<remotePipe>`, or socket, `$XDG_RUNTIME_DIR/<remotePipe>` (`/tmp/<remotePipe>-<uid>` without that variable); copied by `Start()` |
+| `remoteMemory` | `false` | With `remoteControl`: the memory tools, which read, write and scan the memory of the game for the assistant |
 
 </details>
 

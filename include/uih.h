@@ -77,6 +77,11 @@ struct Config {
     // copies the name.
     bool remoteControl = false;
     const char* remotePipe = "universal-imgui-hook";
+    // With remoteControl: the assistant can also list the modules, read,
+    // write and scan the memory of the game, as a memory editor does. On
+    // Linux, that bypasses the ptrace restrictions of Yama for the user's
+    // programs.
+    bool remoteMemory = false;
     // Called every frame between ImGui::NewFrame() and ImGui::Render().
     void (*render)() = nullptr;
     // Called when the ImGui context is created, before its first frame: load

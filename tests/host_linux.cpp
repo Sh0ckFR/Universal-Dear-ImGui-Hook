@@ -1,5 +1,6 @@
 // OpenGL and Vulkan application driven with the hotkeys while the hook is preloaded.
 #include "host.h"
+#include "remote_memory.h"
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -629,6 +630,7 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
     std::string text;
     std::string screenshot;
     std::string unknownKey;
+    std::string memoryFailure;
     std::vector<uint8_t> rgb;
     WhileRendering(
         [&] {
@@ -636,7 +638,7 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
             if (!client.Open())
                 return;
             info = client.Request("info");
-            text = client.Request("text 5 hello\\nworld");
+            text = client.Request("text 60 hello\\nworld");
             screenshot = client.Request("screenshot 400");
             if (screenshot == "ok 400 300") {
                 rgb.resize(400 * 300 * 3);
@@ -644,6 +646,7 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
                     rgb.clear();
             }
             unknownKey = client.Request("key nokey 50");
+            memoryFailure = CheckRemoteMemory(client);
         },
         frame);
     for (int i = 0; i < 10; ++i)
@@ -660,6 +663,8 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
             return Fail("the screenshot does not show the frame of the game alone");
     if (text != "ok" || unknownKey.rfind("error unknown key nokey", 0) != 0)
         return Fail("the remote control does not answer its commands");
+    if (!memoryFailure.empty())
+        return Fail(memoryFailure.c_str());
     if (after < before + 1000)
         return Fail("the message of the assistant is not drawn");
 

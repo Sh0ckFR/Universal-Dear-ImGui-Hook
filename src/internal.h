@@ -195,6 +195,33 @@ int KeyCode(const std::string& name);
 std::string HoldKeys(const std::vector<int>& keys, unsigned ms);
 // Client area of the game window, and whether it has the keyboard focus.
 bool GameWindow(uint32_t& width, uint32_t& height, bool& focused);
+// True once Stop() was called, for long commands.
+bool StopRequested();
+
+// Memory commands, src/memory.cpp: false when `command` is not one of them.
+bool HandleMemory(const std::string& command, const std::string& rest, std::vector<uint8_t>& payload, std::string& answer);
+// Implemented once per platform, for the memory commands:
+struct MemoryRegion {
+    uintptr_t base;
+    size_t size;
+    bool writable;
+};
+// Readable memory of the process, without device memory.
+std::vector<MemoryRegion> MemoryRegions();
+struct LoadedModule {
+    std::string name;
+    uintptr_t base;
+    size_t size;
+    // The executable of the process.
+    bool main;
+};
+std::vector<LoadedModule> LoadedModules();
+// Copies memory of the process without faulting; false when part of it is not readable.
+bool ReadMemory(uintptr_t address, void* out, size_t size);
+// Writes memory of the process, code included.
+bool WriteMemory(uintptr_t address, const void* data, size_t size);
+// Memory of its own, zeroed, in a mapping apart from the heap; never released.
+void* AllocateScanMemory(size_t size);
 } // namespace remote
 
 // Runs work of the overlay on a thread of the application. On Windows with
