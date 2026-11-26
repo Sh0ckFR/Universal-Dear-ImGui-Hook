@@ -506,10 +506,20 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
+  # Links, anchors, tables and code spans of the Markdown files.
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the Markdown files
+        run: python3 tests/check_docs.py
+
   release:
     name: Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [msvc, windows-tests, solution, mingw, linux, linux-sanitizers, linux-portable, games-linux, games-windows, consumer]
+    needs: [msvc, windows-tests, solution, mingw, linux, linux-sanitizers, linux-portable, games-linux, games-windows, consumer, docs]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -533,7 +543,26 @@ jobs:
       - uses: actions/attest-build-provenance@v2
         with:
           subject-checksums: release/SHA256SUMS
+      # The message of an annotated tag, without its first line when that line
+      # is only the tag name, becomes the highlights above the list of pull requests.
+      - name: Highlights from the tag message
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          : > highlights.md
+          ref=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME")
+          if [ "$(jq -r .object.type <<< "$ref")" = tag ]; then
+            gh api "repos/$GITHUB_REPOSITORY/git/tags/$(jq -r .object.sha <<< "$ref")" --jq .message \
+              | sed '/^-----BEGIN [A-Z ]*SIGNATURE-----/,$d' \
+              | awk -v tag="$GITHUB_REF_NAME" 'NR == 1 && $0 == tag { next } { print }' \
+              | sed '/./,$!d' > message.md
+            if [ -s message.md ] && grep -q '[^[:space:]]' message.md; then
+              { echo '## Highlights'; echo; cat message.md; echo; } > highlights.md
+            fi
+          fi
+          cat highlights.md
       - uses: softprops/action-gh-release@v2
         with:
           files: release/*
+          body_path: highlights.md
           generate_release_notes: true

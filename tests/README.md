@@ -104,5 +104,10 @@ The [CI](../.github/workflows/build.yml) runs on every pull request, on `master`
 | DDNet, Godot on Linux | The released library preloaded into [DDNet](https://ddnet.org/) and an empty [Godot](https://godotengine.org/) project (`tests/godot`), with OpenGL and Vulkan; then the same games played through the MCP server (`tests/game_mcp.py`) |
 | DDNet, Godot on Windows | The DLL injected into the same games once they render, without a GPU: DDNet with OpenGL and Vulkan, Godot with Direct3D 12, Vulkan and Direct3D 11 (its OpenGL renderer through ANGLE) |
 | FetchContent consumer | The repository as a CMake dependency |
+| Docs | `tests/check_docs.py` on every Markdown file: relative links and anchors, tables, control characters, code spans |
 
-Pushing a `v*` tag publishes the MSVC and Linux portable libraries as a release once every job above has passed, with their SHA256 in `SHA256SUMS` and a build provenance attestation.
+Pushing a `v*` tag publishes the MSVC and Linux portable libraries as a release once every job above has passed, with their SHA256 in `SHA256SUMS` and a build provenance attestation. The message of an annotated tag becomes the highlights of the release notes: see [CONTRIBUTING.md](../CONTRIBUTING.md#releases).
+
+## Documentation
+
+`python tests/check_docs.py` checks the Markdown files as the CI does, without fetching external links: relative links to missing files or anchors, table rows cut off from their table or with the wrong number of cells, tabs and other control characters, unclosed code spans and unbalanced `<details>` blocks.
