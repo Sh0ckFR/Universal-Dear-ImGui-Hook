@@ -28,7 +28,12 @@ struct Tool {
 };
 
 std::mutex g_toolsMutex;
-std::vector<Tool> g_tools;
+// Constructed on first use: a preloaded library registers its tools from its
+// constructor, which may run before the variables of this file are initialized.
+std::vector<Tool>& Tools() {
+    static std::vector<Tool> tools;
+    return tools;
+}
 
 // The call waiting for the frame of the overlay. The server thread answers
 // one request at a time, so there is at most one.
@@ -244,7 +249,7 @@ std::string Payload(const std::string& text, std::vector<uint8_t>& payload) {
 std::string ListTools(std::vector<uint8_t>& payload) {
     std::string json = "[";
     std::lock_guard<std::mutex> lock(g_toolsMutex);
-    for (const Tool& tool : g_tools) {
+    for (const Tool& tool : Tools()) {
         if (json.size() > 1)
             json += ",";
         json += "{\"name\":" + JsonString(tool.name) + ",\"description\":" + JsonString(tool.description) + ",\"inputSchema\":" + tool.parameters + "}";
@@ -261,7 +266,7 @@ std::string CallTool(const std::string& rest, std::vector<uint8_t>& payload) {
     ToolCall call;
     {
         std::lock_guard<std::mutex> lock(g_toolsMutex);
-        for (const Tool& tool : g_tools) {
+        for (const Tool& tool : Tools()) {
             if (tool.name == name)
                 call = tool.call;
         }
@@ -350,13 +355,13 @@ bool RegisterTool(const char* name, const char* description, const char* paramet
         return false;
     detail::Tool tool{name, description ? description : "", schema, std::move(call)};
     std::lock_guard<std::mutex> lock(detail::g_toolsMutex);
-    for (detail::Tool& existing : detail::g_tools) {
+    for (detail::Tool& existing : detail::Tools()) {
         if (existing.name == tool.name) {
             existing = std::move(tool);
             return true;
         }
     }
-    detail::g_tools.push_back(std::move(tool));
+    detail::Tools().push_back(std::move(tool));
     return true;
 }
 
@@ -364,9 +369,9 @@ void UnregisterTool(const char* name) {
     if (!name)
         return;
     std::lock_guard<std::mutex> lock(detail::g_toolsMutex);
-    for (auto it = detail::g_tools.begin(); it != detail::g_tools.end(); ++it) {
+    for (auto it = detail::Tools().begin(); it != detail::Tools().end(); ++it) {
         if (it->name == name) {
-            detail::g_tools.erase(it);
+            detail::Tools().erase(it);
             return;
         }
     }
