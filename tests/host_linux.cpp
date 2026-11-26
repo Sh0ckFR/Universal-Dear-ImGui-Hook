@@ -1,6 +1,7 @@
 // OpenGL and Vulkan application driven with the hotkeys while the hook is preloaded.
 #include "host.h"
 #include "remote_memory.h"
+#include "remote_advanced.h"
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -89,7 +90,7 @@ struct OpenGLHost : Host {
     }
 
     static void Clear() {
-        glClearColor(kClear[0], kClear[1], kClear[2], kClear[3]);
+        glClearColor(ClearColor()[0], ClearColor()[1], ClearColor()[2], ClearColor()[3]);
         glClear(GL_COLOR_BUFFER_BIT);
     }
 
@@ -613,13 +614,36 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
     constexpr int kClick[2] = {120, 90};
     int clickPresses = 0;
     int clickReleases = 0;
-    XSelectInput(display, window, StructureNotifyMask | KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask);
+    // Typed by the advanced commands, moves to kMove, and a drag with the
+    // first button from kDragFrom to kDragTo.
+    constexpr int kMove[2] = {150, 160};
+    constexpr int kDragFrom[2] = {200, 200};
+    constexpr int kDragTo[2] = {300, 250};
+    std::string typed;
+    int moves = 0;
+    int dragPresses = 0;
+    int dragMoves = 0;
+    int dragReleases = 0;
+    XSelectInput(display, window, StructureNotifyMask | KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask);
     auto frame = [&] {
         while (XPending(display)) {
             XEvent event;
             XNextEvent(display, &event);
             if ((event.type == KeyPress || event.type == KeyRelease) && XLookupKeysym(&event.xkey, 0) == XK_u)
                 ++(event.type == KeyPress ? presses : releases);
+            if (event.type == KeyPress) {
+                char text[8] = {};
+                if (XLookupString(&event.xkey, text, sizeof(text) - 1, nullptr, nullptr) > 0)
+                    typed += text;
+            }
+            if (event.type == MotionNotify && (event.xmotion.state & Button1Mask))
+                ++dragMoves;
+            else if (event.type == MotionNotify && event.xmotion.x == kMove[0] && event.xmotion.y == kMove[1])
+                ++moves;
+            if (event.type == ButtonPress && event.xbutton.button == Button1 && event.xbutton.x == kDragFrom[0] && event.xbutton.y == kDragFrom[1])
+                ++dragPresses;
+            if (event.type == ButtonRelease && event.xbutton.button == Button1 && event.xbutton.x == kDragTo[0] && event.xbutton.y == kDragTo[1])
+                ++dragReleases;
             if ((event.type == ButtonPress || event.type == ButtonRelease) && event.xbutton.button == Button3 && event.xbutton.x == kClick[0] &&
                 event.xbutton.y == kClick[1])
                 ++(event.type == ButtonPress ? clickPresses : clickReleases);
@@ -638,6 +662,7 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
     std::string screenshot;
     std::string unknownKey;
     std::string memoryFailure;
+    std::string advancedFailure;
     std::vector<uint8_t> rgb;
     WhileRendering(
         [&] {
@@ -654,6 +679,7 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
             }
             unknownKey = client.Request("key nokey 50");
             memoryFailure = CheckRemoteMemory(client);
+            advancedFailure = CheckRemoteAdvanced(client);
         },
         frame);
     for (int i = 0; i < 10; ++i)
@@ -672,6 +698,8 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
         return Fail("the remote control does not answer its commands");
     if (!memoryFailure.empty())
         return Fail(memoryFailure.c_str());
+    if (!advancedFailure.empty())
+        return Fail(advancedFailure.c_str());
     if (after < before + 1000)
         return Fail("the message of the assistant is not drawn");
 
@@ -744,6 +772,33 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
     XSync(display, False);
     for (int i = 0; i < 10; ++i)
         frame();
+
+    // Typing with Shift, a move and a drag through XTEST, the window focused.
+    typed.clear();
+    std::string typeAnswer;
+    std::string moveAnswer;
+    std::string dragAnswer;
+    WhileRendering(
+        [&] {
+            RemoteClient client;
+            if (client.Open()) {
+                typeAnswer = client.Request("type Hi!");
+                moveAnswer = client.Request("move " + std::to_string(kMove[0]) + " " + std::to_string(kMove[1]));
+                dragAnswer = client.Request("drag " + std::to_string(kDragFrom[0]) + " " + std::to_string(kDragFrom[1]) + " " + std::to_string(kDragTo[0]) + " " +
+                                            std::to_string(kDragTo[1]) + " left 200");
+            }
+        },
+        frame);
+    for (int i = 0; i < 20; ++i)
+        frame();
+    printf("type: %s, the window got \"%s\"\nmove: %s, %d moves\ndrag: %s, %d presses, %d moves, %d releases\n", typeAnswer.c_str(), typed.c_str(),
+           moveAnswer.c_str(), moves, dragAnswer.c_str(), dragPresses, dragMoves, dragReleases);
+    if (typeAnswer.rfind("ok typed 3 characters as keyboard input", 0) != 0 || typed != "Hi!")
+        return Fail("the text typed by the remote control did not reach the window");
+    if (moveAnswer.rfind("ok moved the pointer", 0) != 0 || moves == 0)
+        return Fail("the pointer moved by the remote control did not reach the window");
+    if (dragAnswer.rfind("ok sent as mouse input", 0) != 0 || dragPresses == 0 || dragMoves < 3 || dragReleases == 0)
+        return Fail("the drag of the remote control did not reach the window");
 
     // Right clicks through the remote control: the answer, and whether the
     // window received the press and the release at kClick.

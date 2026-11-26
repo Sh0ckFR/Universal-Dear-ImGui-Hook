@@ -1,6 +1,6 @@
 // The hook with the remote control on, preloaded by the remote scenario of
-// host_linux.cpp, with the memory commands: served on the socket
-// uih-host-<pid of the host>.
+// host_linux.cpp, with the memory commands and the advanced features: served
+// on the socket uih-host-<pid of the host>.
 #include <unistd.h>
 
 #include <string>
@@ -12,6 +12,7 @@ __attribute__((constructor)) static void Load() {
     uih::Config config;
     config.remoteControl = true;
     config.remoteMemory = true;
+    config.aiAdvancedFeatures = true;
     config.remotePipe = socket.c_str();
     config.debugLog = true;
     uih::Start(config);

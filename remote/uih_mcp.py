@@ -163,6 +163,126 @@ TOOLS += [
     },
 ]
 
+ADVANCED_NOTE = " Needs config.aiAdvancedFeatures = true in example/config.cpp."
+POINT = {"type": "integer", "minimum": 0}
+
+TOOLS += [
+    {
+        "name": "type_text",
+        "description": "Types text in the game, as a keyboard would, for chat boxes, names and text fields: any Unicode character; "
+        "a new line presses Enter and a tab presses Tab. Games that read the keys directly rather than text see only Enter and Tab: "
+        "use press_key for them." + ADVANCED_NOTE,
+        "inputSchema": {"type": "object", "properties": {"text": {"type": "string", "description": "Up to 2000 characters."}}, "required": ["text"]},
+    },
+    {
+        "name": "mouse_move",
+        "description": "Moves the mouse cursor to a point of the last screenshot, in its pixels, without clicking: to hover a "
+        "button, show a tooltip, or aim." + ADVANCED_NOTE,
+        "inputSchema": {"type": "object", "properties": {"x": POINT, "y": POINT}, "required": ["x", "y"]},
+    },
+    {
+        "name": "drag",
+        "description": "Presses a mouse button at a point of the last screenshot, moves to another point while holding it, and "
+        "releases it there: drag and drop items, sliders, selection boxes, camera rotation." + ADVANCED_NOTE,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "x": POINT,
+                "y": POINT,
+                "to_x": POINT,
+                "to_y": POINT,
+                "button": {"type": "string", "enum": ["left", "right", "middle"], "description": "left by default."},
+                "duration_ms": {"type": "integer", "description": "Duration of the move, 300 by default.", "minimum": 50, "maximum": 10000},
+            },
+            "required": ["x", "y", "to_x", "to_y"],
+        },
+    },
+    {
+        "name": "wait_for_change",
+        "description": "Waits until the game screen changes, such as after a loading screen, an animation or the answer of a menu, "
+        "instead of taking screenshots in a loop. Compares each frame with the one at the start of the call." + ADVANCED_NOTE,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "timeout_ms": {"type": "integer", "description": "5000 by default.", "minimum": 100, "maximum": 30000},
+                "threshold_percent": {"type": "number", "description": "Share of the pixels that must change, 1 by default; raise it "
+                                      "for games with an animated background.", "minimum": 0.01, "maximum": 100},
+                "screenshot": {"type": "boolean", "description": "Also returns a screenshot once the wait ends, false by default."},
+            },
+        },
+    },
+    {
+        "name": "memory_pointer",
+        "description": "Follows a pointer chain and shows each pointer read and the address it ends at. Brackets read the pointer "
+        "stored at an address: [[game.exe+1a2b]+10]+8. Every memory tool takes these addresses too." + MEMORY_NOTE + ADVANCED_NOTE,
+        "inputSchema": {"type": "object", "properties": {"address": ADDRESS}, "required": ["address"]},
+    },
+    {
+        "name": "memory_pointer_scan",
+        "description": "Finds the pointers to an address found with memory_find, those stored in a module first: [game.exe+offset]+delta "
+        "finds the value again after the game restarts or reloads, where its own address changes. For a deeper chain, scan "
+        "again for the pointers to a pointer that is not in a module." + MEMORY_NOTE + ADVANCED_NOTE,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "address": ADDRESS,
+                "max_offset": {"type": "string", "description": "How far before the address the pointers may point, as the start of "
+                               "the object holding the value, in hexadecimal: 1000 by default."},
+                "count": {"type": "integer", "description": "30 by default.", "minimum": 1, "maximum": 1000},
+            },
+            "required": ["address"],
+        },
+    },
+    {
+        "name": "memory_watch",
+        "description": "Watch list of values, shown live to the player in the AI Advanced Features window of the overlay: add a value "
+        "with a type and a label, list the values with their current value, remove one, or clear the list. Freeze them with "
+        "memory_freeze." + MEMORY_NOTE + ADVANCED_NOTE,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["add", "list", "remove", "clear"]},
+                "address": ADDRESS,
+                "type": {"type": "string", "enum": list(MEMORY_TYPES), "description": "For add, i32 by default."},
+                "label": {"type": "string", "description": "For add, such as health."},
+                "id": {"type": "integer", "description": "For remove: the id given by add or list."},
+            },
+            "required": ["action"],
+        },
+    },
+    {
+        "name": "memory_freeze",
+        "description": "Keeps a value of the watch list at a value, written again every frame, as infinite health or money; or "
+        "unfreezes it." + MEMORY_NOTE + ADVANCED_NOTE,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer", "description": "Id of the value in memory_watch."},
+                "value": {"type": "string", "description": "The value to keep; its current value by default."},
+                "enabled": {"type": "boolean", "description": "false unfreezes it; true by default."},
+            },
+            "required": ["id"],
+        },
+    },
+    {
+        "name": "memory_what_writes",
+        "description": "Finds the instructions of the game that write a value, as the data breakpoint of a debugger does: start on "
+        "an address, make the value change in the game, then get the results: each instruction with its hits and the bytes "
+        "before the address given, where the instruction ends. Patch it with memory_write to stop the change. On Linux, needs kernel.perf_event_paranoid at 2 or lower." +
+        MEMORY_NOTE + ADVANCED_NOTE,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["start", "results", "stop"]},
+                "address": ADDRESS,
+                "size": {"type": "integer", "enum": [1, 2, 4, 8], "description": "Bytes watched, 4 by default; the address must be a multiple of it."},
+                "access": {"type": "boolean", "description": "Also the instructions that read the value; false by default."},
+            },
+            "required": ["action"],
+        },
+    },
+]
+
 # The font of the overlay covers Latin-1: typographic signs outside it become their ASCII forms.
 TYPOGRAPHY = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"', "\u2013": "-", "\u2014": "-", "\u2026": "...", "\u00a0": " ", "\u202f": " "})
 
@@ -250,8 +370,9 @@ def call_tool(name, args):
         text, _ = request("info")
         backend, size, focused, menu = text.split()[1:5]
         memory = "memory=1" in text.split()
+        advanced = "advanced=1" in text.split()
         return [{"type": "text", "text": f"Graphics API: {backend}, window {size}, keyboard focus: {focused[8:] == '1'}, overlay menu open: "
-                 f"{menu[5:] == '1'}, memory tools: {'on' if memory else 'off'}"}]
+                 f"{menu[5:] == '1'}, memory tools: {'on' if memory else 'off'}, advanced tools: {'on' if advanced else 'off'}"}]
     if name == "screenshot":
         size = int(args.get("max_size", 1280))
         text, rgb = request(f"screenshot {size}", payload=lambda answer: int(answer.split()[1]) * int(answer.split()[2]) * 3)
@@ -272,15 +393,38 @@ def call_tool(name, args):
         text, _ = request(f"key {key} {int(args.get('duration_ms', 150))}")
         return [{"type": "text", "text": f"Pressed {key}: {text[3:]}."}]
     if name == "click":
-        x, y = int(args.get("x", 0)), int(args.get("y", 0))
+        (x, y), = window_points([(args.get("x", 0), args.get("y", 0))])
         button = str(args.get("button", "left"))
-        if last_screenshot:
-            info, _ = request("info")
-            window_width, window_height = (int(value) for value in info.split()[2].split("x"))
-            x = min(window_width - 1, x * window_width // last_screenshot[0])
-            y = min(window_height - 1, y * window_height // last_screenshot[1])
         text, _ = request(f"click {x} {y} {button} {int(args.get('duration_ms', 100))}")
         return [{"type": "text", "text": f"Clicked {button} at {x},{y} in the window: {text[3:]}."}]
+    if name == "type_text":
+        text = str(args.get("text", ""))
+        if not text:
+            raise GameError("Give the text to type.")
+        escaped = text.replace("\\", "\\\\").replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\\n").replace("\t", "\\t")
+        answer, _ = request(f"type {escaped}")
+        return [{"type": "text", "text": answer[3:4].upper() + answer[4:] + "."}]
+    if name == "mouse_move":
+        (x, y), = window_points([(args.get("x", 0), args.get("y", 0))])
+        answer, _ = request(f"move {x} {y}")
+        return [{"type": "text", "text": f"Moved to {x},{y} in the window: {answer[3:]}."}]
+    if name == "drag":
+        (x, y), (to_x, to_y) = window_points([(args.get("x", 0), args.get("y", 0)), (args.get("to_x", 0), args.get("to_y", 0))])
+        button = str(args.get("button", "left"))
+        answer, _ = request(f"drag {x} {y} {to_x} {to_y} {button} {int(args.get('duration_ms', 300))}")
+        return [{"type": "text", "text": f"Dragged {button} from {x},{y} to {to_x},{to_y} in the window: {answer[3:]}."}]
+    if name == "wait_for_change":
+        timeout = int(args.get("timeout_ms", 5000))
+        answer, _ = request(f"wait {timeout} {float(args.get('threshold_percent', 1))}")
+        words = answer.split()
+        if words[1] == "changed":
+            message = f"The screen changed after {words[2]} ms ({words[3]}% of the pixels)."
+        else:
+            message = f"No change within {words[2]} ms: at most {words[3]}% of the pixels changed."
+        content = [{"type": "text", "text": message}]
+        if args.get("screenshot"):
+            content += call_tool("screenshot", {})
+        return content
     if name.startswith("memory_"):
         return [{"type": "text", "text": memory_tool(name, args)}]
     raise GameError(f"Unknown tool {name}.")
@@ -290,7 +434,78 @@ def text_payload(answer):
     return int(answer.split()[1])
 
 
+def window_points(points):
+    """Points of the last screenshot, in pixels of the game window."""
+    points = [(int(x), int(y)) for x, y in points]
+    if not last_screenshot:
+        return points
+    info, _ = request("info")
+    width, height = (int(value) for value in info.split()[2].split("x"))
+    return [(min(width - 1, x * width // last_screenshot[0]), min(height - 1, y * height // last_screenshot[1])) for x, y in points]
+
+
+def advanced_memory_tool(name, args):
+    if name == "memory_pointer":
+        _, data = request(f"pointer {str(args.get('address', '')).strip()}", payload=text_payload)
+        return data.decode("utf-8", "replace").strip()
+    if name == "memory_pointer_scan":
+        address = str(args.get("address", "")).strip()
+        max_offset = str(args.get("max_offset", "1000")).strip().lower()
+        max_offset = max_offset[2:] if max_offset.startswith("0x") else max_offset
+        _, data = request(f"pointers {address} {max_offset or '1000'}", payload=text_payload)
+        lines = []
+        for row in data.decode("utf-8", "replace").splitlines()[:max(1, min(int(args.get("count", 30)), 1000))]:
+            location, where, delta = row.split()
+            delta = "" if delta == "+0x0" else delta
+            lines.append(f"[{where}]{delta}  (stored at {location}, in a module: kept after a restart)" if where != "-" else
+                         f"[{location}]{delta}  (stored on the heap or a stack: moves after a restart)")
+        return "\n".join(lines) if lines else "No pointer to this address."
+    if name == "memory_watch":
+        action = str(args.get("action", ""))
+        if action == "add":
+            label = " ".join(str(args.get("label", "")).split())
+            answer, _ = request(f"watch add {args.get('type', 'i32')} {str(args.get('address', '')).strip()} {label}".rstrip())
+            return f"Added as value {answer.split()[1]}; the player sees it in the AI Advanced Features window."
+        if action == "remove":
+            request(f"watch remove {int(args.get('id', 0))}")
+            return "Removed."
+        if action == "clear":
+            request("watch clear")
+            return "The watch list is empty."
+        _, data = request("watch list", payload=text_payload)
+        lines = []
+        for row in data.decode("utf-8", "replace").splitlines():
+            parts = row.split(" ", 6)
+            label = f" {parts[6]}" if len(parts) > 6 else ""
+            lines.append(f"{parts[0]}:{label} {parts[1]} at {parts[2]} ({parts[3]}) = {parts[4]}" + (" (frozen)" if parts[5] == "frozen=1" else ""))
+        return "\n".join(lines) if lines else "The watch list is empty."
+    if name == "memory_freeze":
+        value_id = int(args.get("id", 0))
+        if args.get("enabled", True) is False:
+            request(f"unfreeze {value_id}")
+            return f"Value {value_id} is no longer frozen."
+        value = str(args.get("value", "")).strip()
+        request(f"freeze {value_id} {value}".rstrip())
+        return f"Value {value_id} is frozen" + (f" at {value}." if value else " at its current value.")
+    action = str(args.get("action", ""))
+    if action == "start":
+        address = str(args.get("address", "")).strip()
+        request(f"writes start {address} {int(args.get('size', 4))} {'access' if args.get('access') else 'write'}")
+        return f"Watching {address}. Make the value change in the game, then call memory_what_writes with action results."
+    if action == "stop":
+        request("writes stop")
+        return "Stopped watching."
+    _, data = request("writes results", payload=text_payload)
+    lines = []
+    for row in data.decode("utf-8", "replace").splitlines():
+        parts = row.split(" ", 3)
+        lines.append(f"Instruction ending before {parts[1]} ({parts[0]}): {parts[2]} hits. Bytes before: {parts[3] if len(parts) > 3 else '?'}")
+    return "\n".join(lines) if lines else "No instruction hit yet: make the value change in the game."
+
+
 def memory_tool(name, args):
+    if name in ("memory_pointer", "memory_pointer_scan", "memory_watch", "memory_freeze", "memory_what_writes"):
+        return advanced_memory_tool(name, args)
     if name == "memory_modules":
         _, data = request("modules", payload=text_payload)
         return data.decode("utf-8", "replace") or "No module."

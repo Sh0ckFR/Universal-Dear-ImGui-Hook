@@ -102,13 +102,21 @@ def play(game, assistant, backend, screenshot):
         raise Failure(f"unexpected server {info['serverInfo']}")
     assistant.send({"jsonrpc": "2.0", "method": "notifications/initialized"})
     tools = sorted(tool["name"] for tool in assistant.request("tools/list", {})["tools"])
-    memory = ["memory_find", "memory_modules", "memory_next", "memory_pattern", "memory_read", "memory_results", "memory_write"]
-    if tools != ["click", "game_info"] + memory + ["press_key", "screenshot", "show_text"]:
+    expected = sorted(["click", "drag", "game_info", "memory_find", "memory_freeze", "memory_modules", "memory_next", "memory_pattern",
+                       "memory_pointer", "memory_pointer_scan", "memory_read", "memory_results", "memory_watch", "memory_what_writes",
+                       "memory_write", "mouse_move", "press_key", "screenshot", "show_text", "type_text", "wait_for_change"])
+    if tools != expected:
         raise Failure(f"unexpected tools {tools}")
 
     _, text = assistant.call("game_info")
     if not text.startswith(f"Graphics API: {backend}, window ") or "keyboard focus: True" not in text or "menu open: False" not in text:
         raise Failure("the game is not described as it runs, with the pointer over its window")
+    if "advanced tools: on" not in text:
+        raise Failure("the advanced tools of tests/remote_preload.cpp are described as off")
+    # Games animate their menus: either answer is right, as long as the wait ends.
+    _, text = assistant.call("wait_for_change", {"timeout_ms": 1000})
+    if not text.startswith(("The screen changed after ", "No change within ")):
+        raise Failure(f"wait_for_change answered {text}")
 
     content, text = assistant.call("screenshot", {"max_size": 640})
     image = base64.b64decode(next(item["data"] for item in content if item["type"] == "image"))

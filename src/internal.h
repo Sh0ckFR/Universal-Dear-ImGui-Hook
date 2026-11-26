@@ -186,6 +186,8 @@ std::string Handle(const std::string& line, std::vector<uint8_t>& payload);
 // The last message of the assistant, drawn in the frame of the overlay.
 void Draw();
 void ClearText();
+// The message of the assistant at the top of the screen, for `seconds`.
+void ShowMessage(const std::string& text, double seconds);
 
 // Implemented once per platform, in remote.cpp:
 // serves the pipe or socket named `name` on a thread of its own.
@@ -203,6 +205,13 @@ std::string ClickAt(int x, int y, int button, unsigned ms);
 bool GameWindow(uint32_t& width, uint32_t& height, bool& focused);
 // True once Stop() was called, for long commands.
 bool StopRequested();
+// Config::aiAdvancedFeatures: types `text`, code points with '\n' for Enter
+// and '\t' for Tab, and answers the request.
+std::string TypeText(const std::vector<uint32_t>& text);
+// Moves the pointer to x, y in the client area of the game window.
+std::string MoveTo(int x, int y);
+// Presses `button` at x0, y0, moves to x1, y1 over `ms` milliseconds, and releases it there.
+std::string DragTo(int x0, int y0, int x1, int y1, int button, unsigned ms);
 
 // Memory commands, src/memory.cpp: false when `command` is not one of them.
 bool HandleMemory(const std::string& command, const std::string& rest, std::vector<uint8_t>& payload, std::string& answer);
@@ -228,6 +237,63 @@ bool ReadMemory(uintptr_t address, void* out, size_t size);
 bool WriteMemory(uintptr_t address, const void* data, size_t size);
 // Memory of its own, zeroed, in a mapping apart from the heap; never released.
 void* AllocateScanMemory(size_t size);
+
+// Shared by the memory commands and the advanced features, src/memory.cpp:
+enum class ValueType { I8, I16, I32, I64, F32, F64 };
+bool ParseValueType(std::string name, ValueType& type);
+const char* ValueTypeName(ValueType type);
+size_t ValueSize(ValueType type);
+std::string FormatValue(const uint8_t* bytes, ValueType type);
+// The little-endian bytes of `text` read as a number of `type`; false when it is not one.
+bool EncodeValue(const std::string& text, ValueType type, uint8_t* bytes);
+// The modules sorted by address, for LocateAddress().
+std::vector<LoadedModule> SortedModules();
+// module+offset of `address`, or "-" outside the modules.
+std::string LocateAddress(uintptr_t address, const std::vector<LoadedModule>& sortedModules);
+// An address: hexadecimal, module+offset, module-offset, and [expression] for
+// the pointer stored there, such as [[game.exe+1a2b]+10]+8. `steps` gets one
+// line per pointer read. False with the reason in `error`.
+bool ResolveAddress(const std::string& text, const std::vector<LoadedModule>& modules, uintptr_t& address, std::string* error = nullptr,
+                    std::vector<std::string>* steps = nullptr);
+struct PointerHit {
+    // Where the pointer is stored, and how far before the target it points.
+    uintptr_t location;
+    uintptr_t delta;
+    // Stored in a module: found again at the same module+offset after a restart.
+    bool inModule;
+};
+// Writable memory holding a pointer to `target`, or to up to `maxOffset`
+// bytes before it, those in a module first; at most `limit`. False when
+// `cancelled` returned true.
+bool ScanPointers(uintptr_t target, size_t maxOffset, size_t limit, bool (*cancelled)(), std::vector<PointerHit>& hits);
+
+// Advanced features, Config::aiAdvancedFeatures, src/advanced.cpp:
+// switches of the "AI Advanced Features" window, on until the player turns them off.
+bool InputAllowed();
+bool MemoryAllowed();
+// Shows a command of the assistant and its answer in the window.
+void RecordActivity(const std::string& line, const std::string& answer);
+// The watch list and the instruction watch: false when `command` is not one of their commands.
+bool HandleAdvanced(const std::string& command, const std::string& rest, std::vector<uint8_t>& payload, std::string& answer);
+// Every frame of the overlay: writes the frozen values, watches new threads.
+void Tick();
+// Once the overlay is gone: ends the instruction watch and the scan of the window.
+void StopAdvanced();
+// Implemented once per platform: the instructions that write `size` bytes at
+// `address`, or that access them. Replaces the previous watch; empty when it
+// started, the reason otherwise.
+std::string WatchInstructions(uintptr_t address, unsigned size, bool access);
+void UnwatchInstructions();
+// Also removes what WatchInstructions() installed, before the library leaves the process.
+void ShutdownInstructionWatch();
+struct InstructionHit {
+    // The instruction after the one that hit, where the processor stops.
+    uintptr_t next;
+    uint64_t count;
+};
+std::vector<InstructionHit> InstructionHits();
+// Watches the threads started since; called every frame.
+void RefreshInstructionWatch();
 } // namespace remote
 
 // Runs work of the overlay on a thread of the application. On Windows with
