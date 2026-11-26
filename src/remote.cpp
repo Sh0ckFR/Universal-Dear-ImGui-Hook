@@ -14,7 +14,8 @@
 //   move <x> <y>               -> ok <how the pointer was moved>
 //   drag <x0> <y0> <x1> <y1> [left|right|middle] [milliseconds]  -> ok <how the drag was sent>
 //   wait <milliseconds> [percent]  -> ok changed|unchanged <milliseconds> <percent of the pixels that changed>
-// and the memory commands of src/memory.cpp and src/advanced.cpp.
+// and the memory commands of src/memory.cpp and src/advanced.cpp, and the
+// tools of the game, src/tools.cpp.
 // Failures answer: error <reason>
 #include "internal.h"
 
@@ -348,7 +349,7 @@ std::string Answer(const std::string& command, const std::string& rest, std::vec
     if (command == "wait")
         return Wait(rest);
     std::string answer;
-    if (HandleMemory(command, rest, payload, answer) || HandleAdvanced(command, rest, payload, answer))
+    if (HandleTools(command, rest, payload, answer) || HandleMemory(command, rest, payload, answer) || HandleAdvanced(command, rest, payload, answer))
         return answer;
     return "error unknown command";
 }

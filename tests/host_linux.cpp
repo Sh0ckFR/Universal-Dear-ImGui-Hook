@@ -2,6 +2,7 @@
 #include "host.h"
 #include "remote_memory.h"
 #include "remote_advanced.h"
+#include "remote_tools.h"
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -663,6 +664,7 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
     std::string unknownKey;
     std::string memoryFailure;
     std::string advancedFailure;
+    std::string toolsFailure;
     std::vector<uint8_t> rgb;
     WhileRendering(
         [&] {
@@ -680,6 +682,7 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
             unknownKey = client.Request("key nokey 50");
             memoryFailure = CheckRemoteMemory(client);
             advancedFailure = CheckRemoteAdvanced(client);
+            toolsFailure = CheckRemoteTools(client);
         },
         frame);
     for (int i = 0; i < 10; ++i)
@@ -698,6 +701,8 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
         return Fail("the remote control does not answer its commands");
     if (!memoryFailure.empty())
         return Fail(memoryFailure.c_str());
+    if (!toolsFailure.empty())
+        return Fail(toolsFailure.c_str());
     if (!advancedFailure.empty())
         return Fail(advancedFailure.c_str());
     if (after < before + 1000)

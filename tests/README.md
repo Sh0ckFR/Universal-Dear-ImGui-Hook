@@ -29,7 +29,7 @@ One option per scenario:
 | `--api d3d9\|d3d9ex\|d3d10\|d3d11\|d3d12\|vulkan\|opengl` | Hook started in-process, overlay drawn once per frame, then `Stop()` |
 | `--inject-at 0`, `--settle <ms>` | Hook started before the API; delay before the swap chain is created |
 | `--capture` | Checks the overlay and an exact color on screen |
-| `--format srgb\|float` | Back buffer storing linear values |
+| `--format srgb\|float\|hdr10` | Back buffer storing linear values, or HDR10 (D3D12): a 10-bit swap chain set to the PQ color space, whose probe color must come out unchanged through Windows' conversion |
 | `--decoy-queue` | A second D3D12 device executes work every frame |
 | `--remove-device` | The D3D12 device is removed: the overlay must not hold up its frames, and must show on the new device the host creates |
 | `--transfer-only` | The Vulkan swap chain images are created for transfers only, without `COLOR_ATTACHMENT` usage: the overlay must still show |
@@ -46,7 +46,7 @@ One option per scenario:
 | `--gpu-latency ms` | The D3D12 GPU runs each frame `ms` after it was submitted, as a busy GPU does: the overlay's frames are still in flight when it moves to another swap chain |
 | `--textures <n>` | `n` images created with `uih::CreateTexture()`, 300 in the tests, more than `kMaxTextures`: every image it accepts must be drawn |
 | `--capture-frame` | Another thread copies a frame with `uih::CaptureFrame()` while the menu is open: the copy must have the size of the back buffer and show the game where the menu covers it |
-| `--remote` | Drives the remote control as `remote/uih_mcp.py` does: game description, screenshot without the overlay, message drawn, a click on the menu's button, keys and a right click received by the window, also while another host window has the focus; then `uih::Stop()` must end it while a client stays connected |
+| `--remote` | Drives the remote control as `remote/uih_mcp.py` does: game description, screenshot without the overlay, message drawn, a click on the menu's button, keys and a right click received by the window, also while another host window has the focus; the tools of `tests/remote_tools.h`, registered with `uih::RegisterTool()`, listed as JSON and run in a frame of the overlay with their arguments, an exception answering as an error; then `uih::Stop()` must end it while a client stays connected |
 | `--remote-memory` | `--remote` with `remoteMemory` on: value scans of an integer and a float narrowed by change, a write through `module+offset` read back, the module list and a pattern scan must find the host's values and bytes. `--remote` alone checks that the memory commands are refused |
 | `--remote-advanced` | `--remote-memory` with `aiAdvancedFeatures` on: `wait` on a still screen and on a changing one, a pointer chain from the executable and a read through it, a pointer scan that finds that pointer at module+offset, a value frozen then unfrozen, the instruction watch counting 5 writes of the host and refusing a misaligned address (on Linux, a refusal by the kernel passes only while `kernel.perf_event_paranoid` is above 2 or in a container), the chat commands, the window drawn, and typing, a move and a drag received by the window. Without it, the advanced commands must be refused |
 | `--fault access\|exception\|draw` | The render callback writes to a null pointer or throws, or a draw callback writes to a null pointer while the backend draws: the overlay must be removed while the host keeps rendering and can resize its back buffers, then start again (MSVC) |
@@ -72,7 +72,7 @@ On Linux, `uih_host` does not link the hook: each test preloads the `.so`, opens
 - `--resize`, `--reload`, `--second-window`, `--recreate-context` and `--bound-framebuffer` variants;
 - overlay faults (`--fault`), with `tests/fault_preload.cpp`: a null pointer write in the render callback or in a draw callback, or a C++ exception, must remove the overlay while the host keeps rendering, and the menu key must bring it back;
 - what the host reads while the menu is open (`--input x11`), with `tests/input_preload.cpp`: no key or button press and no motion, but the release of a key held when the menu opened, and the wheel scrolls the menu;
-- the remote control (`--remote`), with `tests/remote_preload.cpp` and the hook built with it on: game description, screenshot without the assistant's message, message on screen, keys and right clicks through XTEST with the focus and as X11 events without it, the memory and advanced commands as with `--remote-advanced` on Windows, and typing with Shift, a move and a drag through XTEST;
+- the remote control (`--remote`), with `tests/remote_preload.cpp` and the hook built with it on: game description, screenshot without the assistant's message, message on screen, the tools of `tests/remote_tools.h`, keys and right clicks through XTEST with the focus and as X11 events without it, the memory and advanced commands as with `--remote-advanced` on Windows, and typing with Shift, a move and a drag through XTEST;
 - presents through `eglSwapBuffersWithDamage` that redraw and post a single pixel once `EGL_EXT_buffer_age` allows it (`--swap-with-damage`);
 - Vulkan swap chain images for transfers only (`--transfer-only`) and device functions from `vkGetDeviceProcAddr` (`--device-proc-addr`);
 - the Vulkan loader opened as `libvulkan.so` (`--vulkan-library`).
@@ -87,7 +87,7 @@ They need `libx11-dev libxtst-dev libgl-dev libegl-dev`. Without a display, run 
 
 `tests/game.sh` runs the same scenario on a Linux game, such as [DDNet](https://ddnet.org/) or a [Godot](https://godotengine.org/) project.
 
-`tests/game_mcp.py libuih_remote_preload.so <backend> mcp.png game [arguments]` plays a Linux game through `remote/uih_mcp.py`, as an assistant does, with the remote control on: the tool list (memory and advanced tools included), game description, screenshot, message, `INSERT` to open the menu, `wait_for_change`, a click in the menu and `F11` to remove the overlay, after which the socket must be gone and the game still running.
+`tests/game_mcp.py libuih_remote_preload.so <backend> mcp.png game [arguments]` plays a Linux game through `remote/uih_mcp.py`, as an assistant does, with the remote control on: the tool list (memory and advanced tools, and the tools `tests/remote_preload.cpp` registers, included), a call of `test_add`, game description, screenshot, message, `INSERT` to open the menu, `wait_for_change`, a click in the menu and `F11` to remove the overlay, after which the socket must be gone and the game still running.
 
 ## The CI
 
