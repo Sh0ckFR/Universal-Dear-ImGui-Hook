@@ -506,6 +506,8 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       # Only MSVC builds of the Windows DLL survive an exception in the overlay.
       - uses: actions/download-artifact@v4
@@ -518,7 +520,11 @@ jobs:
           for file in artifacts/Universal-ImGui-Hook-msvc-*/Universal-ImGui-Hook.dll artifacts/Universal-ImGui-Hook-linux-*/Universal-ImGui-Hook.so; do
             cp "$file" "release/$(basename "$(dirname "$file")").${file##*.}"
           done
+          (cd release && sha256sum Universal-ImGui-Hook-* > SHA256SUMS && cat SHA256SUMS)
           ls -l release
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-checksums: release/SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:
           files: release/*
