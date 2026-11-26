@@ -80,11 +80,13 @@ They need `libx11-dev libxtst-dev libgl-dev libegl-dev`. Without a display, run 
 
 ## Real games
 
-`uih_game` on Windows, `tests/game.sh` and `tests/game_mcp.py` on Linux.
+`uih_game` on Windows, `tests/game.sh` and `tests/game_mcp.py` on Linux, `tests/wine.sh` under Wine.
 
 `uih_game --dll <path> --backend <name> -- game.exe [arguments]` runs a game and injects the DLL once its window shows, as an injector does: the backend must become active, `INSERT` must show the menu on screen and `F11` remove it while the game keeps running. It reads the DLL's log as DebugView does, so DebugView must not run at the same time. It saves its captures as `game-before.bmp`, `game-menu.bmp` and `game-after.bmp` (`--captures <prefix>`).
 
 `tests/game.sh` runs the same scenario on a Linux game, such as [DDNet](https://ddnet.org/) or a [Godot](https://godotengine.org/) project.
+
+`tests/wine.sh Universal-ImGui-Hook.dll <backend> <prefix> game.exe [arguments]` runs it on a Windows game under Wine, as a Linux or Steam Deck player does: the DLL is copied next to the game as `dinput8.dll` and loaded with `WINEDLLOVERRIDES="dinput8=n,b"`. It reads the DLL's log on Wine's debug output (`WINEDEBUG=+debugstr`), checks with `+loaddll` that Wine loaded this `dinput8.dll` rather than its own, and saves its screen captures as `<prefix>-before.png`, `<prefix>-menu.png` and `<prefix>-after.png`. It needs Wine, an X server, xdotool and ImageMagick.
 
 `tests/game_mcp.py libuih_remote_preload.so <backend> mcp.png game [arguments]` plays a Linux game through `remote/uih_mcp.py`, as an assistant does, with the remote control on: the tool list (memory and advanced tools included), game description, screenshot, message, `INSERT` to open the menu, `wait_for_change`, a click in the menu and `F11` to remove the overlay, after which the socket must be gone and the game still running.
 
@@ -103,6 +105,7 @@ The [CI](../.github/workflows/build.yml) runs on every pull request, on `master`
 | Linux portable x86_64, aarch64 | The released libraries, built and tested against glibc 2.28 |
 | DDNet, Godot on Linux | The released library preloaded into [DDNet](https://ddnet.org/) and an empty [Godot](https://godotengine.org/) project (`tests/godot`), with OpenGL and Vulkan; then the same games played through the MCP server (`tests/game_mcp.py`) |
 | DDNet, Godot on Windows | The DLL injected into the same games once they render, without a GPU: DDNet with OpenGL and Vulkan, Godot with Direct3D 12, Vulkan and Direct3D 11 (its OpenGL renderer through ANGLE) |
+| Godot under Wine | The released x64 DLL as `dinput8.dll` next to the Windows build of Godot, run with `WINEDLLOVERRIDES="dinput8=n,b"` under Wine 11 and Xvfb (`tests/wine.sh`), with OpenGL, Direct3D 11 (ANGLE on Wine's Direct3D) and Vulkan on llvmpipe and lavapipe: Wine must load the DLL, the backend become active, `INSERT` show the menu on screen and `F11` remove it while the game keeps running |
 | FetchContent consumer | The repository as a CMake dependency |
 | Docs | `tests/check_docs.py` on every Markdown file: relative links and anchors, tables, control characters, code spans |
 

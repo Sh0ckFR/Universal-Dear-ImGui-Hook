@@ -49,7 +49,7 @@ Sections marked with ▶ expand on click. What changed in each version is listed
 - **Readable on any display**: the interface follows the game window's DPI, or a fixed scale, with correct colors on sRGB and floating-point back buffers.
 - **No injector needed**: the DLL can be loaded as `dinput8.dll`, and the Linux library with `LD_PRELOAD`.
 - **No dependencies**: Dear ImGui, MinHook and the Vulkan headers are vendored, and the C and C++ runtimes are linked statically.
-- **Tested in real games**: on every commit, the CI loads the library into [DDNet](https://ddnet.org/) and a [Godot](https://godotengine.org/) project on Windows and Linux, with Direct3D 11, Direct3D 12, Vulkan and OpenGL, and plays them through the MCP server on Linux.
+- **Tested in real games**: on every commit, the CI loads the library into [DDNet](https://ddnet.org/) and a [Godot](https://godotengine.org/) project on Windows and Linux, with Direct3D 11, Direct3D 12, Vulkan and OpenGL, and plays them through the MCP server on Linux. It also runs the Windows build of Godot under Wine with the DLL as `dinput8.dll`, with OpenGL, Direct3D 11 and Vulkan.
 
 ## Quick start
 
@@ -88,7 +88,7 @@ LD_PRELOAD=$PWD/build/linux/Universal-ImGui-Hook.so ./game
 
 Inject `Universal-ImGui-Hook.dll` with any injector, with `LoadLibrary`, or with the script of this repository (see [step 2](#step-2-load-the-library-into-the-game) of the chat). `F11` unloads an injected DLL; inject it again to bring the overlay back.
 
-To load it without an injector, rename it to `dinput8.dll` and put it next to the game's executable. It exports `DirectInput8Create` and forwards it to the system library, so any game that imports DirectInput 8 loads it. Under Wine or Proton, add `WINEDLLOVERRIDES="dinput8=n,b" %command%` to the launch options. Loaded this way, the DLL stays in the game, which holds a reference to it: `F11` removes the overlay and `INSERT` brings it back.
+To load it without an injector, rename it to `dinput8.dll` and put it next to the game's executable. It exports `DirectInput8Create` and forwards it to the system library, so any game that imports DirectInput 8, or loads `dinput8.dll` as Godot does, loads it. Under Wine or Proton, add `WINEDLLOVERRIDES="dinput8=n,b" %command%` to the launch options. Loaded this way, the DLL stays in the game, which holds a reference to it: `F11` removes the overlay and `INSERT` brings it back.
 
 Logs (`config.debugLog`) go to `OutputDebugString`; read them with [DebugView](https://learn.microsoft.com/sysinternals/downloads/debugview). The example DLL writes them when the game runs with the environment variable `UIH_DEBUG=1`.
 
