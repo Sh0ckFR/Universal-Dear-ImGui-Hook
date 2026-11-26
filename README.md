@@ -179,7 +179,7 @@ Chat with [Claude](https://claude.com/claude-code) in a window drawn over the ga
 ```mermaid
 flowchart LR
     A["Chat tab of the<br/>AI Advanced Features window"] -- "your messages" --> B["remote/uih_chat.py<br/>(the bridge)"]
-    B -- "claude -p, for each message" --> C["Claude Code"]
+    B -- "claude -p, one for<br/>the conversation" --> C["Claude Code"]
     C -- "game tools" --> D["remote/uih_mcp.py"]
     D -- "screenshots, keys,<br/>clicks, memory" --> E["The library in the game"]
     B -- "the answers" --> A
@@ -246,7 +246,7 @@ python remote/uih_chat.py
 
 It prints `Connected` once it has found the game. Start it before or after the game, in any order: it waits for the game, and for it to come back after a restart.
 
-You never start `remote/uih_mcp.py` yourself for the chat: the bridge hands it to Claude Code, which starts it for each answer. Run without arguments, it is an MCP server waiting for a client on its standard input, and does nothing on its own.
+You never start `remote/uih_mcp.py` yourself for the chat: the bridge hands it to Claude Code, which starts it once and keeps it for the conversation. Run without arguments, it is an MCP server waiting for a client on its standard input, and does nothing on its own.
 
 ### Step 4: chat
 
@@ -268,7 +268,7 @@ Claude writes in the chat as it works, and the line *Claude is working* shows wh
 | `--model <model>` | Claude Code's default | `sonnet` answers faster, `opus` thinks more |
 | `--claude <path>` | `claude` on the `PATH` | The Claude Code executable |
 
-Each message runs Claude Code headless (`claude -p`) with the tools of `remote/uih_mcp.py` and no other tool: no shell, no file access. It runs from its own folder in the temporary directory, so none of your `CLAUDE.md` files apply, and the conversation is kept there until **New conversation**.
+The bridge runs Claude Code headless (`claude -p`) with the tools of `remote/uih_mcp.py` and no other tool: no shell, no file access. It starts it as soon as it finds the game and keeps it for the whole conversation, writing it each of your messages, so answers start without waiting for Claude Code to load; **New conversation** starts a new one. It runs from its own folder in the temporary directory, so none of your `CLAUDE.md` files apply, and the conversation is kept there: if Claude Code stops, the next message resumes it.
 
 ### Troubleshooting
 
