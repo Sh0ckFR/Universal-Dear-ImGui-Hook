@@ -97,7 +97,9 @@ void Render(GetCurrentContextFn getCurrentContext, NativeWindow window, uint32_t
     ImDrawData* drawData = Frame();
     drawn = drawData && drawData->TotalVtxCount > 0;
     OverlayGlState state;
-    ImGui_ImplOpenGL3_RenderDrawData(drawData);
+    BackendGlState backend;
+    if (!Guarded([&] { ImGui_ImplOpenGL3_RenderDrawData(drawData); }))
+        backend.Restore();
 }
 
 // Stop() gave up waiting for this thread: release here, where the context of the overlay may be current.

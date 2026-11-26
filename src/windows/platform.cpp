@@ -357,9 +357,14 @@ bool RunGuarded(void (*work)(void*), void* context) {
     OnFault(code);
     return false;
 #else
-    // MinGW-w64 has no structured exception handling.
-    work(context);
-    return true;
+    // MinGW-w64 has no structured exception handling: C++ exceptions only.
+    try {
+        work(context);
+        return true;
+    } catch (...) {
+        OnFault(0xE06D7363);
+        return false;
+    }
 #endif
 }
 

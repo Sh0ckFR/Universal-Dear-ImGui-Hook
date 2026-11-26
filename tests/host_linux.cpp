@@ -858,6 +858,48 @@ int RunInput(Display* display, Window window, Host& host, const std::string& nam
     return 0;
 }
 
+
+// tests/fault_preload.cpp faults in the first frame of the menu: the overlay
+// must be removed while the host keeps rendering, and the menu key must
+// bring it back.
+int RunFault(Display* display, Window window, Host& host, const std::string& name) {
+    const int visible = kWidth * kHeight / 100;
+    auto run = [&](int frames) {
+        for (int frame = 0; frame < frames; ++frame) {
+            PumpEvents(display);
+            host.Frame();
+            usleep(5000);
+        }
+    };
+    auto pressMenuKey = [&] {
+        if (!PressKey(display, window, XK_Insert))
+            return false;
+        run(5);
+        HoldKey(display, XK_Insert, false);
+        return true;
+    };
+
+    run(90);
+    if (!pressMenuKey())
+        return Skip("the host window does not have the focus");
+    run(120);
+    int pixels = CountOverlayPixels(display, window);
+    printf("after the fault: %d overlay pixels, the host still renders\n", pixels);
+    if (pixels >= visible)
+        return Fail("overlay is still visible after the fault");
+    if (!pressMenuKey())
+        return Skip("the host window lost the focus");
+    run(120);
+    pixels = CountOverlayPixels(display, window);
+    printf("after the menu key: %d overlay pixels\n", pixels);
+    if (pixels < visible)
+        return Fail("the menu key did not bring the overlay back after the fault");
+    if (host.ValidationErrors() > 0)
+        return Fail("the validation layer reported errors");
+    printf("PASS: %s fault\n", name.c_str());
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -880,6 +922,7 @@ int main(int argc, char** argv) {
         else if (arg == "--swap-with-damage") options.swapWithDamage = true;
         else if (arg == "--remote") options.remote = true;
         else if (arg == "--input" && i + 1 < argc) options.input = argv[++i];
+        else if (arg == "--fault") options.fault = "env";
     }
     if (options.api != "opengl" && options.api != "vulkan") {
         printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--transfer-only] [--vulkan-library path] [--menu-key keysym] [--unload-key keysym] [--resize] [--reload] [--second-window] [--recreate-context] [--bound-framebuffer] [--swap-with-damage] [--remote]\n");
@@ -923,5 +966,7 @@ int main(int argc, char** argv) {
         return RunRemote(display, window, *host, name);
     if (options.input == "x11")
         return RunInput(display, window, *host, name);
+    if (!options.fault.empty())
+        return RunFault(display, window, *host, name);
     return Run(display, window, *host, name, options);
 }
