@@ -170,6 +170,8 @@ DXGI_FORMAT BackBufferFormat(const Options& options) {
         return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
     if (options.format == "float")
         return DXGI_FORMAT_R16G16B16A16_FLOAT;
+    if (options.format == "hdr10")
+        return DXGI_FORMAT_R10G10B10A2_UNORM;
     return DXGI_FORMAT_R8G8B8A8_UNORM;
 }
 
@@ -430,6 +432,8 @@ struct D3D12Host : Host {
     ID3D12Device* device = nullptr;
     ID3D12CommandQueue* queue = nullptr;
     IDXGISwapChain3* swapChain = nullptr;
+    bool hdr10 = false;
+    int framesSinceColorSpace = 0;
     ID3D12DescriptorHeap* heap = nullptr;
     ID3D12Resource* buffers[kBuffers] = {};
     D3D12_CPU_DESCRIPTOR_HANDLE targets[kBuffers] = {};
@@ -526,6 +530,10 @@ struct D3D12Host : Host {
             return false;
         swapChain1->QueryInterface(IID_PPV_ARGS(&swapChain));
         swapChain1->Release();
+        // As an HDR game does: the overlay must then draw its colors with the PQ curve.
+        hdr10 = options.format == "hdr10";
+        if (hdr10 && FAILED(swapChain->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)))
+            return false;
 
         D3D12_DESCRIPTOR_HEAP_DESC heapDesc{};
         heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
@@ -599,6 +607,9 @@ struct D3D12Host : Host {
         barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
         commandList->ResourceBarrier(1, &barrier);
         commandList->ClearRenderTargetView(targets[index], ClearColor(), 0, nullptr);
+        // Set again once the hook runs, as a game does when the player turns HDR on.
+        if (hdr10 && ++framesSinceColorSpace == 60)
+            swapChain->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020);
         barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
         barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
         commandList->ResourceBarrier(1, &barrier);
@@ -2487,7 +2498,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--own-hooks before|after] [--fault access|exception|draw] [--second-window [--shared-device]] [--composition] [--capture-frame] [--remote [--remote-memory] [--remote-advanced]] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--own-hooks before|after] [--fault access|exception|draw] [--second-window [--shared-device]] [--composition] [--capture-frame] [--remote [--remote-memory] [--remote-advanced]] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float|hdr10] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 

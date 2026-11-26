@@ -42,7 +42,7 @@ On Linux, the library exports the hooked functions under their own names and ove
 
 `uih::Frame()` registers new textures, polls the hotkeys, applies the DPI scale and runs `render`. The backend then draws the ImGui data on the back buffer, uploading textures as needed, and the game's present continues.
 
-Vertex colors are converted to linear for back buffers that store linear values; OpenGL and D3D9 turn sRGB writes off instead. Vulkan submits its own command buffer, which waits on the game's semaphores and signals the one the present waits on.
+Vertex colors are converted to linear for back buffers that store linear values; OpenGL and D3D9 turn sRGB writes off instead. On HDR10 swap chains (`IDXGISwapChain3::SetColorSpace1` with `DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020`, which is hooked, or `VK_COLOR_SPACE_HDR10_ST2084_EXT`), they are converted to BT.2020 and encoded with the PQ curve, white being the SDR content brightness of the display (`DisplayConfigGetDeviceInfo`, 203 nits on Linux). Vulkan submits its own command buffer, which waits on the game's semaphores and signals the one the present waits on.
 
 **Resolution changes** are followed on every API: D3D9 `Reset`/`ResetEx`, DXGI `ResizeBuffers`, a new Vulkan swap chain, or a new size of the OpenGL window. The overlay takes the new size on the next frame.
 

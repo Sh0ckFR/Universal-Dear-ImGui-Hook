@@ -113,6 +113,9 @@ bool IsFocused() { return input::IsFocused(); }
 
 float WindowScale() { return input::Scale(); }
 
+// The reference white of HDR video (ITU-R BT.2408): Linux has no setting for it.
+float SdrWhiteNits() { return 203.0f; }
+
 // A preloaded library cannot be unloaded: the overlay is removed and comes
 // back with the menu key.
 void Unload() {

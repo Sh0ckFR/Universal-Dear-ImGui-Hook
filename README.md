@@ -46,7 +46,7 @@ Sections marked with ▶ expand on click. What changed in each version is listed
 - **The overlay can't crash the game** (MSVC builds on Windows, and Linux): an access violation or a C++ exception in the overlay, whether in a renderer backend or in your menu code, removes the overlay instead of taking the game down. The menu key brings it back.
 - **Images and frame capture**: `uih::CreateTexture()` turns RGBA pixels into an image for `ImGui::Image()`, and `uih::CaptureFrame()` copies the game's frame, without the overlay, on every backend.
 - **Multiple windows**: when the game presents to more than one window or swap chain, the overlay stays on one of them and follows the focus.
-- **Readable on any display**: the interface follows the game window's DPI, or a fixed scale, with correct colors on sRGB and floating-point back buffers.
+- **Readable on any display**: the interface follows the game window's DPI, or a fixed scale, with correct colors on sRGB, floating-point and HDR10 back buffers, where the overlay is as bright as the SDR content Windows shows.
 - **No injector needed**: the DLL can be loaded as `dinput8.dll`, and the Linux library with `LD_PRELOAD`.
 - **No dependencies**: Dear ImGui, MinHook and the Vulkan headers are vendored, and the C and C++ runtimes are linked statically.
 - **Tested in real games**: on every commit, the CI loads the library into [DDNet](https://ddnet.org/) and a [Godot](https://godotengine.org/) project on Windows and Linux, with Direct3D 11, Direct3D 12, Vulkan and OpenGL, and plays them through the MCP server on Linux.
@@ -526,7 +526,8 @@ Bug reports, fixes and features are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) 
 ## Limitations
 
 **Windows**
-- HDR10 swap chains (PQ color space) show the overlay with wrong colors, and `CaptureFrame()` only copies 8-bit and 10-bit back buffers: HDR output's floating-point back buffers are not captured.
+- `CaptureFrame()` only copies 8-bit and 10-bit back buffers: HDR output's floating-point back buffers are not captured, and the frame of an HDR10 swap chain comes with its PQ values as they are, which look washed out.
+- On an HDR10 swap chain, the overlay draws its colors with the PQ curve when the game set the color space after the hook started, or when the game's window is on a display in HDR mode. A game injected late on an SDR display, whose HDR10 output Windows converts, shows the overlay with wrong colors until it sets the color space again, as when HDR is turned off and on in its settings.
 - A Vulkan swap chain created before the hook has no overlay until the game recreates it. Its presents report `VK_SUBOPTIMAL_KHR`, to which games respond by recreating it.
 - When the game, or another overlay, subclasses the window after the hook, the hook's window procedure stays in its chain: the unload key leaves the DLL loaded, and injecting it again does not start it.
 - Native ARM64 Windows games are not supported: MinHook only handles x86 and x64.

@@ -29,7 +29,7 @@ One option per scenario:
 | `--api d3d9\|d3d9ex\|d3d10\|d3d11\|d3d12\|vulkan\|opengl` | Hook started in-process, overlay drawn once per frame, then `Stop()` |
 | `--inject-at 0`, `--settle <ms>` | Hook started before the API; delay before the swap chain is created |
 | `--capture` | Checks the overlay and an exact color on screen |
-| `--format srgb\|float` | Back buffer storing linear values |
+| `--format srgb\|float\|hdr10` | Back buffer storing linear values, or HDR10 (D3D12): a 10-bit swap chain set to the PQ color space, whose probe color must come out unchanged through Windows' conversion |
 | `--decoy-queue` | A second D3D12 device executes work every frame |
 | `--remove-device` | The D3D12 device is removed: the overlay must not hold up its frames, and must show on the new device the host creates |
 | `--transfer-only` | The Vulkan swap chain images are created for transfers only, without `COLOR_ATTACHMENT` usage: the overlay must still show |

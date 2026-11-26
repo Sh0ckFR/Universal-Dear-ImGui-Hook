@@ -320,6 +320,45 @@ float WindowScale() {
     return dpi ? static_cast<float>(dpi) / USER_DEFAULT_SCREEN_DPI : 1.0f;
 }
 
+float SdrWhiteNits() {
+    // DISPLAYCONFIG_SDR_WHITE_LEVEL, missing from older SDKs: 1000 is 80 nits.
+    struct SdrWhiteLevel {
+        DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+        ULONG level;
+    };
+    constexpr auto kGetSdrWhiteLevel = static_cast<DISPLAYCONFIG_DEVICE_INFO_TYPE>(11);
+    // Read again every 2 seconds, since the player may change it in the display settings.
+    static ULONGLONG checked = 0;
+    static float nits = 80.0f;
+    ULONGLONG now = GetTickCount64();
+    if (checked && now - checked < 2000)
+        return nits;
+    checked = now;
+    MONITORINFOEXW monitor{};
+    monitor.cbSize = sizeof(monitor);
+    UINT32 pathCount = 0;
+    UINT32 modeCount = 0;
+    if (!GetMonitorInfoW(MonitorFromWindow(g_window, MONITOR_DEFAULTTOPRIMARY), &monitor) ||
+        GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &pathCount, &modeCount) != ERROR_SUCCESS)
+        return nits;
+    std::vector<DISPLAYCONFIG_PATH_INFO> paths(pathCount);
+    std::vector<DISPLAYCONFIG_MODE_INFO> modes(modeCount);
+    if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &pathCount, paths.data(), &modeCount, modes.data(), nullptr) != ERROR_SUCCESS)
+        return nits;
+    for (UINT32 i = 0; i < pathCount; ++i) {
+        DISPLAYCONFIG_SOURCE_DEVICE_NAME source{};
+        source.header = {DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, sizeof(source), paths[i].sourceInfo.adapterId, paths[i].sourceInfo.id};
+        if (DisplayConfigGetDeviceInfo(&source.header) != ERROR_SUCCESS || wcscmp(source.viewGdiDeviceName, monitor.szDevice) != 0)
+            continue;
+        SdrWhiteLevel white{};
+        white.header = {kGetSdrWhiteLevel, sizeof(white), paths[i].targetInfo.adapterId, paths[i].targetInfo.id};
+        if (DisplayConfigGetDeviceInfo(&white.header) == ERROR_SUCCESS && white.level)
+            nits = white.level * 80.0f / 1000.0f;
+        break;
+    }
+    return nits;
+}
+
 bool IsFocused() {
     HWND foreground = GetForegroundWindow();
     return foreground && (foreground == g_window || IsChild(g_window, foreground));
