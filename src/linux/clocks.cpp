@@ -10,7 +10,9 @@
 
 #include <dlfcn.h>
 #include <link.h>
+#include <sys/syscall.h>
 #include <time.h>
+#include <unistd.h>
 
 #include <cstring>
 
@@ -23,13 +25,18 @@ using ClockGettimeFn = int (*)(clockid_t, timespec*);
 
 ClockGettimeFn g_next = nullptr;
 
-UIH_NO_SANITIZE ClockGettimeFn Next() {
-    ClockGettimeFn next = __atomic_load_n(&g_next, __ATOMIC_ACQUIRE);
-    if (!next) {
-        next = reinterpret_cast<ClockGettimeFn>(dlsym(RTLD_NEXT, "clock_gettime"));
-        __atomic_store_n(&g_next, next, __ATOMIC_RELEASE);
-    }
-    return next;
+// Looked up once the library is loaded, never from clock_gettime(): the
+// sanitizer runtimes call it from their allocator, inside dlopen(), where
+// dlsym() must not run.
+__attribute__((constructor(101))) void FindNext() {
+    __atomic_store_n(&g_next, reinterpret_cast<ClockGettimeFn>(dlsym(RTLD_NEXT, "clock_gettime")), __ATOMIC_RELEASE);
+}
+
+// The clock of the C library, or of the kernel before the library's constructors ran.
+UIH_NO_SANITIZE int RealClockGettime(clockid_t id, timespec* now) {
+    if (ClockGettimeFn next = __atomic_load_n(&g_next, __ATOMIC_ACQUIRE))
+        return next(id, now);
+    return static_cast<int>(syscall(SYS_clock_gettime, id, now));
 }
 
 // Which code keeps real time, by address range: libraries, and the regions of
@@ -150,7 +157,7 @@ namespace timing {
 // Preloaded, the library stands for clock_gettime(), maybe behind a sanitizer
 // runtime that calls it; loaded later, the game calls the C library directly.
 bool ClocksHooked() {
-    static const bool hooked = dlsym(RTLD_DEFAULT, "clock_gettime") != reinterpret_cast<void*>(Next());
+    static const bool hooked = dlsym(RTLD_DEFAULT, "clock_gettime") != reinterpret_cast<void*>(__atomic_load_n(&g_next, __ATOMIC_ACQUIRE));
     return hooked;
 }
 
@@ -172,9 +179,8 @@ bool RealClock(Clock clock, int64_t& real) {
     default:
         return false;
     }
-    ClockGettimeFn next = Next();
     timespec now{};
-    if (!next || next(id, &now) != 0)
+    if (RealClockGettime(id, &now) != 0)
         return false;
     real = now.tv_sec * kNanoseconds + now.tv_nsec;
     return true;
@@ -188,10 +194,7 @@ using namespace uih::detail;
 // Called before the library starts, while the process starts: nothing is
 // scaled until the speed changes.
 extern "C" UIH_NO_SANITIZE int clock_gettime(clockid_t id, timespec* now) noexcept {
-    ClockGettimeFn next = Next();
-    if (!next)
-        return -1;
-    int result = next(id, now);
+    int result = RealClockGettime(id, now);
     timing::Clock clock;
     if (result != 0 || !now || !timing::Scaling() || !Scaled(id, clock) || RealTimeCaller(__builtin_return_address(0)))
         return result;
