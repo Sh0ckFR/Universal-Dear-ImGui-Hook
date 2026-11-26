@@ -32,6 +32,9 @@ std::condition_variable g_teardownSignal;
 bool g_teardownDone = false;
 // Backend whose overlay the thread drawing it releases once its frame ends.
 std::atomic<Backend> g_abandonedBackend{Backend::None};
+// From a frame of the overlay to the end of the present that follows it, in
+// which the thread still uses the device of the overlay.
+std::atomic<bool> g_presentPending{false};
 
 float g_appliedScale = 1.0f;
 // Textures created with CreateTexture(). They are registered with each ImGui
@@ -311,6 +314,7 @@ bool BeginOverlayFrame(uint64_t swapchain, NativeWindow window) {
         return false;
     }
     g_renderThread = std::this_thread::get_id();
+    g_presentPending = true;
     return true;
 }
 
@@ -320,6 +324,9 @@ void ServiceTeardown(Backend backend, void (*teardown)()) {
     std::thread::id renderThread = g_renderThread;
     if (renderThread != std::thread::id() && renderThread != std::this_thread::get_id())
         return;
+    // Before the look at g_abandonedBackend: ReleaseOverlayWithin() sets it
+    // before it looks at this.
+    g_presentPending = false;
     // Stop() gave up waiting for the frame this thread was drawing.
     Backend abandoned = backend;
     if (g_abandonedBackend.compare_exchange_strong(abandoned, Backend::None)) {
@@ -342,17 +349,32 @@ void ReleaseOverlay(void (*release)()) {
 }
 
 bool ReleaseOverlayWithin(unsigned timeoutMs, void (*release)()) {
+    // A thread that draws the overlay presents right after, with the device
+    // the overlay would be released with, and few devices may be used by two
+    // threads at once (D3D9 without D3DCREATE_MULTITHREADED, the immediate
+    // context of D3D11, OpenGL): that thread releases the overlay once its
+    // present returns, in ServiceTeardown().
+    g_abandonedBackend = g_activeBackend.load();
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
     std::unique_lock<std::timed_mutex> lock(g_frameMutex, std::defer_lock);
-    if (!lock.try_lock_for(std::chrono::milliseconds(timeoutMs))) {
-        g_abandonedBackend = g_activeBackend.load();
-        // The frame may have ended before its thread could see that.
-        if (!lock.try_lock())
-            return false;
-        if (g_abandonedBackend.exchange(Backend::None) == Backend::None)
+    for (;;) {
+        if (g_abandonedBackend == Backend::None)
             return true;
+        // A present still under way, unless no thread is in a hook any more.
+        bool presenting = g_presentPending && g_inFlight > 0;
+        if (!presenting && lock.try_lock()) {
+            if (!(g_presentPending && g_inFlight > 0)) {
+                if (g_abandonedBackend.exchange(Backend::None) == Backend::None)
+                    return true;
+                Guarded([&] { release(); });
+                return true;
+            }
+            lock.unlock();
+        }
+        if (std::chrono::steady_clock::now() >= deadline)
+            return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    Guarded([&] { release(); });
-    return true;
 }
 
 bool TeardownOnRenderThread(unsigned timeoutMs) {

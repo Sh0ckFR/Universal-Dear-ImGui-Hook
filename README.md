@@ -341,7 +341,7 @@ Everything is in `include/uih.h`, namespace `uih`.
 <details>
 <summary><b>Teardown</b>: what <code>Stop()</code> and the unload key do</summary>
 
-`Stop()` asks the rendering thread to release the backend at its next present, or does it itself after one second, then removes the hooks once none of them is running. When the library cannot leave the process (Linux, `dinput8.dll` proxy, no `module`), the unload key runs `Stop()` on a thread that then polls the menu key and buttons, and starts the hook again with the menu open.
+`Stop()` asks the rendering thread to release the backend at its next present, or does it itself after one second when no thread presents; a thread still drawing the overlay, or presenting after it, releases it once its present returns, as most devices cannot be used by two threads at once. `Stop()` then removes the hooks once none of them is running. When the library cannot leave the process (Linux, `dinput8.dll` proxy, no `module`), the unload key runs `Stop()` on a thread that then polls the menu key and buttons, and starts the hook again with the menu open.
 
 </details>
 
