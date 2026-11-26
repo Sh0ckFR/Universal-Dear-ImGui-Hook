@@ -61,7 +61,7 @@ Sections marked with ▶ expand on click. What changed in each version is listed
 | Windows, 32-bit | `Universal-ImGui-Hook-msvc-Win32.dll` |
 | Linux, x86-64 or ARM64 | `Universal-ImGui-Hook-linux-x86_64.so` or `-linux-aarch64.so` (glibc 2.28 or later) |
 
-These are the `Universal-ImGui-Hook.dll` and `.so` that the build below produces, renamed after their platform; the rest of this page uses the short name.
+These are the `Universal-ImGui-Hook.dll` and `.so` that the build below produces, renamed after their platform; the rest of this page uses the short name. Each also comes as an `-ai` file, such as `Universal-ImGui-Hook-msvc-x64-ai.dll`, with the [chat with Claude](#talk-to-claude-from-the-game) and every tool of the assistant on: use it for single-player games only, since any program you run can then control the game and its memory.
 
 Each release lists the SHA256 of its libraries in `SHA256SUMS`, and GitHub attests that this repository's CI built them: `gh attestation verify Universal-ImGui-Hook-msvc-x64.dll --repo Sh0ckFR/Universal-Dear-ImGui-Hook` checks a file you downloaded.
 
@@ -195,9 +195,9 @@ flowchart LR
 | **This repository** | Cloned, to build the library and run the scripts in `remote/`. |
 | **A single-player game** | Anti-cheat systems detect injected DLLs. |
 
-### Step 1: build the library with the chat on
+### Step 1: get the library with the chat on
 
-In `example/config.cpp`, set these settings to `true`:
+Download the `-ai` library of a [release](https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook/releases) that matches the game, such as `Universal-ImGui-Hook-msvc-x64-ai.dll` (see [Quick start](#quick-start)): it has the settings below on. Or build it: in `example/config.cpp`, set these settings to `true`,
 
 ```cpp
 config.remoteControl = true;        // the game can be controlled through a local pipe or socket
@@ -205,7 +205,7 @@ config.remoteMemory = true;         // optional: Claude can read and change the 
 config.aiAdvancedFeatures = true;   // the AI Advanced Features window and its chat
 ```
 
-Then build. On Windows, open `Universal-ImGui-Hook.sln` in Visual Studio and build `Release|x64` (`Release|Win32` for a 32-bit game), which produces `build/vs/x64/Release/Universal-ImGui-Hook.dll` (`build/vs/x86/Release/` for Win32). On Linux, `cmake --preset linux && cmake --build --preset linux` produces `build/linux/Universal-ImGui-Hook.so`.
+or configure CMake with `-DUIH_EXAMPLE_AI=ON`, which turns them all on. Then build. On Windows, open `Universal-ImGui-Hook.sln` in Visual Studio and build `Release|x64` (`Release|Win32` for a 32-bit game), which produces `build/vs/x64/Release/Universal-ImGui-Hook.dll` (`build/vs/x86/Release/` for Win32). On Linux, `cmake --preset linux && cmake --build --preset linux` produces `build/linux/Universal-ImGui-Hook.so`.
 
 ### Step 2: load the library into the game
 
@@ -293,7 +293,7 @@ flowchart LR
     B -- "local named pipe or Unix socket" --> C["The library in the game"]
 ```
 
-**1. Turn it on and load the library into the game**, as in steps [1](#step-1-build-the-library-with-the-chat-on) and [2](#step-2-load-the-library-into-the-game) of the chat. Only `config.remoteControl` is required: `remoteMemory` adds the memory tools, and `aiAdvancedFeatures` adds the advanced tools and their window. `config.remotePipe` names the pipe, `\\.\pipe\universal-imgui-hook` by default, or the socket, `$XDG_RUNTIME_DIR/universal-imgui-hook`. `python remote/uih_mcp.py check` tells you whether the game answers.
+**1. Turn it on and load the library into the game**, as in steps [1](#step-1-get-the-library-with-the-chat-on) and [2](#step-2-load-the-library-into-the-game) of the chat. Only `config.remoteControl` is required: `remoteMemory` adds the memory tools, and `aiAdvancedFeatures` adds the advanced tools and their window. `config.remotePipe` names the pipe, `\\.\pipe\universal-imgui-hook` by default, or the socket, `$XDG_RUNTIME_DIR/universal-imgui-hook`. `python remote/uih_mcp.py check` tells you whether the game answers.
 
 **2. Register the MCP server with the assistant**, once. You do not start `uih_mcp.py` yourself: the assistant does when a session starts, and talks to it over its standard input and output. With Claude Code:
 
