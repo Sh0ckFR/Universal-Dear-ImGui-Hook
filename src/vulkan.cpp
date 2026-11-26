@@ -221,6 +221,21 @@ size_t IcdForDevice(VkDevice device) {
 }
 
 #ifdef _WIN32
+// Whether [address, address + size) is committed memory that can be read.
+bool Readable(const void* address, size_t size) {
+    constexpr DWORD kReadable = PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE |
+                                PAGE_EXECUTE_WRITECOPY;
+    auto begin = reinterpret_cast<uintptr_t>(address);
+    for (uintptr_t at = begin; at < begin + size;) {
+        MEMORY_BASIC_INFORMATION info{};
+        if (VirtualQuery(reinterpret_cast<const void*>(at), &info, sizeof(info)) != sizeof(info) || info.State != MEM_COMMIT ||
+            !(info.Protect & kReadable) || (info.Protect & PAGE_GUARD))
+            return false;
+        at = reinterpret_cast<uintptr_t>(info.BaseAddress) + info.RegionSize;
+    }
+    return true;
+}
+
 // The loader's vkAllocateCommandBuffers is not the driver's: it calls the
 // layers of the device it is given, which do not know the command pools the
 // hook creates in the driver, then gives the new command buffers the dispatch
@@ -233,8 +248,12 @@ PFN_vkAllocateCommandBuffers FindDriverAllocateCommandBuffers(VkDevice dummyDevi
     for (int i = 0; i < 6; ++i)
         if (names[i] && !(neighbors[i] = reinterpret_cast<void*>(g_getDeviceProcAddr(dummyDevice, names[i]))))
             return nullptr;
-    void* const* table = *reinterpret_cast<void* const* const*>(dummyDevice);
+    // Wine's vulkan-1.dll is not the Khronos loader: its devices do not start
+    // with a pointer to a dispatch table, and the scan crashed Godot under Wine.
     constexpr int kSlots = 256;
+    void* const* table = *reinterpret_cast<void* const* const*>(dummyDevice);
+    if (!Readable(table, kSlots * sizeof(void*)))
+        return nullptr;
     for (int slot = 0; slot + 6 <= kSlots; ++slot) {
         bool match = table[slot + 3] != nullptr;
         for (int i = 0; i < 6 && match; ++i)
