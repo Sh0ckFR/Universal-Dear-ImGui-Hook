@@ -10,6 +10,7 @@
 #include <d3d12.h>
 #include <d3d12sdklayers.h>
 #include <d3d9.h>
+#include <dbghelp.h>
 #include <dxgi1_4.h>
 #include <GL/gl.h>
 #define GL_APIENTRY APIENTRY
@@ -2235,11 +2236,53 @@ int RunProxyMode(const Options& options) {
     return 0;
 }
 
+// A crash of the host prints where it happened and, when UIH_TEST_DUMPS
+// names a directory, writes uih_host-<pid>.dmp there, as the CI keeps it.
+using MiniDumpWriteDumpFn = BOOL(WINAPI*)(HANDLE, DWORD, HANDLE, MINIDUMP_TYPE, PMINIDUMP_EXCEPTION_INFORMATION,
+                                          PMINIDUMP_USER_STREAM_INFORMATION, PMINIDUMP_CALLBACK_INFORMATION);
+MiniDumpWriteDumpFn g_writeDump = nullptr;
+char g_dumpPath[MAX_PATH] = {};
+
+LONG WINAPI ReportCrash(EXCEPTION_POINTERS* exception) {
+    void* address = exception->ExceptionRecord->ExceptionAddress;
+    HMODULE module = nullptr;
+    char name[MAX_PATH] = "?";
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, static_cast<LPCSTR>(address), &module))
+        GetModuleFileNameA(module, name, sizeof(name));
+    printf("CRASH: exception 0x%08lX at %s+0x%llx, thread %lu\n", exception->ExceptionRecord->ExceptionCode, name,
+           static_cast<unsigned long long>(static_cast<char*>(address) - reinterpret_cast<char*>(module)), GetCurrentThreadId());
+    if (g_writeDump && g_dumpPath[0]) {
+        HANDLE file = CreateFileA(g_dumpPath, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file != INVALID_HANDLE_VALUE) {
+            MINIDUMP_EXCEPTION_INFORMATION info{GetCurrentThreadId(), exception, FALSE};
+            auto type = static_cast<MINIDUMP_TYPE>(MiniDumpWithDataSegs | MiniDumpWithHandleData | MiniDumpWithIndirectlyReferencedMemory |
+                                                   MiniDumpWithThreadInfo | MiniDumpWithUnloadedModules);
+            if (g_writeDump(GetCurrentProcess(), GetCurrentProcessId(), file, type, &info, nullptr, nullptr))
+                printf("CRASH: dump written to %s\n", g_dumpPath);
+            CloseHandle(file);
+        }
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+void InstallCrashReport() {
+    char directory[MAX_PATH] = {};
+    DWORD length = GetEnvironmentVariableA("UIH_TEST_DUMPS", directory, sizeof(directory));
+    if (length > 0 && length < sizeof(directory)) {
+        CreateDirectoryA(directory, nullptr);
+        snprintf(g_dumpPath, sizeof(g_dumpPath), "%s\\uih_host-%lu.dmp", directory, GetCurrentProcessId());
+        // Loaded now: the crash may come from the loader lock or the heap.
+        g_writeDump = reinterpret_cast<MiniDumpWriteDumpFn>(reinterpret_cast<void*>(GetProcAddress(LoadLibraryW(L"dbghelp.dll"), "MiniDumpWriteDump")));
+    }
+    SetUnhandledExceptionFilter(ReportCrash);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     // Keeps the output of a test that crashes.
     setvbuf(stdout, nullptr, _IONBF, 0);
+    InstallCrashReport();
     Options options;
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];

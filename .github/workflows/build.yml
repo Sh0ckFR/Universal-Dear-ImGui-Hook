@@ -60,10 +60,17 @@ jobs:
       GALLIUM_DRIVER: llvmpipe
       # The runner's display can change modes: the fullscreen scenarios run.
       UIH_TEST_FULLSCREEN: 1
+      # Crashes of uih_host write minidumps there, kept with the binaries and their symbols.
+      UIH_TEST_DUMPS: ${{ github.workspace }}\dumps
     steps:
       - uses: actions/checkout@v4
+      # Not released: built with symbols for the minidumps.
       - name: Configure
-        run: cmake -S . -B build -A ${{ matrix.arch }} -DUIH_BUILD_TESTS=ON
+        run: >-
+          cmake -S . -B build -A ${{ matrix.arch }} -DUIH_BUILD_TESTS=ON
+          "-DCMAKE_C_FLAGS_RELEASE=/O2 /Ob2 /DNDEBUG /Z7" "-DCMAKE_CXX_FLAGS_RELEASE=/O2 /Ob2 /DNDEBUG /Z7"
+          "-DCMAKE_EXE_LINKER_FLAGS_RELEASE=/DEBUG /OPT:REF /OPT:ICF /INCREMENTAL:NO"
+          "-DCMAKE_SHARED_LINKER_FLAGS_RELEASE=/DEBUG /OPT:REF /OPT:ICF /INCREMENTAL:NO"
       - name: Build
         run: cmake --build build --config Release
       - name: Install software drivers
@@ -135,6 +142,11 @@ jobs:
           path: |
             build/tests/*.bmp
             ctest*.log
+            dumps/*.dmp
+            build/tests/Release/*.exe
+            build/tests/Release/*.pdb
+            build/Release/*.dll
+            build/Release/*.pdb
           if-no-files-found: ignore
 
   solution:

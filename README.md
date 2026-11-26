@@ -438,6 +438,8 @@ Without a GPU, as on the CI runners, Direct3D uses WARP, and Mesa's software dri
 
 `UIH_TEST_VULKAN_VALIDATION=1` runs the Vulkan host under `VK_LAYER_KHRONOS_validation`, from the Vulkan SDK on Windows or `vulkan-validationlayers` on Linux, and `UIH_TEST_D3D_DEBUG=1` creates the Direct3D 10, 11 and 12 devices with the debug layer, from the Graphics Tools optional feature of Windows. Any error they report, from the host or from the hook, fails the test.
 
+When the Windows host crashes, it prints the exception code, module and offset, and writes a minidump to the directory named by `UIH_TEST_DUMPS`, when it is set. The Windows test jobs of the CI set it and build with symbols, and keep the dumps with the binaries and their PDBs when a test fails.
+
 </details>
 
 <details>
