@@ -549,7 +549,7 @@ Built with [Dear ImGui](https://github.com/ocornut/imgui), [MinHook](https://git
 
 ## Support
 
-This project is free and MIT-licensed. It covers six graphics backends on two operating systems and runs about 150 test scenarios on every commit, real games included. If it saved you time, consider [sponsoring](https://github.com/sponsors/Sh0ckFR) or starring the repository.
+This project is free and MIT-licensed. It is, as far as we know, the only ImGui hook that covers every major graphics API on both Windows and Linux, tests itself in real games on every commit, and lets an AI assistant play the game from inside it. Rebuilding it would take roughly 125 days of senior C++ work, about €81,000 at French freelance rates: some 18,000 lines, a third of them tests. If it saved you time, consider [sponsoring](https://github.com/sponsors/Sh0ckFR) or starring the repository.
 
 ## License
 
