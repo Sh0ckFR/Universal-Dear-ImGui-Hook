@@ -3,7 +3,9 @@
 
 #include <unistd.h>
 #include <xcb/xcb.h>
+#include <xcb/xcbext.h>
 
+#include <atomic>
 #include <cfloat>
 #include <chrono>
 #include <cstdlib>
@@ -25,6 +27,11 @@ constexpr int kKeycodes = 256;
 constexpr int kMaxTreeDepth = 32;
 
 xcb_connection_t* g_connection = nullptr;
+// For the event hooks of events.cpp, which run on the threads of the application.
+std::atomic<xcb_connection_t*> g_ownConnection{nullptr};
+std::atomic<uint8_t> g_xinputOpcode{0};
+std::atomic<int> g_wheelX{0};
+std::atomic<int> g_wheelY{0};
 bool g_unavailable = false;
 xcb_window_t g_root = XCB_NONE;
 xcb_atom_t g_pidAtom = XCB_NONE;
@@ -85,6 +92,7 @@ void LoadScale() {
 }
 
 void Disconnect() {
+    g_ownConnection = nullptr;
     if (g_connection)
         xcb_disconnect(g_connection);
     g_connection = nullptr;
@@ -109,7 +117,14 @@ bool Connect() {
     for (int i = 0; i < screenIndex && screen.rem > 1; ++i)
         xcb_screen_next(&screen);
     g_connection = connection;
+    g_ownConnection = connection;
     g_root = screen.data->root;
+
+    // Extension opcodes are the same on every connection, the application's included.
+    static xcb_extension_t xinput = {"XInputExtension", 0};
+    const xcb_query_extension_reply_t* extension = xcb_get_extension_data(connection, &xinput);
+    if (extension && extension->present)
+        g_xinputOpcode = extension->major_opcode;
 
     static const char kPid[] = "_NET_WM_PID";
     Reply<xcb_intern_atom_reply_t> atom(xcb_intern_atom_reply(connection, xcb_intern_atom(connection, 0, sizeof(kPid) - 1, kPid), nullptr));
@@ -333,6 +348,10 @@ void NewFrame() {
         io.AddMousePosEvent(static_cast<float>(pointer->win_x), static_cast<float>(pointer->win_y));
     else
         io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
+    int wheelX = g_wheelX.exchange(0);
+    int wheelY = g_wheelY.exchange(0);
+    if (focused && (wheelX || wheelY))
+        io.AddMouseWheelEvent(static_cast<float>(wheelX), static_cast<float>(wheelY));
     uint16_t state = pointer->mask;
     io.AddMouseButtonEvent(ImGuiMouseButton_Left, focused && (state & XCB_BUTTON_MASK_1) != 0);
     io.AddMouseButtonEvent(ImGuiMouseButton_Right, focused && (state & XCB_BUTTON_MASK_3) != 0);
@@ -390,5 +409,14 @@ bool KeyDownInApplication(int keysym) {
 }
 
 float Scale() { return g_scale; }
+
+uint8_t XInputOpcode() { return g_xinputOpcode; }
+
+bool OwnConnection(const void* connection) { return connection == g_ownConnection.load(); }
+
+void AddWheel(int x, int y) {
+    g_wheelX += x;
+    g_wheelY += y;
+}
 
 } // namespace uih::detail::input

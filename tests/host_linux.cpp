@@ -750,6 +750,114 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
     return 0;
 }
 
+
+// Color of the probe that tests/input_preload.cpp draws, red until the wheel
+// turned down in the menu, then green.
+bool ProbeGreen(Display* display, Window window) {
+    XImage* image = XGetImage(display, window, kInputProbe[0], kInputProbe[1], 1, 1, AllPlanes, ZPixmap);
+    if (!image)
+        return false;
+    unsigned long pixel = XGetPixel(image, 0, 0);
+    XDestroyImage(image);
+    return ((pixel >> 8) & 0xff) > 200 && ((pixel >> 16) & 0xff) < 60;
+}
+
+// While the menu is open, the host reads no key or button presses and no
+// motion, but the releases of keys held when it opened; the wheel scrolls
+// the menu. Before and after, the host reads everything.
+int RunInput(Display* display, Window window, Host& host, const std::string& name) {
+    struct Seen {
+        int keyPresses = 0;
+        int keyReleases = 0;
+        int buttonPresses = 0;
+        int motions = 0;
+    } seen;
+    XSelectInput(display, window, StructureNotifyMask | KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask);
+    auto run = [&](int frames) {
+        for (int frame = 0; frame < frames; ++frame) {
+            while (XPending(display)) {
+                XEvent event;
+                XNextEvent(display, &event);
+                if (event.type == KeyPress && XLookupKeysym(&event.xkey, 0) == XK_a)
+                    ++seen.keyPresses;
+                else if (event.type == KeyRelease && XLookupKeysym(&event.xkey, 0) == XK_a)
+                    ++seen.keyReleases;
+                else if (event.type == ButtonPress)
+                    ++seen.buttonPresses;
+                else if (event.type == MotionNotify)
+                    ++seen.motions;
+            }
+            host.Frame();
+            usleep(5000);
+        }
+    };
+    auto move = [&](int x, int y) {
+        XTestFakeMotionEvent(display, DefaultScreen(display), x, y, CurrentTime);
+        XFlush(display);
+    };
+    auto click = [&](unsigned button) {
+        XTestFakeButtonEvent(display, button, True, CurrentTime);
+        XTestFakeButtonEvent(display, button, False, CurrentTime);
+        XFlush(display);
+    };
+    // Presses, releases, a click, the wheel and motion, away from the probe.
+    auto everything = [&] {
+        seen = Seen{};
+        move(600, 450);
+        if (!PressKey(display, window, XK_a))
+            return false;
+        run(10);
+        move(620, 470);
+        click(1);
+        click(5);
+        run(10);
+        HoldKey(display, XK_a, false);
+        run(20);
+        return true;
+    };
+    auto toggleMenu = [&] {
+        if (!PressKey(display, window, XK_Insert))
+            return false;
+        run(5);
+        HoldKey(display, XK_Insert, false);
+        run(60);
+        return true;
+    };
+
+    run(60);
+    if (!everything())
+        return Skip("the host window does not have the focus");
+    printf("menu closed: %d key presses, %d key releases, %d button presses, %d motions\n", seen.keyPresses, seen.keyReleases, seen.buttonPresses, seen.motions);
+    if (!seen.keyPresses || !seen.keyReleases || seen.buttonPresses < 2 || !seen.motions)
+        return Fail("the host did not read its input before the menu opened");
+
+    if (!toggleMenu())
+        return Skip("the host window lost the focus");
+    if (CountOverlayPixels(display, window) < kWidth * kHeight / 100)
+        return Fail("overlay is not visible on screen");
+    if (ProbeGreen(display, window))
+        return Fail("the probe is green before the wheel turned");
+    if (!everything())
+        return Skip("the host window lost the focus");
+    printf("menu open: %d key presses, %d key releases, %d button presses, %d motions\n", seen.keyPresses, seen.keyReleases, seen.buttonPresses, seen.motions);
+    if (seen.keyPresses || seen.buttonPresses || seen.motions)
+        return Fail("the host read presses or motion while the menu was open");
+    if (!seen.keyReleases)
+        return Fail("the host did not read the release of a key held while the menu was open");
+    if (!ProbeGreen(display, window))
+        return Fail("the wheel did not reach the menu");
+
+    if (!toggleMenu())
+        return Skip("the host window lost the focus");
+    if (!everything())
+        return Skip("the host window lost the focus");
+    printf("menu closed again: %d key presses, %d key releases, %d button presses, %d motions\n", seen.keyPresses, seen.keyReleases, seen.buttonPresses, seen.motions);
+    if (!seen.keyPresses || !seen.keyReleases || seen.buttonPresses < 2 || !seen.motions)
+        return Fail("the host did not read its input after the menu closed");
+    printf("PASS: %s input\n", name.c_str());
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -771,6 +879,7 @@ int main(int argc, char** argv) {
         else if (arg == "--bound-framebuffer") options.boundFramebuffer = true;
         else if (arg == "--swap-with-damage") options.swapWithDamage = true;
         else if (arg == "--remote") options.remote = true;
+        else if (arg == "--input" && i + 1 < argc) options.input = argv[++i];
     }
     if (options.api != "opengl" && options.api != "vulkan") {
         printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--transfer-only] [--vulkan-library path] [--menu-key keysym] [--unload-key keysym] [--resize] [--reload] [--second-window] [--recreate-context] [--bound-framebuffer] [--swap-with-damage] [--remote]\n");
@@ -812,5 +921,7 @@ int main(int argc, char** argv) {
     }
     if (options.remote)
         return RunRemote(display, window, *host, name);
+    if (options.input == "x11")
+        return RunInput(display, window, *host, name);
     return Run(display, window, *host, name, options);
 }
