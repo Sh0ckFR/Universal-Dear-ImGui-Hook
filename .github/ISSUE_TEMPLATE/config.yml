@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a vulnerability
+    url: https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook/security/advisories/new
+    about: Security problems go to a private report, as SECURITY.md explains.

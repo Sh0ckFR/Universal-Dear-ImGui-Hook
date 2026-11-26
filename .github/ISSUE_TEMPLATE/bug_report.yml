@@ -1,0 +1,88 @@
+name: Bug report
+description: The overlay, the remote control or the chat with Claude does not work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Check [Troubleshooting](https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook#troubleshooting) and [Limitations](https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook#limitations) first.
+        A security problem goes to a [private report](https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook/security/advisories/new), not here.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release, such as v2.1.0, or the commit you built.
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows, 64-bit game
+        - Windows, 32-bit game
+        - Linux, native game
+        - Linux, Windows game under Wine or Proton
+        - Steam Deck
+    validations:
+      required: true
+  - type: input
+    id: game
+    attributes:
+      label: Game
+      description: Its name and engine if you know it (Unity, Unreal, Godot...), or the application.
+    validations:
+      required: true
+  - type: dropdown
+    id: api
+    attributes:
+      label: Graphics API
+      options:
+        - Direct3D 9
+        - Direct3D 10
+        - Direct3D 11
+        - Direct3D 12
+        - Vulkan
+        - OpenGL
+        - I don't know
+    validations:
+      required: true
+  - type: dropdown
+    id: loading
+    attributes:
+      label: How the library is loaded
+      options:
+        - An injector or LoadLibrary
+        - python remote/uih_mcp.py inject
+        - As dinput8.dll next to the game
+        - LD_PRELOAD
+        - Through the CMake package (uih::uih), in my own library
+    validations:
+      required: true
+  - type: checkboxes
+    id: settings
+    attributes:
+      label: Settings turned on in example/config.cpp
+      options:
+        - label: remoteControl
+        - label: remoteMemory
+        - label: aiAdvancedFeatures
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: |
+        Run the game with the environment variable `UIH_DEBUG=1`. On Windows, copy the log from [DebugView](https://learn.microsoft.com/sysinternals/downloads/debugview); on Linux, it is on stderr. For the chat or the remote control, add the output of `python remote/uih_mcp.py check` and of the bridge.
+      render: text
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: Screenshots, other overlays or mods running, a crash dump.

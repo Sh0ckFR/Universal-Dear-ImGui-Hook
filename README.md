@@ -100,6 +100,8 @@ LD_PRELOAD=/path/to/Universal-ImGui-Hook.so ./game
 
 For a Steam game, set the launch options to `LD_PRELOAD=/path/to/Universal-ImGui-Hook.so %command%`. `UIH_DEBUG=1` prints the log on stderr. A preloaded library cannot leave the process: `F11` removes the overlay and its hooks, and `INSERT` brings them back.
 
+**Steam Deck.** SteamOS is Linux: for a native game, set its launch options to `LD_PRELOAD=/path/to/Universal-ImGui-Hook.so %command%`. For a Windows game running under Proton, use the Windows DLL as `dinput8.dll` next to the game's executable, with `WINEDLLOVERRIDES="dinput8=n,b" %command%` in the launch options (see [Windows](#windows)). The controller buttons that open the menu (`menuButtons`) are read through XInput, which only the Windows DLL uses: in a native game, bind the menu key, `INSERT` by default, to a button of the Deck with Steam Input.
+
 ### Settings
 
 The example library's settings are compiled into it: edit `example/config.cpp`, next to `dllmain.cpp`, and rebuild.
@@ -519,11 +521,7 @@ Some tests press real keys and move the mouse. They are skipped when the host wi
 
 ## Contributing
 
-- A new source file goes into `CMakeLists.txt` **and** the matching project in `vs/`.
-- A fix comes with a `uih_host` scenario that fails without it.
-- Run the CTest suite on Windows; the CI covers Linux.
-
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) maps where the code is and how it works.
+Bug reports, fixes and features are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) gives the principles and rules of the project, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) maps where the code is and how it works. Report security problems privately, as [SECURITY.md](SECURITY.md) explains.
 
 ## Limitations
 

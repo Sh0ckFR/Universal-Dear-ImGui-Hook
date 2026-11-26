@@ -1,0 +1,12 @@
+# Sections of the release notes that GitHub generates from the merged pull
+# requests, by label; pull requests without one go to "Other changes".
+changelog:
+  categories:
+    - title: New features
+      labels: [enhancement]
+    - title: Fixes
+      labels: [bug]
+    - title: Documentation
+      labels: [documentation]
+    - title: Other changes
+      labels: ['*']

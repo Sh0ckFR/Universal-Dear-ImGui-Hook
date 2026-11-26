@@ -1,0 +1,21 @@
+name: Feature request
+description: An idea for the overlay, the API, the remote control or the chat with Claude
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What you want to do
+      description: The problem or the use case, rather than a solution.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How it could work
+      description: Optional. The API, setting or tool you have in mind.
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: Games or graphics APIs concerned, workarounds you use today.
