@@ -6,8 +6,6 @@
 namespace uih::detail {
 
 void TeardownVulkan();
-// X11 window the overlay draws on, 0 before its first frame.
-NativeWindow BoundWindow();
 
 namespace remote {
 // Opens the socket of the remote control once this process draws the overlay.

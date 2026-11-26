@@ -609,13 +609,20 @@ void WhileRendering(Work&& work, Frame&& frame) {
 int RunRemote(Display* display, Window window, Host& host, const std::string& name) {
     int presses = 0;
     int releases = 0;
-    XSelectInput(display, window, StructureNotifyMask | KeyPressMask | KeyReleaseMask);
+    // Right clicks at kClick.
+    constexpr int kClick[2] = {120, 90};
+    int clickPresses = 0;
+    int clickReleases = 0;
+    XSelectInput(display, window, StructureNotifyMask | KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask);
     auto frame = [&] {
         while (XPending(display)) {
             XEvent event;
             XNextEvent(display, &event);
             if ((event.type == KeyPress || event.type == KeyRelease) && XLookupKeysym(&event.xkey, 0) == XK_u)
                 ++(event.type == KeyPress ? presses : releases);
+            if ((event.type == ButtonPress || event.type == ButtonRelease) && event.xbutton.button == Button3 && event.xbutton.x == kClick[0] &&
+                event.xbutton.y == kClick[1])
+                ++(event.type == ButtonPress ? clickPresses : clickReleases);
             if (event.type == MappingNotify)
                 XRefreshKeyboardMapping(&event.xmapping);
         }
@@ -737,6 +744,38 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
     XSync(display, False);
     for (int i = 0; i < 10; ++i)
         frame();
+
+    // Right clicks through the remote control: the answer, and whether the
+    // window received the press and the release at kClick.
+    auto rightClick = [&](bool& received) {
+        int pressesBefore = clickPresses;
+        int releasesBefore = clickReleases;
+        std::string answer;
+        WhileRendering(
+            [&] {
+                RemoteClient client;
+                if (client.Open())
+                    answer = client.Request("click " + std::to_string(kClick[0]) + " " + std::to_string(kClick[1]) + " right 50");
+            },
+            frame);
+        for (int i = 0; i < 10; ++i)
+            frame();
+        received = clickPresses > pressesBefore && clickReleases > releasesBefore;
+        return answer;
+    };
+    bool focusedClicked = false;
+    std::string focusedClick = rightClick(focusedClicked);
+    setFocus(None, 1200, 700);
+    bool unfocusedClicked = false;
+    std::string unfocusedClick = rightClick(unfocusedClicked);
+    std::string outside;
+    WhileRendering(
+        [&] {
+            RemoteClient client;
+            if (client.Open())
+                outside = client.Request("click 800 10");
+        },
+        frame);
     unlink(RemoteSocketPath().c_str());
 
     printf("focused: %s, received %d\nwithout the focus: %s, received %d\nroot window focused, pointer outside: %s, received %d\n"
@@ -751,6 +790,14 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
         return Fail("the keys of the remote control went to the window under the pointer");
     if (!remappedReceived)
         return Fail("the remote control pressed u where the previous keyboard layout had it");
+    printf("right click, focused: %s, received %d\nright click without the focus: %s, received %d\nclick outside: %s\n", focusedClick.c_str(),
+           focusedClicked, unfocusedClick.c_str(), unfocusedClicked, outside.c_str());
+    if (focusedClick.rfind("ok sent as mouse input", 0) != 0 || !focusedClicked)
+        return Fail("the clicks of the remote control did not reach the focused window");
+    if (unfocusedClick.rfind("ok sent as window events", 0) != 0 || !unfocusedClicked)
+        return Fail("the clicks of the remote control did not reach the window without the focus");
+    if (outside.rfind("error the point is outside the game window", 0) != 0)
+        return Fail("the remote control clicked outside the game window");
     printf("PASS: %s remote control\n", name.c_str());
     return 0;
 }

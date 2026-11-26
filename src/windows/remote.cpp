@@ -204,15 +204,31 @@ int KeyCode(const std::string& name) {
     return 0;
 }
 
+namespace {
+
+// The window the overlay draws on, or before its first frame the main window
+// of the process: another window of the game may have the focus.
+HWND TargetWindow() {
+    HWND window = BoundWindow();
+    return window && IsWindowVisible(window) ? window : input::FindProcessWindow();
+}
+
+bool HasFocus(HWND window) {
+    HWND foreground = GetForegroundWindow();
+    return foreground && (foreground == window || foreground == GetAncestor(window, GA_ROOT));
+}
+
+} // namespace
+
 // SendInput when the game has the focus. Otherwise, as when the player types
 // to the assistant in another window, the keys go to the game window as
 // messages, which games that poll the keyboard state do not see. Stop()
 // releases the keys at once.
 std::string HoldKeys(const std::vector<int>& keys, unsigned ms) {
-    HWND window = input::FindProcessWindow();
+    HWND window = TargetWindow();
     if (!window)
         return "error the game has no visible window";
-    if (GetForegroundWindow() == window) {
+    if (HasFocus(window)) {
         SendKeys(keys, false);
         WaitForSingleObject(g_stopEvent, ms);
         SendKeys(keys, true);
@@ -227,14 +243,63 @@ std::string HoldKeys(const std::vector<int>& keys, unsigned ms) {
     return "ok sent as window messages, the game does not have the focus: games that read the keyboard state directly do not see them";
 }
 
+// Mouse input when the game has the focus, moved there with SendInput: the hook
+// of SetCursorPos keeps the cursor still while the menu is open. Otherwise
+// window messages, a move before the release too: Dear ImGui forgets the
+// cursor when Windows tells it the real one is not over the window. The
+// cursor rests on the point for a few frames before the press, as games read
+// it once per frame.
+std::string ClickAt(int x, int y, int button, unsigned ms) {
+    constexpr DWORD kHoverMs = 50;
+    static const DWORD kDown[] = {0, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_RIGHTDOWN};
+    static const DWORD kUp[] = {0, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_RIGHTUP};
+    static const UINT kDownMessage[] = {0, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_RBUTTONDOWN};
+    static const UINT kUpMessage[] = {0, WM_LBUTTONUP, WM_MBUTTONUP, WM_RBUTTONUP};
+    static const WPARAM kHeld[] = {0, MK_LBUTTON, MK_MBUTTON, MK_RBUTTON};
+    HWND window = TargetWindow();
+    if (!window)
+        return "error the game has no visible window";
+    if (HasFocus(window)) {
+        POINT point{x, y};
+        ClientToScreen(window, &point);
+        int left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        int top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        int width = std::max(2, GetSystemMetrics(SM_CXVIRTUALSCREEN));
+        int height = std::max(2, GetSystemMetrics(SM_CYVIRTUALSCREEN));
+        INPUT inputs[2] = {};
+        inputs[0].type = INPUT_MOUSE;
+        inputs[0].mi.dx = static_cast<LONG>((static_cast<int64_t>(point.x - left) * 65535 + (width - 1) / 2) / (width - 1));
+        inputs[0].mi.dy = static_cast<LONG>((static_cast<int64_t>(point.y - top) * 65535 + (height - 1) / 2) / (height - 1));
+        inputs[0].mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+        inputs[1].type = INPUT_MOUSE;
+        inputs[1].mi.dwFlags = kDown[button];
+        SendInput(1, inputs, sizeof(INPUT));
+        WaitForSingleObject(g_stopEvent, kHoverMs);
+        SendInput(1, inputs + 1, sizeof(INPUT));
+        WaitForSingleObject(g_stopEvent, ms);
+        inputs[1].mi.dwFlags = kUp[button];
+        SendInput(1, inputs + 1, sizeof(INPUT));
+        return "ok sent as mouse input, the game has the focus";
+    }
+    LPARAM position = MAKELPARAM(x, y);
+    PostMessageW(window, WM_MOUSEMOVE, 0, position);
+    WaitForSingleObject(g_stopEvent, kHoverMs);
+    PostMessageW(window, WM_MOUSEMOVE, 0, position);
+    PostMessageW(window, kDownMessage[button], kHeld[button], position);
+    WaitForSingleObject(g_stopEvent, ms);
+    PostMessageW(window, WM_MOUSEMOVE, kHeld[button], position);
+    PostMessageW(window, kUpMessage[button], 0, position);
+    return "ok sent as window messages, the game does not have the focus: games that read the mouse directly do not see them";
+}
+
 bool GameWindow(uint32_t& width, uint32_t& height, bool& focused) {
-    HWND window = input::FindProcessWindow();
+    HWND window = TargetWindow();
     RECT client{};
     if (!window || !GetClientRect(window, &client))
         return false;
     width = static_cast<uint32_t>(client.right);
     height = static_cast<uint32_t>(client.bottom);
-    focused = GetForegroundWindow() == window;
+    focused = HasFocus(window);
     return true;
 }
 

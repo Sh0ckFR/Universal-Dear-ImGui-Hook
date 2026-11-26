@@ -70,7 +70,25 @@ TOOLS = [
             "required": ["key"],
         },
     },
+    {
+        "name": "click",
+        "description": "Clicks in the game at a point of the last screenshot, in its pixels, and returns once the button is released. "
+        "Before any screenshot, x and y are pixels of the game window. Clicks reach the overlay menu too when the game has the focus.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "x": {"type": "integer", "minimum": 0},
+                "y": {"type": "integer", "minimum": 0},
+                "button": {"type": "string", "enum": ["left", "right", "middle"], "description": "left by default."},
+                "duration_ms": {"type": "integer", "description": "How long the button is held, 100 by default.", "minimum": 30, "maximum": 10000},
+            },
+            "required": ["x", "y"],
+        },
+    },
 ]
+
+# Size of the last screenshot, to turn its pixels into pixels of the window.
+last_screenshot = None
 
 MEMORY_TYPES = {"i8": "<b", "i16": "<h", "i32": "<i", "i64": "<q", "f32": "<f", "f64": "<d"}
 MEMORY_NOTE = " Needs config.remoteMemory = true in example/config.cpp."
@@ -238,6 +256,8 @@ def call_tool(name, args):
         size = int(args.get("max_size", 1280))
         text, rgb = request(f"screenshot {size}", payload=lambda answer: int(answer.split()[1]) * int(answer.split()[2]) * 3)
         width, height = (int(value) for value in text.split()[1:3])
+        global last_screenshot
+        last_screenshot = (width, height)
         image = base64.b64encode(png(width, height, rgb)).decode("ascii")
         return [{"type": "image", "data": image, "mimeType": "image/png"}, {"type": "text", "text": f"{width}x{height}"}]
     if name == "show_text":
@@ -251,6 +271,16 @@ def call_tool(name, args):
             raise GameError("Give keys without spaces, such as space or right+space.")
         text, _ = request(f"key {key} {int(args.get('duration_ms', 150))}")
         return [{"type": "text", "text": f"Pressed {key}: {text[3:]}."}]
+    if name == "click":
+        x, y = int(args.get("x", 0)), int(args.get("y", 0))
+        button = str(args.get("button", "left"))
+        if last_screenshot:
+            info, _ = request("info")
+            window_width, window_height = (int(value) for value in info.split()[2].split("x"))
+            x = min(window_width - 1, x * window_width // last_screenshot[0])
+            y = min(window_height - 1, y * window_height // last_screenshot[1])
+        text, _ = request(f"click {x} {y} {button} {int(args.get('duration_ms', 100))}")
+        return [{"type": "text", "text": f"Clicked {button} at {x},{y} in the window: {text[3:]}."}]
     if name.startswith("memory_"):
         return [{"type": "text", "text": memory_tool(name, args)}]
     raise GameError(f"Unknown tool {name}.")
