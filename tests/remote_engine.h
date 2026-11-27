@@ -128,6 +128,19 @@ std::string CheckRemoteEngine(Client& client, const FakeEngine& fake, bool advan
     if (client.Request("engine class Nothing").rfind("error no class named Nothing", 0) != 0)
         return "an unknown class is not refused";
 
+    // The methods and fields of every class: the one named so first, then those that start with the text.
+    if (payload("engine search heal") != "function Assembly-CSharp Game.Player::Heal System.Void Heal(System.Int32 amount)\n"
+                                         "property Assembly-CSharp Game.Player::health " + EngineHex(health) + " System.Int32\n"
+                                         "property Assembly-CSharp Game.Player::MaxHealth const System.Int32\n"
+                                         "function Assembly-CSharp Game.Player::get_Health System.Int32 get_Health()\n" ||
+        payload("engine search HEAL functions") != "function Assembly-CSharp Game.Player::Heal System.Void Heal(System.Int32 amount)\n"
+                                                  "function Assembly-CSharp Game.Player::get_Health System.Int32 get_Health()\n" ||
+        payload("engine search Game.Player::s_ properties") != "property Assembly-CSharp Game.Player::s_Count static System.Int32\n"
+                                                              "property Assembly-CSharp Game.Player::s_Local static Game.Player\n"
+                                                              "property Assembly-CSharp Game.Player::s_Spawn static UnityEngine.Vector3\n" ||
+        payload("engine search nothing_named_so") != "" || client.Request("engine search").rfind("error give a part of the name", 0) != 0)
+        return "engine search does not find the methods and fields of the classes";
+
     if (payload("engine get Game.Player s_Count") != "System.Int32 7" || payload("engine get Game.Player s_Spawn") != "UnityEngine.Vector3 {x=5, y=6, z=7}" ||
         payload("engine get Game.Player s_Local") != "Game.Player " + EngineHex(alice) + " (Game.Player)")
         return "engine get does not read the static fields";
@@ -418,6 +431,24 @@ std::string CheckRemoteUnreal(Client& client, const FakeUnreal& fake, bool advan
     if (hero.rfind("class BP_Hero_C : GamePlayer : Pawn : Actor : Object (/Game/Blueprints/BP_Hero)\nproperties:\n  0x15c float Mana\n", 0) != 0 ||
         !has(hero, "functions:\n  float \"Get Health Ratio\"()\nfunctions of GamePlayer: engine class GamePlayer\n"))
         return "engine class does not describe a blueprint class, or does not quote the names with spaces";
+
+    // The functions and properties of every class: the one named so first,
+    // then those that start with the text, then those that contain it.
+    std::string healers = "function /Script/Game GamePlayer::Heal bool Heal(int32 Amount)\n"
+                          "property /Script/Game GamePlayer::Health 0x100 int32\n"
+                          "property /Script/Game \"GamePlayer::Health Max\" 0x158 int32\n"
+                          "function /Game/Blueprints/BP_Hero \"BP_Hero_C::Get Health Ratio\" float \"Get Health Ratio\"()\n";
+    if (payload("engine search heal") != healers || payload("engine search Heal all") != healers ||
+        payload("engine search HEAL functions") != "function /Script/Game GamePlayer::Heal bool Heal(int32 Amount)\n"
+                                                  "function /Game/Blueprints/BP_Hero \"BP_Hero_C::Get Health Ratio\" float \"Get Health Ratio\"()\n" ||
+        payload("engine search health max properties") != "property /Script/Game \"GamePlayer::Health Max\" 0x158 int32\n" ||
+        payload("engine search \"Health Max\"") != "property /Script/Game \"GamePlayer::Health Max\" 0x158 int32\n" ||
+        payload("engine search hero::") != "property /Game/Blueprints/BP_Hero BP_Hero_C::Mana 0x15c float\n"
+                                           "function /Game/Blueprints/BP_Hero \"BP_Hero_C::Get Health Ratio\" float \"Get Health Ratio\"()\n" ||
+        payload("engine search bhidden") != "property /Script/Engine Actor::bHidden 0x58 bool (bit 0x2)\n" ||
+        payload("engine search add_int functions") != "function /Script/Engine KismetMathLibrary::Add_IntInt static int32 Add_IntInt(int32 A, int32 B)\n" ||
+        payload("engine search nothing_named_so") != "" || client.Request("engine search").rfind("error give a part of the name", 0) != 0)
+        return "engine search does not find the functions and properties of the classes";
 
     std::string players = EngineHex(fake.alice) + " GamePlayer GamePlayer_0\n" + EngineHex(fake.bob) + " GamePlayer GamePlayer_1\n" + EngineHex(fake.carol) +
                           " GamePlayer GamePlayer_2\n" + EngineHex(fake.dave) + " BP_Hero_C BP_Hero_C_0\n";
