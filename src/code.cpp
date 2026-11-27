@@ -18,6 +18,10 @@
 #include <cstdlib>
 #include <cstring>
 
+#ifdef __linux__
+#include <link.h>
+#endif
+
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
 #define UIH_DISASSEMBLER 1
 // As src/zydis_build.c compiles it.
@@ -624,9 +628,83 @@ uintptr_t FollowJumps(uintptr_t address) {
 }
 #endif
 
+// The bytes from `address` to the end of its function, from the unwind
+// tables compilers write for every function, 0 when unknown: the .pdata of
+// 64-bit Windows modules, and the sorted table of .eh_frame_hdr on Linux,
+// where the next function's start bounds the function. Decoding stops there:
+// the end of a function is not always a ret, after a conditional tail call
+// or a call that does not return.
+size_t FunctionExtent(uintptr_t address) {
+#if defined(_WIN64)
+    DWORD64 base = 0;
+    PRUNTIME_FUNCTION entry = RtlLookupFunctionEntry(static_cast<DWORD64>(address), &base, nullptr);
+    if (!entry || base + entry->EndAddress <= address)
+        return 0;
+    return static_cast<size_t>(base + entry->EndAddress - address);
+#elif defined(__linux__)
+    struct Query {
+        uintptr_t address;
+        size_t extent;
+    } query{address, 0};
+    dl_iterate_phdr(
+        [](dl_phdr_info* info, size_t, void* data) -> int {
+            auto* query = static_cast<Query*>(data);
+            const ElfW(Phdr)* frame = nullptr;
+            bool inside = false;
+            for (int i = 0; i < info->dlpi_phnum; ++i) {
+                const ElfW(Phdr)& header = info->dlpi_phdr[i];
+                uintptr_t start = info->dlpi_addr + header.p_vaddr;
+                if (header.p_type == PT_LOAD && query->address >= start && query->address < start + header.p_memsz)
+                    inside = true;
+                if (header.p_type == PT_GNU_EH_FRAME)
+                    frame = &header;
+            }
+            if (!inside)
+                return 0;
+            if (!frame)
+                return 1;
+            // Version 1, the encodings of eh_frame_ptr, fde_count and the table,
+            // which is pairs of int32 (start, FDE) relative to the header.
+            const auto* hdr = reinterpret_cast<const uint8_t*>(info->dlpi_addr + frame->p_vaddr);
+            uint8_t pointer = hdr[1] & 0x0f;
+            size_t pointerSize = pointer == 0x03 || pointer == 0x0b ? 4 : pointer == 0x04 || pointer == 0x0c ? 8 : 0;
+            if (hdr[0] != 1 || !pointerSize || hdr[2] != 0x03 || hdr[3] != 0x3b)
+                return 1;
+            uint32_t count = 0;
+            memcpy(&count, hdr + 4 + pointerSize, sizeof(count));
+            const uint8_t* table = hdr + 8 + pointerSize;
+            auto startAt = [&](uint32_t index) {
+                int32_t offset = 0;
+                memcpy(&offset, table + static_cast<size_t>(index) * 8, sizeof(offset));
+                return reinterpret_cast<uintptr_t>(hdr) + static_cast<intptr_t>(offset);
+            };
+            // The first function that starts after the address.
+            uint32_t low = 0;
+            uint32_t high = count;
+            while (low < high) {
+                uint32_t middle = low + (high - low) / 2;
+                if (startAt(middle) <= query->address)
+                    low = middle + 1;
+                else
+                    high = middle;
+            }
+            if (low > 0 && low < count)
+                query->extent = static_cast<size_t>(startAt(low) - query->address);
+            return 1;
+        },
+        &query);
+    return query.extent;
+#else
+    (void)address;
+    return 0;
+#endif
+}
+
 #if defined(__aarch64__) || defined(_M_ARM64)
 // ldr wT, [xN, #imm], ldrb, ldur, then tbz/tbnz wT, #bit or tst wT, #mask.
 bool TestsBitsArm64(uintptr_t function, uint32_t displacement, uint32_t mask, size_t length) {
+    if (size_t extent = FunctionExtent(function))
+        length = std::min(length, extent);
     std::vector<uint32_t> code(length / 4);
     if (code.empty() || !ReadMemory(function, code.data(), code.size() * 4))
         return false;
@@ -688,6 +766,8 @@ bool CodeTestsBits(uintptr_t function, uint32_t displacement, uint32_t mask, siz
 #if UIH_DISASSEMBLER
     const Decoder& decoder = GetDecoder();
     uintptr_t start = FollowJumps(function);
+    if (size_t extent = FunctionExtent(start))
+        length = std::min(length, extent);
     std::vector<uint8_t> bytes(length + kMaxInstruction);
     size_t size = ReadUpTo(start, bytes.data(), bytes.size());
     // The registers loaded from the value, and the byte of the value they start at.
