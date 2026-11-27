@@ -702,7 +702,8 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
             if (!client.Open())
                 return;
             info = client.Request("info");
-            text = client.Request("text 60 hello\\nworld");
+            // Long enough to outlast the checks below under the sanitizers.
+            text = client.Request("text 300 hello\\nworld");
             screenshot = client.Request("screenshot 400");
             if (screenshot == "ok 400 300") {
                 rgb.resize(400 * 300 * 3);
