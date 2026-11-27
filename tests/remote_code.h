@@ -63,6 +63,8 @@ inline size_t CountLines(const std::string& text) {
 // and `refusal` the start of the reason.
 template <typename Client>
 std::string CheckRemoteCode(Client& client, const void* protectedCode, const char* symbol, const char* refusal) {
+    if (!protectedCode)
+        return std::string("the host did not find ") + symbol;
     uintptr_t code = PatchTargetCode();
     std::string at = HexAddress(reinterpret_cast<const void*>(code));
     std::string signature;
@@ -107,6 +109,9 @@ std::string CheckRemoteCode(Client& client, const void* protectedCode, const cha
     std::string list = RemotePayload(client, client.Request("patches"));
     std::string overlap = client.Request("patch " + HexAddress(reinterpret_cast<const void*>(code + 1)) + " 90");
     std::string refused = client.Request("patch " + HexAddress(protectedCode) + " 90");
+    // Taken back at once, should the overlay have taken it.
+    if (refused.rfind("ok ", 0) == 0)
+        client.Request("unpatch " + refused.substr(3, refused.find(' ', 3) - 3));
     std::string data = client.Request("patch " + HexAddress(&g_remoteValue) + " 90");
     printf("patch: %s, %d before, %d after\npatches: %spatch over it: %s\npatch the overlay: %s\npatch data: %s\n", patched.c_str(), original,
            changed, list.c_str(), overlap.c_str(), refused.c_str(), data.c_str());
