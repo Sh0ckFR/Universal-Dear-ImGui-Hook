@@ -107,7 +107,7 @@ UIH_EXPORT UIH_NO_SANITIZE void* dlsym(void* handle, const char* name) noexcept 
     if (handle == RTLD_DEFAULT || handle == RTLD_NEXT)
         UIH_MUSTTAIL return RealDlsym()(handle, name);
     void* function = RealDlsym()(handle, name);
-    for (const Library* library : {&kGlx, &kEgl, &kVulkan, &kXcb})
+    for (const Library* library : {&kGlx, &kEgl, &kVulkan, &kXcb, &kWayland})
         if (void* detour = library->Detour(name))
             return library->Contains(function) ? detour : function;
     return function;

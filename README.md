@@ -42,7 +42,7 @@ Sections marked with ▶ expand on click. What changed in each version is listed
 - **Chat with Claude in the game**: a [chat window over the game](#talk-to-claude-from-the-game) where you tell Claude what to do. It looks at the game, plays it, reads or changes its memory, and answers in the chat.
 - **One library for every API**: the backend is picked from the first API that presents a frame. Inject before or after the game initializes its graphics.
 - **AI remote control**: through [MCP](#remote-control-by-an-ai-assistant), an assistant such as Claude Code sees the game, shows messages to the player, presses keys and clicks. Your menu can give it [tools of your own](#tools-of-your-own), such as *teleport* or *spawn an item*, which it calls like the built-in ones. With the [advanced features](#advanced-features-and-the-ai-advanced-features-window), it also types text, drags the mouse, waits for the screen to change, pauses or slows down the game while it thinks, follows pointer chains, freezes values and finds the code that writes them, and the *AI Advanced Features* window shows everything it does.
-- **Menu input**: `INSERT`, or L3 + R3 on a controller, opens the menu; `F11` removes the overlay and unloads the DLL. Both keys are [settings](#settings). While the menu is open, the game receives no keyboard, mouse or controller input (on Linux, no key or button presses and no motion), and an XInput controller navigates the menu.
+- **Menu input**: `INSERT`, or L3 + R3 on a controller, opens the menu; `F11` removes the overlay and unloads the DLL. Both keys are [settings](#settings). While the menu is open, the game receives no keyboard, mouse or controller input (on Linux, no key or button presses and no motion, on X11 and native Wayland alike), and an XInput controller navigates the menu.
 - **The overlay can't crash the game** (MSVC builds on Windows, and Linux): an access violation or a C++ exception in the overlay, whether in a renderer backend or in your menu code, removes the overlay instead of taking the game down. The menu key brings it back.
 - **Images and frame capture**: `uih::CreateTexture()` turns RGBA pixels into an image for `ImGui::Image()`, and `uih::CaptureFrame()` copies the game's frame, without the overlay, on every backend.
 - **Multiple windows**: when the game presents to more than one window or swap chain, the overlay stays on one of them and follows the focus.
@@ -285,7 +285,7 @@ The bridge runs Claude Code headless (`claude -p`) with the tools of `remote/uih
 
 ## Remote control by an AI assistant
 
-The library can let an AI assistant such as [Claude Code](https://claude.com/claude-code) see the game, show messages to the player, press keys and click, and optionally read and write the game's memory. The assistant speaks the [Model Context Protocol](https://modelcontextprotocol.io) (MCP) with `remote/uih_mcp.py` over standard input and output, and the script talks to the library over a local named pipe (Windows) or Unix socket (Linux). It works with every graphics API, and on Linux with X11 and XWayland games.
+The library can let an AI assistant such as [Claude Code](https://claude.com/claude-code) see the game, show messages to the player, press keys and click, and optionally read and write the game's memory. The assistant speaks the [Model Context Protocol](https://modelcontextprotocol.io) (MCP) with `remote/uih_mcp.py` over standard input and output, and the script talks to the library over a local named pipe (Windows) or Unix socket (Linux). It works with every graphics API, and on Linux with X11, XWayland and native Wayland games.
 
 ```mermaid
 flowchart LR
@@ -400,7 +400,7 @@ uih::RegisterTool("teleport", "Moves the player to x, y, z in world units, and r
 - **While you type to the assistant, the game does not have the focus.** Keys and clicks then reach it as window messages, or X11 events on Linux, which games that read the keyboard or mouse state directly (DirectInput, raw input) do not see, and neither does the overlay menu on Linux. With the focus, a click moves the player's cursor. Click the game window after sending your request, or let the assistant play on a second screen.
 - While the overlay menu is open, the game receives no keys: the assistant can close it with `insert`.
 - The assistant plays turn by turn, a screenshot and a few keys at a time: fine for menus, puzzles and slow games, not for reflexes.
-- On Linux, keys and clicks go through the X server's XTEST extension; without it, they are sent as events to the window. Native Wayland games get neither.
+- On Linux, keys and clicks go through the X server's XTEST extension; without it, they are sent as events to the window. Native Wayland games get them as Wayland events, handed to the listeners of their pointer and keyboard the next time they read their events: the compositor's pointer does not move, and a game that reads no events, such as one stopped by `game_speed 0`, gets them once it runs again (the command answers an error after one second).
 - One game per pipe or socket name: a second game started with the same name logs that the remote control is unavailable.
 - `unloadKey` stops the remote control along with the overlay.
 - With `remoteMemory`, any program you run can also read and write the game's memory through the pipe or the socket; on Linux, that bypasses Yama's ptrace restrictions for programs of your user. A value scan also finds copies of the value: change it in the game and narrow the scan until one address is left.
@@ -573,9 +573,9 @@ Bug reports, fixes and features are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) 
 - MinGW-w64 builds of the DLL survive C++ exceptions in the overlay, but not access violations, since MinGW-w64 has no structured exception handling. The released DLLs are built with MSVC.
 
 **Linux**
-- Input is read from the X server, so native Wayland windows get no menu input (run SDL games with `SDL_VIDEODRIVER=x11`). The wheel scrolls the menu in games that read the mouse buttons from the X server. Input methods are not handled, and a pointer the game has grabbed stays grabbed while the menu is open.
+- Input is read from the X server, or, for native Wayland games (SDL with `SDL_VIDEODRIVER=wayland`, GLFW, Godot with `--display-driver wayland`, Vulkan or EGL on a `wl_surface`), from the listeners of their `wl_pointer` and `wl_keyboard`. The wheel scrolls the menu in games that read the mouse buttons from the X server, and in Wayland games. Input methods are not handled, and a pointer the game has grabbed stays grabbed while the menu is open.
+- On Wayland, a pointer the game locked (`zwp_locked_pointer_v1`) stays locked while the menu is open: its relative motion moves the menu's cursor instead, which the compositor does not draw. Keys are read with the game's keymap through libxkbcommon, opened at run time, or with the US layout when it is not installed. Listeners set with `wl_proxy_add_dispatcher`, and those of a protocol version newer than the library knows, are not read, nor input that a game reads on an event queue of its own from inside its presents. The menu is drawn at a scale of 1 on Wayland.
 - 32-bit games, OpenGL ES, and games that link their GL or Vulkan loader statically are not supported.
-- The remote control sends no keys or clicks to native Wayland games.
 - `game_speed` needs the library preloaded, since it stands for `clock_gettime()`. A paused game that sleeps until a time it computed from its own clock may spin a core until it runs again.
 
 ## Credits
