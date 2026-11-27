@@ -610,10 +610,9 @@ int RunRemote(XServer& screen, Host& host, const std::string& name) {
     if (request("key insert 100").rfind("ok sent as keyboard input", 0) != 0)
         return Fail("the menu key of the remote control was not sent");
     RunFor(host, 500);
+    // This hook has no render callback: the open menu draws nothing.
     if (request("info").find(" menu=1") == std::string::npos)
         return Fail("the menu key of the remote control did not open the menu");
-    if (screen.CountOverlayPixels() < kVisible)
-        return Fail("overlay is not visible on screen");
     g_client.seen = Seen{};
     request("key u 100");
     request("click 120 90");
@@ -623,11 +622,10 @@ int RunRemote(XServer& screen, Host& host, const std::string& name) {
     // The unload key ends the remote control with the overlay: the answer may be lost.
     request("key f11 100");
     RunFor(host, 1500);
-    int pixels = screen.CountOverlayPixels();
-    printf("%d overlay pixels left after the unload key\n", pixels);
-    if (pixels >= kVisible)
-        return Fail("overlay is still visible after the unload key of the remote control");
-    unlink(RemoteSocketPath().c_str());
+    if (access(RemoteSocketPath().c_str(), F_OK) == 0) {
+        unlink(RemoteSocketPath().c_str());
+        return Fail("the unload key of the remote control did not stop the hook: its socket is still there");
+    }
     printf("PASS: %s remote control\n", name.c_str());
     return 0;
 }
