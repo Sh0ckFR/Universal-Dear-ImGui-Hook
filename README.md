@@ -81,8 +81,18 @@ Prebuilt libraries are attached to each [release](https://github.com/Sh0ckFR/Uni
 
 These are the `Universal-ImGui-Hook.dll` and `.so` that the build below produces, renamed after their platform; the rest of this page uses the short name.
 
-> [!TIP]
-> Each file also comes as an `-ai` version, such as `Universal-ImGui-Hook-msvc-x64-ai.dll`, with the [chat with Claude](#talk-to-claude-from-the-game) and every tool of the assistant on. Use it for single-player games only, since any program you run can then control the game and its memory.
+Each file also comes in four variants with some settings on, named with a suffix, such as `Universal-ImGui-Hook-msvc-x64-ai.dll`:
+
+| Suffix | Settings on | What it gives |
+| --- | --- | --- |
+| none | none | The menu alone |
+| `-remote` | `remoteControl` | The [remote control](#remote-control-by-an-ai-assistant): an assistant such as Claude sees the game, shows messages and presses keys |
+| `-memory` | `remoteControl`, `remoteMemory` | The remote control and the [memory tools](#memory-tools), with the [engine tools](#engine-tools) of Unity and Unreal games |
+| `-advanced` | `remoteControl`, `aiAdvancedFeatures` | The remote control and the [advanced tools](#advanced-features-and-the-ai-advanced-features-window): typing, mouse, game speed, and the [chat with Claude](#talk-to-claude-from-the-game), without access to the memory |
+| `-ai` | all three | Every tool of the assistant, with the chat and the advanced memory tools |
+
+> [!WARNING]
+> Use the variants for single-player games only: any program you run can then control the game, and with `-memory` or `-ai` its memory too.
 
 <details>
 <summary>Check a file you downloaded</summary>
@@ -250,7 +260,7 @@ flowchart LR
 
 Download the `-ai` library of a [release](https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook/releases) that matches the game, such as `Universal-ImGui-Hook-msvc-x64-ai.dll` (see [Quick start](#quick-start)): it has the settings below on.
 
-Or build it. In `example/config.cpp`, set these settings to `true`, or configure CMake with `-DUIH_EXAMPLE_AI=ON`, which turns them all on:
+Or build it. In `example/config.cpp`, set these settings to `true`, or configure CMake with `-DUIH_EXAMPLE_VARIANT=ai`, which turns them all on (`remote`, `memory` and `advanced` build the other [variants](#1-get-the-library)):
 
 ```cpp
 config.remoteControl = true;        // the game can be controlled through a local pipe or socket

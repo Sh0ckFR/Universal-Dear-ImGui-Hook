@@ -42,11 +42,19 @@ void ApplySettings(uih::Config& config) {
     // and on Windows the instructions that write a value.
     config.aiAdvancedFeatures = false;
 
-#ifdef UIH_EXAMPLE_AI
-    // The -ai libraries of the releases, built with cmake -DUIH_EXAMPLE_AI=ON:
-    // the chat with Claude and every tool of the assistant, ready to use.
+    // The variants of the release libraries, built with
+    // cmake -DUIH_EXAMPLE_VARIANT=remote, memory, advanced or ai:
+    //   -remote    the remote control: Claude sees the game and presses its keys
+    //   -memory    the remote control and the memory and engine tools
+    //   -advanced  the remote control and the advanced tools, with the chat
+    //   -ai        all of them
+#ifdef UIH_EXAMPLE_REMOTE
     config.remoteControl = true;
+#endif
+#ifdef UIH_EXAMPLE_MEMORY
     config.remoteMemory = true;
+#endif
+#ifdef UIH_EXAMPLE_ADVANCED
     config.aiAdvancedFeatures = true;
 #endif
 }
