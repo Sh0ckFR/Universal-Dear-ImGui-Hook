@@ -269,7 +269,7 @@ struct EglHost : Host {
 
 // The X server Weston runs in ------------------------------------------------
 
-struct Screen {
+struct XServer {
     Display* display = nullptr;
     // Weston's window, the output of the compositor.
     Window output = 0;
@@ -370,14 +370,14 @@ void RunFor(Host& host, int ms) {
     }
 }
 
-void Tap(Screen& screen, Host& host, KeySym key) {
+void Tap(XServer& screen, Host& host, KeySym key) {
     screen.Key(key, true);
     RunFor(host, 150);
     screen.Key(key, false);
 }
 
 // INSERT opens the menu, F11 removes the overlay, and with --reload INSERT brings it back.
-int Run(Screen& screen, Host& host, const std::string& name, const Options& options) {
+int Run(XServer& screen, Host& host, const std::string& name, const Options& options) {
     const KeySym menuKey = options.menuKey ? options.menuKey : XK_Insert;
     const KeySym unloadKey = options.unloadKey ? options.unloadKey : XK_F11;
     screen.Move(400, 300);
@@ -419,7 +419,7 @@ int Run(Screen& screen, Host& host, const std::string& name, const Options& opti
 // and no wheel, but the release of a key held before the menu opened; the
 // wheel scrolls the menu and the clicks land in it. Before and after, the
 // host reads everything.
-int RunInput(Screen& screen, Host& host, const std::string& name) {
+int RunInput(XServer& screen, Host& host, const std::string& name) {
     auto everything = [&](int x, int y) {
         g_client.seen = Seen{};
         screen.Move(x, y);
@@ -490,7 +490,7 @@ int RunInput(Screen& screen, Host& host, const std::string& name) {
 
 // The commands of remote/uih_mcp.py: their keys and clicks reach the
 // listeners of the host, and the menu.
-int RunRemote(Screen& screen, Host& host, const std::string& name) {
+int RunRemote(XServer& screen, Host& host, const std::string& name) {
     constexpr int kClick[2] = {120, 90};
     constexpr int kMove[2] = {150, 160};
     constexpr int kDragFrom[2] = {200, 200};
@@ -627,7 +627,7 @@ int main(int argc, char** argv) {
     unsetenv("DISPLAY");
     if (!getenv("WAYLAND_DISPLAY") || xDisplay.empty())
         return Skip("run in Weston with tests/wayland.sh");
-    Screen screen;
+    XServer screen;
     if (!screen.Open(xDisplay.c_str()))
         return Skip("no window of Weston on the X server " + xDisplay);
     g_client.display = wl_display_connect(nullptr);
