@@ -7,6 +7,7 @@
 #include "remote_memory.h"
 #include "remote_advanced.h"
 #include "remote_time.h"
+#include "remote_code.h"
 #define UIH_TEST_TOOLS_HOOK
 #include "remote_tools.h"
 
@@ -16,6 +17,7 @@
 #include <d3d12sdklayers.h>
 #include <d3d9.h>
 #include <dbghelp.h>
+#include <dcomp.h>
 #include <dxgi1_4.h>
 #include <GL/gl.h>
 #define GL_APIENTRY APIENTRY
@@ -57,6 +59,9 @@ void Release(T*& object) {
 
 // Renders like many D3D9 games: several scenes per frame, one of them into a
 // texture that is still bound when the frame is presented.
+// 0 with --bench: the frames are not held to the refresh rate.
+UINT g_syncInterval = 1;
+
 struct D3D9Host : Host {
     bool ex = false;
     bool srgb = false;
@@ -122,6 +127,8 @@ struct D3D9Host : Host {
         srgb = options.format == "srgb";
         present.Windowed = TRUE;
         present.SwapEffect = D3DSWAPEFFECT_DISCARD;
+        if (options.benchFrames > 0)
+            present.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
         present.hDeviceWindow = window;
         if (ex) {
             if (FAILED(Direct3DCreate9Ex(D3D_SDK_VERSION, &d3dEx)) ||
@@ -140,7 +147,9 @@ struct D3D9Host : Host {
     void Frame() override {
         device->SetRenderTarget(0, backBuffer);
         device->SetRenderState(D3DRS_SRGBWRITEENABLE, srgb);
-        device->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_XRGB(26, 51, 77), 1.0f, 0);
+        const float* clear = ClearColor();
+        auto channel = [&](int i) { return static_cast<int>(clear[i] * 255.0f + 0.5f); };
+        device->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_XRGB(channel(0), channel(1), channel(2)), 1.0f, 0);
         device->BeginScene();
         device->EndScene();
         device->SetRenderTarget(0, offscreen);
@@ -204,6 +213,26 @@ DXGI_SWAP_CHAIN_DESC1 CompositionDesc() {
     desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
     return desc;
 }
+
+// Shows a swap chain made for composition in the window with DirectComposition,
+// as the programs that make one do: nothing of it reaches the screen otherwise.
+struct CompositionVisual {
+    IDCompositionDevice* device = nullptr;
+    IDCompositionTarget* target = nullptr;
+    IDCompositionVisual* visual = nullptr;
+
+    bool Show(HWND window, IUnknown* swapChain) {
+        return SUCCEEDED(DCompositionCreateDevice(nullptr, IID_PPV_ARGS(&device))) && SUCCEEDED(device->CreateTargetForHwnd(window, TRUE, &target)) &&
+               SUCCEEDED(device->CreateVisual(&visual)) && SUCCEEDED(visual->SetContent(swapChain)) && SUCCEEDED(target->SetRoot(visual)) &&
+               SUCCEEDED(device->Commit());
+    }
+
+    ~CompositionVisual() {
+        Release(visual);
+        Release(target);
+        Release(device);
+    }
+};
 
 // With UIH_TEST_D3D_DEBUG set, the D3D10, 11 and 12 hosts create their
 // device with the debug layer, which also checks what the hook does on that
@@ -298,7 +327,7 @@ struct D3D10Host : Host {
 
     void Frame() override {
         device->ClearRenderTargetView(target, ClearColor());
-        swapChain->Present(1, 0);
+        swapChain->Present(g_syncInterval, 0);
     }
 
     int ValidationErrors() const override { return DebugErrors<ID3D10InfoQueue, D3D10_MESSAGE>(device); }
@@ -317,6 +346,7 @@ struct D3D11Host : Host {
     ID3D11DeviceContext* context = nullptr;
     IDXGISwapChain* swapChain = nullptr;
     ID3D11RenderTargetView* target = nullptr;
+    CompositionVisual composition;
 
     bool CreateTarget() {
         ID3D11Texture2D* buffer = nullptr;
@@ -334,7 +364,7 @@ struct D3D11Host : Host {
 
     bool Fullscreen(bool on) override { return DxgiFullscreen(swapChain, on) && Resize(0, 0); }
 
-    bool InitComposition(D3D_DRIVER_TYPE driver, UINT flags) {
+    bool InitComposition(HWND window, D3D_DRIVER_TYPE driver, UINT flags) {
         if (FAILED(D3D11CreateDevice(nullptr, driver, nullptr, flags, nullptr, 0, D3D11_SDK_VERSION, &device, nullptr, &context)))
             return false;
         IDXGIDevice* dxgiDevice = nullptr;
@@ -349,7 +379,7 @@ struct D3D11Host : Host {
         Release(adapter);
         Release(dxgiDevice);
         swapChain = swapChain1;
-        return swapChain && CreateTarget();
+        return swapChain && composition.Show(window, swapChain) && CreateTarget();
     }
 
     bool Init(HWND window, const Options& options) override {
@@ -357,7 +387,7 @@ struct D3D11Host : Host {
         D3D_DRIVER_TYPE driver = options.warp ? D3D_DRIVER_TYPE_WARP : D3D_DRIVER_TYPE_HARDWARE;
         UINT flags = D3DDebug() ? D3D11_CREATE_DEVICE_DEBUG : 0;
         if (options.composition)
-            return InitComposition(driver, flags);
+            return InitComposition(window, driver, flags);
         if (FAILED(D3D11CreateDeviceAndSwapChain(nullptr, driver, nullptr, flags, nullptr, 0, D3D11_SDK_VERSION, &desc, &swapChain, &device, nullptr, &context)))
             return false;
         return CreateTarget();
@@ -365,7 +395,7 @@ struct D3D11Host : Host {
 
     void Frame() override {
         context->ClearRenderTargetView(target, ClearColor());
-        swapChain->Present(1, 0);
+        swapChain->Present(g_syncInterval, 0);
     }
 
     int ValidationErrors() const override { return DebugErrors<ID3D11InfoQueue, D3D11_MESSAGE>(device); }
@@ -435,6 +465,7 @@ struct D3D12Host : Host {
     ID3D12Device* device = nullptr;
     ID3D12CommandQueue* queue = nullptr;
     IDXGISwapChain3* swapChain = nullptr;
+    CompositionVisual composition;
     bool hdr10 = false;
     int framesSinceColorSpace = 0;
     ID3D12DescriptorHeap* heap = nullptr;
@@ -533,6 +564,8 @@ struct D3D12Host : Host {
             return false;
         swapChain1->QueryInterface(IID_PPV_ARGS(&swapChain));
         swapChain1->Release();
+        if (options.composition && !composition.Show(window, swapChain))
+            return false;
         // As an HDR game does: the overlay must then draw its colors with the PQ curve.
         hdr10 = options.format == "hdr10";
         if (hdr10 && FAILED(swapChain->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)))
@@ -625,7 +658,7 @@ struct D3D12Host : Host {
             ID3D12CommandList* decoyLists[] = {decoyList};
             decoyQueue->ExecuteCommandLists(1, decoyLists);
         }
-        swapChain->Present(1, 0);
+        swapChain->Present(g_syncInterval, 0);
         queue->Signal(fence, ++fenceValue);
         if (!gate)
             WaitForGpu();
@@ -761,6 +794,11 @@ struct OpenGLHost : Host {
         context = wglCreateContext(hdc);
         if (!context || !wglMakeCurrent(hdc, context))
             return false;
+        if (options.benchFrames > 0) {
+            using SwapIntervalFn = BOOL(WINAPI*)(int);
+            if (auto swapInterval = reinterpret_cast<SwapIntervalFn>(reinterpret_cast<void*>(wglGetProcAddress("wglSwapIntervalEXT"))))
+                swapInterval(0);
+        }
         const char* version = reinterpret_cast<const char*>(glGetString(GL_VERSION));
         if (options.format == "srgb")
             glEnable(kFramebufferSrgb);
@@ -989,8 +1027,13 @@ std::unique_ptr<Host> CreateHost(const std::string& api) {
     return nullptr;
 }
 
+// False with --bench, which measures frames as fast as they go.
+bool g_pace = true;
+
 // Paces the host at about 60 frames per second, so that frame counts are durations.
 void Pace() {
+    if (!g_pace)
+        return;
     static ULONGLONG next = 0;
     ULONGLONG now = GetTickCount64();
     if (next > now)
@@ -1014,17 +1057,21 @@ std::wstring RemotePipePath() { return L"\\\\.\\pipe\\uih-host-" + std::to_wstri
 
 // tests/c_api.c, compiled as C.
 extern "C" const char* uih_test_check_c_api(void);
-extern "C" void uih_test_start_c_api(void (*render)(void), void (*setup)(void), float scale);
+extern "C" void uih_test_start_c_api(void (*render)(void), void (*setup)(void), float scale, const char* pipe, bool memory, bool advanced);
+extern "C" bool uih_test_register_c_tools(void (*ran)(void));
 
 void StartHook(const Options& options) {
+    std::string pipe = RemotePipe();
     if (options.cApi) {
+        if (options.remote && !uih_test_register_c_tools([] { g_toolFrame = ImGui::GetCurrentContext() ? ImGui::GetFrameCount() : -1; }))
+            printf("uih_register_tool() refused a valid tool or accepted an invalid one: the remote scenario fails\n");
         g_hookStarted = true;
-        uih_test_start_c_api(DrawTestMenu, [] { g_setupCalled = true; }, options.scale);
+        uih_test_start_c_api(DrawTestMenu, [] { g_setupCalled = true; }, options.scale, options.remote ? pipe.c_str() : nullptr,
+                             options.remoteMemory, options.remoteAdvanced);
         return;
     }
     uih::Config config;
     config.scale = options.scale;
-    std::string pipe = RemotePipe();
     config.remoteControl = options.remote;
     config.remoteMemory = options.remoteMemory;
     config.aiAdvancedFeatures = options.remoteAdvanced;
@@ -1185,7 +1232,7 @@ int64_t GameMs() {
 // shows the game without the overlay, the message is drawn, and the keys reach
 // the window once the menu is closed.
 template <typename Frame>
-int RemoteScenario(bool memory, bool advanced, Frame&& frame) {
+int RemoteScenario(HWND window, bool memory, bool advanced, Frame&& frame) {
     std::string info;
     std::string screenshot;
     std::string text;
@@ -1197,6 +1244,13 @@ int RemoteScenario(bool memory, bool advanced, Frame&& frame) {
     std::string outside;
     std::vector<uint8_t> rgb;
     int clicksBefore = g_buttonClicks;
+    // A window always on top, as other programs have, covers the button: the
+    // click must reach the menu all the same, also while the game has the focus.
+    POINT button{g_buttonX, g_buttonY};
+    ClientToScreen(window, &button);
+    HWND cover = CreateWindowExW(WS_EX_TOPMOST | WS_EX_NOACTIVATE, L"EDIT", L"", WS_POPUP, button.x - 50, button.y - 50, 100, 100, nullptr, nullptr,
+                                 nullptr, nullptr);
+    ShowWindow(cover, SW_SHOWNOACTIVATE);
     WhileRendering(
         [&] {
             RemoteClient client;
@@ -1220,10 +1274,16 @@ int RemoteScenario(bool memory, bool advanced, Frame&& frame) {
                 advancedFailure = CheckRemoteAdvanced(client);
                 if (advancedFailure.empty())
                     advancedFailure = CheckRemoteTime(client, GameMs);
+                // GetAsyncKeyState() starts with the jump to a hook of the overlay.
+                if (advancedFailure.empty())
+                    advancedFailure = CheckRemoteCode(
+                        client, reinterpret_cast<const void*>(GetProcAddress(GetModuleHandleW(L"user32.dll"), "GetAsyncKeyState")), "GetAsyncKeyState",
+                        "this is a hook of the overlay");
             } else if (client.Request("wait 100").rfind("error the advanced features are off", 0) != 0 ||
                      client.Request("type x").rfind("error the advanced features are off", 0) != 0 ||
                      client.Request("chat poll").rfind("error the advanced features are off", 0) != 0 ||
-                     (memory && client.Request("pointer 1000").rfind("error the advanced features are off", 0) != 0))
+                     (memory && client.Request("pointer 1000").rfind("error the advanced features are off", 0) != 0) ||
+                     (memory && client.Request("disasm 1000").rfind("error the advanced features are off", 0) != 0))
                 advancedFailure = "the advanced commands answer while aiAdvancedFeatures is off";
             click = client.Request("click " + std::to_string(g_buttonX) + " " + std::to_string(g_buttonY) + " left 100");
             outside = client.Request("click 800 10");
@@ -1233,7 +1293,8 @@ int RemoteScenario(bool memory, bool advanced, Frame&& frame) {
         frame();
     for (int i = 0; i < 10; ++i)
         frame();
-    printf("click on the button of the menu at %d,%d: %s, %d clicks\nclick outside: %s\n", g_buttonX.load(), g_buttonY.load(), click.c_str(),
+    DestroyWindow(cover);
+    printf("click on the button of the menu at %d,%d under another window: %s, %d clicks\nclick outside: %s\n", g_buttonX.load(), g_buttonY.load(), click.c_str(),
            g_buttonClicks - clicksBefore, outside.c_str());
     if (click.rfind("ok ", 0) != 0 || g_buttonClicks == clicksBefore)
         return Fail("the click of the remote control did not reach the menu");
@@ -1553,6 +1614,81 @@ int RunDllMode(HWND window, Host& host, const Options& options) {
 
 // Uses the library in-process without a module to free: F11 removes the
 // overlay and INSERT brings it back, twice.
+// Median, mean and 99th percentile of frame times, in milliseconds.
+struct FrameTimes {
+    double median = 0;
+    double mean = 0;
+    double p99 = 0;
+};
+
+FrameTimes MeasureFrames(Host& host, int frames) {
+    LARGE_INTEGER frequency;
+    LARGE_INTEGER previous;
+    QueryPerformanceFrequency(&frequency);
+    std::vector<double> times;
+    times.reserve(frames);
+    QueryPerformanceCounter(&previous);
+    for (int frame = 0; frame < frames; ++frame) {
+        PumpMessages();
+        host.Frame();
+        LARGE_INTEGER now;
+        QueryPerformanceCounter(&now);
+        times.push_back(1000.0 * static_cast<double>(now.QuadPart - previous.QuadPart) / static_cast<double>(frequency.QuadPart));
+        previous = now;
+    }
+    FrameTimes result;
+    if (times.empty())
+        return result;
+    for (double time : times)
+        result.mean += time;
+    result.mean /= static_cast<double>(times.size());
+    std::sort(times.begin(), times.end());
+    result.median = times[times.size() / 2];
+    result.p99 = times[std::min(times.size() - 1, times.size() * 99 / 100)];
+    return result;
+}
+
+// --bench N, vsync off: what the overlay adds to the time of a frame. The
+// phases without it, before Start() and after Stop(), show the noise of the
+// measure; the cost is compared with their mean.
+int RunBenchMode(HWND window, Host& host, const Options& options) {
+    const int frames = options.benchFrames;
+    MeasureFrames(host, 300);
+    FrameTimes before = MeasureFrames(host, frames);
+    StartHook(options);
+    for (ULONGLONG start = GetTickCount64(); uih::ActiveBackend() == uih::Backend::None && GetTickCount64() - start < 10000;)
+        MeasureFrames(host, 1);
+    if (uih::ActiveBackend() == uih::Backend::None)
+        return Fail("the overlay did not start");
+    MeasureFrames(host, 300);
+    FrameTimes closed = MeasureFrames(host, frames);
+    uih::SetMenuOpen(true);
+    MeasureFrames(host, 300);
+    FrameTimes open = MeasureFrames(host, frames);
+    uih::SetMenuOpen(false);
+    uih::Stop();
+    MeasureFrames(host, 300);
+    FrameTimes after = MeasureFrames(host, frames);
+    if (!IsWindow(window))
+        return Fail("the window was closed");
+
+    double base = (before.median + after.median) / 2;
+    printf("bench %s, %d frames per phase, vsync off: median, mean and 99th percentile of a frame, in ms\n", options.api.c_str(), frames);
+    auto line = [&](const char* phase, const FrameTimes& times, bool cost) {
+        printf("  %-28s %8.3f %8.3f %8.3f", phase, times.median, times.mean, times.p99);
+        if (cost)
+            printf("   overlay: %+.3f ms, %.1f%% of a frame at 60 fps, %.1f%% at 144 fps", times.median - base,
+                   100.0 * (times.median - base) / (1000.0 / 60), 100.0 * (times.median - base) / (1000.0 / 144));
+        printf("\n");
+    };
+    line("without the overlay", before, false);
+    line("overlay, menu closed", closed, true);
+    line("overlay, menu open", open, true);
+    line("without the overlay, again", after, false);
+    printf("PASS: %s\n", options.api.c_str());
+    return 0;
+}
+
 int RunRemoveMode(HWND window, Host& host) {
     const int visible = kWidth * kHeight / 100;
     auto run = [&](int frames) {
@@ -2533,6 +2669,7 @@ int main(int argc, char** argv) {
         else if (arg == "--render-thread") options.renderThread = true;
         else if (arg == "--resubclass") options.resubclass = true;
         else if (arg == "--c-api") options.cApi = true;
+        else if (arg == "--bench" && i + 1 < argc) options.benchFrames = atoi(argv[++i]);
         else if (arg == "--recreate-context") options.recreateContext = true;
         else if (arg == "--switch-api" && i + 1 < argc) options.switchApi = argv[++i];
         else if (arg == "--slow-frame" && i + 1 < argc) options.slowFrameMs = atoi(argv[++i]);
@@ -2551,7 +2688,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--own-hooks before|after] [--fault access|exception|draw] [--second-window [--shared-device]] [--composition] [--capture-frame] [--remote [--remote-memory] [--remote-advanced]] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--c-api] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float|hdr10] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--own-hooks before|after] [--fault access|exception|draw] [--second-window [--shared-device]] [--composition] [--capture-frame] [--remote [--remote-memory] [--remote-advanced]] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--c-api] [--bench frames] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -2589,7 +2726,11 @@ int main(int argc, char** argv) {
             return Fail(failure);
         printf("C interface: defaults and names checked\n");
     }
-    if (options.injectAt == 0 && options.dll.empty())
+    if (options.benchFrames > 0) {
+        g_syncInterval = 0;
+        g_pace = false;
+    }
+    if (options.injectAt == 0 && options.dll.empty() && options.benchFrames <= 0)
         StartHook(options);
 
     if (options.fullscreen && !getenv("UIH_TEST_FULLSCREEN"))
@@ -2657,6 +2798,12 @@ int main(int argc, char** argv) {
     if (!options.preview.empty()) {
         int result = RunPreviewMode(window, *host, options);
         host.reset();
+        return result;
+    }
+    if (options.benchFrames > 0) {
+        int result = RunBenchMode(window, *host, options);
+        host.reset();
+        DestroyWindow(window);
         return result;
     }
     if (!options.dll.empty()) {
@@ -2767,7 +2914,7 @@ int main(int argc, char** argv) {
                     break;
             }
             if (options.remote) {
-                result = RemoteScenario(options.remoteMemory, options.remoteAdvanced, [&] {
+                result = RemoteScenario(window, options.remoteMemory, options.remoteAdvanced, [&] {
                     PumpMessages();
                     host->Frame();
                 });
@@ -2920,6 +3067,8 @@ int main(int argc, char** argv) {
                 printf("Stop() took %llu ms with a remote client connected\n", stopMs);
                 if (stopMs > 3000 || served)
                     result = Fail("uih::Stop() did not end the remote control");
+                if (!PatchRestoredAtStop())
+                    result = Fail("uih::Stop() did not restore the code the assistant patched");
             }
             if (ImGui::GetCurrentContext() || uih::ActiveBackend() != uih::Backend::None)
                 result = Fail("hook did not release its resources");

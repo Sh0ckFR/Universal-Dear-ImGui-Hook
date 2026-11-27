@@ -338,6 +338,6 @@ void Uninstall() {
 
 } // namespace
 
-const Renderer kD3D9Renderer = {"D3D9", L"d3d9.dll", Install, Uninstall, Teardown};
+const Renderer kD3D9Renderer = {"D3D9", {L"d3d9.dll"}, Install, Uninstall, Teardown};
 
 } // namespace uih::detail

@@ -1248,7 +1248,7 @@ void Uninstall() {
 
 } // namespace
 
-const Renderer kVulkanRenderer = {"Vulkan", L"vulkan-1.dll", Install, Uninstall, Teardown};
+const Renderer kVulkanRenderer = {"Vulkan", {L"vulkan-1.dll"}, Install, Uninstall, Teardown};
 
 bool VulkanPresenting() { return GetTickCount64() - g_lastPresent < 500; }
 

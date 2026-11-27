@@ -113,7 +113,8 @@ TOOLS += [
     },
     {
         "name": "memory_write",
-        "description": "Writes a value or bytes into the memory of the game, code included." + MEMORY_NOTE,
+        "description": "Writes a value or bytes into the memory of the game, code included. To change code, memory_patch keeps the "
+        "original bytes to restore." + MEMORY_NOTE,
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -284,9 +285,9 @@ TOOLS += [
     {
         "name": "memory_what_writes",
         "description": "Finds the instructions of the game that write a value, as the data breakpoint of a debugger does: start on "
-        "an address, make the value change in the game, then get the results: each instruction with its hits and the bytes "
-        "before the address given, where the instruction ends. Patch it with memory_write to stop the change. On Linux, needs kernel.perf_event_paranoid at 2 or lower." +
-        MEMORY_NOTE + ADVANCED_NOTE,
+        "an address, make the value change in the game, then get the results: each instruction, decoded, with its address and its "
+        "hits. Read the code around it with memory_disassemble, and patch it with memory_patch to stop the change. On Linux, needs "
+        "kernel.perf_event_paranoid at 2 or lower." + MEMORY_NOTE + ADVANCED_NOTE,
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -296,6 +297,67 @@ TOOLS += [
                 "access": {"type": "boolean", "description": "Also the instructions that read the value; false by default."},
             },
             "required": ["action"],
+        },
+    },
+]
+
+TOOLS += [
+    {
+        "name": "memory_disassemble",
+        "description": "Disassembles the code of the game at an address: each x86 or x64 instruction in Intel syntax with its address, "
+        "module+offset and bytes, the exported function it starts when known, and the module+offset and symbol of the addresses it "
+        "branches to or reads. before also shows the instructions that lead to the address, as for one found by memory_what_writes. "
+        "Not on ARM64." + MEMORY_NOTE + ADVANCED_NOTE,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "address": ADDRESS,
+                "count": {"type": "integer", "description": "Instructions from the address on, 20 by default.", "minimum": 1, "maximum": 200},
+                "before": {"type": "integer", "description": "Instructions before the address, 0 by default.", "minimum": 0, "maximum": 50},
+            },
+            "required": ["address"],
+        },
+    },
+    {
+        "name": "memory_patch",
+        "description": "Changes the code of the game: writes bytes over its instructions, such as 90 (nop) over an instruction that "
+        "takes health away, and keeps the original bytes, which memory_unpatch puts back, as removing the overlay does. Shows the "
+        "new instructions. Refuses data, the code of the overlay and its hooks, and another patch. On Windows, waits for a moment "
+        "when no thread of the game runs the bytes being changed." + MEMORY_NOTE + ADVANCED_NOTE,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "address": ADDRESS,
+                "bytes": {"type": "string", "description": "Hexadecimal, up to 256 bytes, such as 90 90 90 or b8 01 00 00 00 c3."},
+            },
+            "required": ["address", "bytes"],
+        },
+    },
+    {
+        "name": "memory_unpatch",
+        "description": "Puts back the original bytes of a patch of memory_patch, or of all of them. Without arguments, lists the "
+        "patches." + MEMORY_NOTE + ADVANCED_NOTE,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer", "description": "The patch to restore, given by memory_patch."},
+                "all": {"type": "boolean", "description": "Restores every patch."},
+            },
+        },
+    },
+    {
+        "name": "memory_signature",
+        "description": "Makes a signature of the code at an address: a byte pattern found once in its module, with ?? over the "
+        "offsets and addresses that change when the game is rebuilt or loaded elsewhere. memory_pattern finds the code again after "
+        "a restart or an update of the game, where its module+offset changes. x86 and x64." + MEMORY_NOTE + ADVANCED_NOTE,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "address": ADDRESS,
+                "length": {"type": "integer", "description": "Bytes the pattern covers at least; it grows until it is unique.",
+                           "minimum": 1, "maximum": 128},
+            },
+            "required": ["address"],
         },
     },
 ]
@@ -545,14 +607,87 @@ def advanced_memory_tool(name, args):
     _, data = request("writes results", payload=text_payload)
     lines = []
     for row in data.decode("utf-8", "replace").splitlines():
+        row, _, instruction = row.partition(" ; ")
         parts = row.split(" ", 3)
-        lines.append(f"Instruction ending before {parts[1]} ({parts[0]}): {parts[2]} hits. Bytes before: {parts[3] if len(parts) > 3 else '?'}")
-    return "\n".join(lines) if lines else "No instruction hit yet: make the value change in the game."
+        if instruction:
+            address, _, text = instruction.partition(" ")
+            lines.append(f"{text} at {address}, ending before {parts[1]} ({parts[0]}): {parts[2]} hits")
+        else:
+            lines.append(f"Instruction ending before {parts[1]} ({parts[0]}): {parts[2]} hits. Bytes before: {parts[3] if len(parts) > 3 else '?'}")
+    if not lines:
+        return "No instruction hit yet: make the value change in the game."
+    return "\n".join(lines) + "\nmemory_disassemble with before=10 shows the code that leads to an instruction."
+
+
+def disassembly(text, mark=None):
+    """The lines of the disasm command, laid out for reading; `mark` points at one address."""
+    lines = []
+    for row in text.splitlines():
+        parts = row.split(" ", 4)
+        if len(parts) < 5:
+            continue
+        address, where, symbol, code, instruction = parts
+        if symbol != "-" and "+" not in symbol:
+            lines.append(f"{symbol}:")
+        code = " ".join(code[i:i + 2] for i in range(0, len(code), 2))
+        prefix = "> " if mark is not None and int(address, 16) == mark else "  "
+        lines.append(f"{prefix}{address}  {where:<28} {code:<30} {instruction}")
+    return "\n".join(lines)
+
+
+def code_tool(name, args):
+    address = str(args.get("address", "")).strip()
+    if name == "memory_disassemble":
+        count = max(1, min(int(args.get("count", 20)), 200))
+        before = max(0, min(int(args.get("before", 0)), 50))
+        answer, data = request(f"disasm {address} {count} {before}", payload=text_payload)
+        # The address given, resolved, follows the size of the text.
+        mark = int(answer.split()[2], 16) if before and len(answer.split()) > 2 else None
+        text = data.decode("utf-8", "replace")
+        return disassembly(text, mark) or "No instruction."
+    if name == "memory_patch":
+        data = bytes.fromhex(str(args.get("bytes", "")).replace(" ", ""))
+        if not data:
+            raise GameError("Give the new bytes in hexadecimal, such as 90 90.")
+        answer, _ = request(f"patch {address} {data.hex(' ')}")
+        words = answer.split()
+        message = f"Patch {words[1]}: {len(data)} bytes written at {address}; memory_unpatch with id {words[1]} puts the original back."
+        if len(words) >= 5 and words[2] == "cuts":
+            message += (f" Warning: the patch ends inside the instruction at {words[3]}, whose last bytes, up to {words[4]}, are "
+                        "left and run as other instructions: pad the patch with 90 (nop) up to there, unless that is the intent.")
+        try:
+            _, listing = request(f"disasm {address} {max(2, min(len(data), 20))}", payload=text_payload)
+            message += "\nThe code there now:\n" + disassembly(listing.decode("utf-8", "replace"))
+        except GameError:
+            pass  # Not on ARM64.
+        return message
+    if name == "memory_unpatch":
+        if args.get("all"):
+            answer, _ = request("unpatch all")
+            return f"Restored the original bytes of {answer.split()[1]} patches."
+        if "id" in args:
+            answer, _ = request(f"unpatch {int(args['id'])}")
+            if answer.endswith("changed"):
+                return f"The game changed the bytes of patch {int(args['id'])} since: they were left as they are, and the patch forgotten."
+            return f"Patch {int(args['id'])} restored: the original bytes are back."
+        _, data = request("patches", payload=text_payload)
+        lines = []
+        for row in data.decode("utf-8", "replace").splitlines():
+            patch_id, at, where, original, patched = row.split(" ")
+            lines.append(f"{patch_id}: {at} ({where}), {original} replaced with {patched}")
+        return "\n".join(lines) if lines else "No patch."
+    length = args.get("length")
+    _, data = request(f"signature {address} {int(length)}" if length else f"signature {address}", payload=text_payload)
+    module, _, pattern = data.decode("utf-8", "replace").strip().partition(" ")
+    return (f"{pattern}\nFound once in {module}, at {address}. After an update or a restart, memory_pattern with this pattern and "
+            f"module {module} finds the code again.")
 
 
 def memory_tool(name, args):
     if name in ("memory_pointer", "memory_pointer_scan", "memory_watch", "memory_freeze", "memory_what_writes"):
         return advanced_memory_tool(name, args)
+    if name in ("memory_disassemble", "memory_patch", "memory_unpatch", "memory_signature"):
+        return code_tool(name, args)
     if name == "memory_modules":
         _, data = request("modules", payload=text_payload)
         return data.decode("utf-8", "replace") or "No module."

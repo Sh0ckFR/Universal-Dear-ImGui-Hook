@@ -272,6 +272,47 @@ struct PointerHit {
 // bytes before it, those in a module first; at most `limit`. False when
 // `cancelled` returned true.
 bool ScanPointers(uintptr_t target, size_t maxOffset, size_t limit, bool (*cancelled)(), std::vector<PointerHit>& hits);
+// Addresses in `module` where `pattern` is, -1 for any byte; at most `limit`.
+// False when the scan's memory cannot be allocated.
+bool FindPattern(const std::vector<int>& pattern, const LoadedModule& module, size_t limit, std::vector<uintptr_t>& found);
+
+// The code commands, src/code.cpp, with Config::remoteMemory and
+// Config::aiAdvancedFeatures: the disassembler, the patches of the code and
+// the signatures. False when `command` is not one of them.
+bool HandleCode(const std::string& command, const std::string& rest, std::vector<uint8_t>& payload, std::string& answer);
+// "<address> <instruction>" of the instruction that ends at `next`, as the
+// instruction watch reports them; empty when it cannot be decoded.
+std::string InstructionBefore(uintptr_t next);
+struct CodePatch {
+    int id;
+    uintptr_t address;
+    std::vector<uint8_t> original;
+    std::vector<uint8_t> patched;
+};
+std::vector<CodePatch> CodePatches();
+// Puts the original bytes back and forgets the patch. Empty when it did,
+// "changed" when the game changed the bytes since and they were left as they
+// are, the reason otherwise.
+std::string RestorePatch(int id);
+// Puts back every patch whose bytes are still there, once the overlay is gone.
+void RestorePatches();
+// Writes `size` bytes of code at `address`, an aligned 8 bytes at once when
+// they fit in them, so that a thread running the code sees either all the old
+// bytes or all the new ones. The memory must be writable; does not allocate.
+void StoreCode(uintptr_t address, const void* data, size_t size);
+// Implemented once per platform, in code.cpp:
+// true when all of address..address+size is mapped executable.
+bool IsCode(uintptr_t address, size_t size);
+// Why patching there would break the hook, such as a MinHook hook or
+// trampoline of the overlay; empty otherwise.
+std::string ProtectedCode(uintptr_t address, size_t size);
+// Writes code: makes the pages writable, then puts their protection back,
+// and flushes the instruction cache. On Windows, the other threads are
+// suspended meanwhile, and the write waits until none of them is inside
+// `from`..address+size, past its first byte. Empty when it wrote, the reason otherwise.
+std::string WriteCode(uintptr_t address, const void* data, size_t size, uintptr_t from);
+// "name" or "name+0x12" of the exported or dynamic symbol `address` is in, empty when none is known.
+std::string SymbolAt(uintptr_t address);
 
 // Advanced features, Config::aiAdvancedFeatures, src/advanced.cpp:
 // switches of the "AI Advanced Features" window, on until the player turns them off.

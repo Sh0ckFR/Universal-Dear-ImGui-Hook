@@ -211,7 +211,7 @@ void NoTeardown() {}
 
 } // namespace
 
-const Renderer kClockHooks = {"Clocks", L"winmm.dll", InstallWinmm, UninstallWinmm, NoTeardown};
+const Renderer kClockHooks = {"Clocks", {L"winmm.dll"}, InstallWinmm, UninstallWinmm, NoTeardown};
 
 namespace clocks {
 

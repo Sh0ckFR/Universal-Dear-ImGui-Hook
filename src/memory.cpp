@@ -33,6 +33,7 @@ constexpr size_t kChunk = 1 << 20;
 // Matches a scan keeps, 16 bytes each.
 constexpr size_t kMaxMatches = size_t{1} << 21;
 constexpr size_t kMaxListed = 1000;
+constexpr size_t kMaxPattern = 256;
 // Pointers a pointer scan keeps before it sorts them.
 constexpr size_t kMaxPointerHits = 1 << 16;
 
@@ -550,51 +551,20 @@ std::string Pattern(const std::string& rest, std::vector<uint8_t>& payload) {
         else
             return "error give bytes in hexadecimal, ?? for any byte, then optionally a module";
     }
-    if (pattern.empty() || pattern.size() > 256)
+    if (pattern.empty() || pattern.size() > kMaxPattern)
         return "error give 1 to 256 bytes";
     std::vector<LoadedModule> modules = SortedModules();
     const LoadedModule* module = FindModule(modules, moduleName);
     if (!module)
         return "error no such module: list them with modules";
-    std::lock_guard<std::mutex> lock(g_scanMutex);
-    if (!EnsureScanMemory())
+    std::vector<uintptr_t> found;
+    if (!FindPattern(pattern, *module, kMaxListed, found))
         return "error out of memory";
-    // The readable parts of the module: segments aligned to 64 KiB, as on
-    // aarch64, leave unmapped pages between them.
-    std::vector<MemoryRegion> spans;
-    uintptr_t moduleEnd = module->base + module->size;
-    for (const MemoryRegion& region : MemoryRegions()) {
-        uintptr_t start = std::max(region.base, module->base);
-        uintptr_t end = std::min(region.base + region.size, moduleEnd);
-        if (start >= end)
-            continue;
-        if (!spans.empty() && spans.back().base + spans.back().size == start)
-            spans.back().size += end - start;
-        else
-            spans.push_back({start, end - start, region.writable});
-    }
     std::string text;
-    size_t found = 0;
     char line[48];
-    // Chunks overlap by the length of the pattern, less one byte.
-    size_t step = kChunk - (pattern.size() - 1);
-    for (const MemoryRegion& span : spans) {
-        for (size_t offset = 0; offset < span.size && found < kMaxListed; offset += step) {
-            size_t length = std::min(kChunk, span.size - offset);
-            if (length < pattern.size() || !ReadMemory(span.base + offset, g_memory.chunk, length))
-                continue;
-            for (size_t i = 0; i + pattern.size() <= length && found < kMaxListed; ++i) {
-                size_t j = 0;
-                while (j < pattern.size() && (pattern[j] < 0 || g_memory.chunk[i + j] == pattern[j]))
-                    ++j;
-                if (j < pattern.size())
-                    continue;
-                uintptr_t address = span.base + offset + i;
-                snprintf(line, sizeof(line), "0x%" PRIxPTR " ", address);
-                text += line + Locate(address, modules) + "\n";
-                ++found;
-            }
-        }
+    for (uintptr_t address : found) {
+        snprintf(line, sizeof(line), "0x%" PRIxPTR " ", address);
+        text += line + Locate(address, modules) + "\n";
     }
     return WithPayload(text, payload);
 }
@@ -694,6 +664,46 @@ bool ScanPointers(uintptr_t target, size_t maxOffset, size_t limit, bool (*cance
     if (found.size() > limit)
         found.resize(limit);
     hits.swap(found);
+    return true;
+}
+
+bool FindPattern(const std::vector<int>& pattern, const LoadedModule& module, size_t limit, std::vector<uintptr_t>& found) {
+    found.clear();
+    if (pattern.empty() || pattern.size() > kMaxPattern)
+        return true;
+    std::lock_guard<std::mutex> lock(g_scanMutex);
+    if (!EnsureScanMemory())
+        return false;
+    // The readable parts of the module: segments aligned to 64 KiB, as on
+    // aarch64, leave unmapped pages between them.
+    std::vector<MemoryRegion> spans;
+    uintptr_t moduleEnd = module.base + module.size;
+    for (const MemoryRegion& region : MemoryRegions()) {
+        uintptr_t start = std::max(region.base, module.base);
+        uintptr_t end = std::min(region.base + region.size, moduleEnd);
+        if (start >= end)
+            continue;
+        if (!spans.empty() && spans.back().base + spans.back().size == start)
+            spans.back().size += end - start;
+        else
+            spans.push_back({start, end - start, region.writable});
+    }
+    // Chunks overlap by the length of the pattern, less one byte.
+    size_t step = kChunk - (pattern.size() - 1);
+    for (const MemoryRegion& span : spans) {
+        for (size_t offset = 0; offset < span.size && found.size() < limit; offset += step) {
+            size_t length = std::min(kChunk, span.size - offset);
+            if (length < pattern.size() || !ReadMemory(span.base + offset, g_memory.chunk, length))
+                continue;
+            for (size_t i = 0; i + pattern.size() <= length && found.size() < limit; ++i) {
+                size_t j = 0;
+                while (j < pattern.size() && (pattern[j] < 0 || g_memory.chunk[i + j] == pattern[j]))
+                    ++j;
+                if (j == pattern.size())
+                    found.push_back(span.base + offset + i);
+            }
+        }
+    }
     return true;
 }
 
