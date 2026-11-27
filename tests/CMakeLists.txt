@@ -29,7 +29,7 @@ endforeach()
 
 if(WIN32)
     add_executable(uih_host host.cpp host_vulkan.cpp c_api.c fake_unreal.cpp)
-    target_link_libraries(uih_host PRIVATE uih minhook d3d9 d3d10 d3d11 d3d12 dxgi opengl32 dinput8 dxguid)
+    target_link_libraries(uih_host PRIVATE uih minhook d3d9 d3d10 d3d11 d3d12 dxgi dcomp opengl32 dinput8 dxguid)
     target_compile_definitions(uih_host PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 
     # A controller the tests drive, in its own directory so that only the
