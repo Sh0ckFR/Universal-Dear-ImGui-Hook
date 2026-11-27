@@ -80,8 +80,11 @@ else()
 endif()
 add_library(uih::imgui ALIAS uih_imgui)
 
-add_library(uih STATIC src/uih.cpp src/vulkan.cpp src/remote.cpp src/memory.cpp src/advanced.cpp src/c_api.cpp src/tools.cpp src/timing.cpp)
-target_include_directories(uih PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_library(uih STATIC src/uih.cpp src/vulkan.cpp src/remote.cpp src/memory.cpp src/code.cpp src/advanced.cpp src/c_api.cpp src/tools.cpp
+            src/timing.cpp src/zydis_build.c)
+target_include_directories(uih PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${UIH_THIRD_PARTY}/zydis)
+# Zydis, the disassembler of src/code.cpp, is third-party code: its warnings are not ours.
+set_source_files_properties(src/zydis_build.c PROPERTIES COMPILE_OPTIONS $<IF:$<C_COMPILER_ID:MSVC>,/W0,-w>)
 if(WIN32)
     target_sources(uih PRIVATE
         src/windows/platform.cpp
@@ -90,6 +93,7 @@ if(WIN32)
         src/windows/dinput.cpp
         src/windows/remote.cpp
         src/windows/breakpoints.cpp
+        src/windows/code.cpp
         src/windows/xinput.cpp
         src/windows/d3d9.cpp
         src/windows/dxgi.cpp
@@ -111,7 +115,8 @@ else()
         src/linux/events.cpp
         src/linux/opengl.cpp
         src/linux/remote.cpp
-        src/linux/breakpoints.cpp)
+        src/linux/breakpoints.cpp
+        src/linux/code.cpp)
     target_link_libraries(uih PUBLIC uih_imgui PRIVATE PkgConfig::UIH_XCB Threads::Threads ${CMAKE_DL_LIBS})
     # Only the functions the hook stands for are visible to the target process.
     target_link_options(uih INTERFACE LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/src/linux/exports.map)
@@ -120,9 +125,9 @@ else()
     set_target_properties(uih uih_imgui PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()
 if(MSVC)
-    target_compile_options(uih PRIVATE /W4 /permissive-)
+    target_compile_options(uih PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:/W4;/permissive->")
 else()
-    target_compile_options(uih PRIVATE -Wall -Wextra)
+    target_compile_options(uih PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra>")
 endif()
 add_library(uih::uih ALIAS uih)
 

@@ -3,6 +3,7 @@
 #include "remote_memory.h"
 #include "remote_advanced.h"
 #include "remote_time.h"
+#include "remote_code.h"
 #include "remote_tools.h"
 
 #include <EGL/egl.h>
@@ -692,6 +693,9 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
             advancedFailure = CheckRemoteAdvanced(client);
             if (advancedFailure.empty())
                 advancedFailure = CheckRemoteTime(client, GameMs);
+            // The preloaded library stands for glXSwapBuffers().
+            if (advancedFailure.empty())
+                advancedFailure = CheckRemoteCode(client, dlsym(RTLD_DEFAULT, "glXSwapBuffers"), "glXSwapBuffers", "this is the code of the overlay itself");
             toolsFailure = CheckRemoteTools(client);
         },
         frame);

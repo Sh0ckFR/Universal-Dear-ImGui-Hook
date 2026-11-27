@@ -5,7 +5,7 @@ Bug reports, fixes and features are welcome. Open an [issue](https://github.com/
 ## Principles
 
 - **One file.** The library ships as a single DLL or `.so`: no configuration file or other file next to it. Settings are compiled in, from `example/config.cpp`.
-- **No dependencies.** Dear ImGui, MinHook and the Vulkan headers are vendored in `third_party/`, and the C and C++ runtimes are linked statically. The scripts of `remote/` use the Python standard library only.
+- **No dependencies.** Dear ImGui, MinHook, Zydis and the Vulkan headers are vendored in `third_party/`, and the C and C++ runtimes are linked statically. The scripts of `remote/` use the Python standard library only.
 - **The game comes first.** A fault in the overlay removes the overlay instead of crashing the game, and the backends leave the graphics state as the game set it.
 
 ## Rules

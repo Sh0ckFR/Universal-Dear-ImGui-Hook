@@ -45,6 +45,14 @@ std::atomic<HWND> g_window{nullptr};
 // Hooks of the overlay: the code that uses the library may place its own with MinHook.
 std::vector<void*> g_hookTargets;
 bool g_ownsMinHook = false;
+// The code of those hooks, which the code patches of the assistant must leave alone.
+struct HookCode {
+    uintptr_t target;
+    uintptr_t trampoline;
+    uintptr_t detour;
+};
+std::mutex g_hookCodeMutex;
+std::vector<HookCode> g_hookCode;
 
 // ntdll DLL load notifications -------------------------------------------
 
@@ -167,6 +175,10 @@ void RemoveHooks(bool uninitialize) {
     for (void* target : g_hookTargets)
         MH_RemoveHook(target);
     g_hookTargets.clear();
+    {
+        std::lock_guard<std::mutex> lock(g_hookCodeMutex);
+        g_hookCode.clear();
+    }
     if (uninitialize && g_ownsMinHook) {
         MH_Uninitialize();
         g_ownsMinHook = false;
@@ -212,6 +224,11 @@ bool CreateHook(const char* name, void* target, void* detour, void** original) {
     MH_STATUS status = MH_CreateHook(target, detour, original);
     if (status == MH_OK) {
         g_hookTargets.push_back(target);
+        {
+            std::lock_guard<std::mutex> lock(g_hookCodeMutex);
+            g_hookCode.push_back({reinterpret_cast<uintptr_t>(target), reinterpret_cast<uintptr_t>(original ? *original : nullptr),
+                                  reinterpret_cast<uintptr_t>(detour)});
+        }
         status = MH_EnableHook(target);
     }
     if (status != MH_OK) {
@@ -220,6 +237,18 @@ bool CreateHook(const char* name, void* target, void* detour, void** original) {
     }
     Log("Hooked %s at %p", name, target);
     return true;
+}
+
+bool OverlapsOwnHook(uintptr_t address, size_t size) {
+    auto overlaps = [&](uintptr_t start, size_t length) { return start && address < start + length && start < address + size; };
+    std::lock_guard<std::mutex> lock(g_hookCodeMutex);
+    for (const HookCode& hook : g_hookCode) {
+        // The jump MinHook writes, and the one before the function of a hot-patch hook.
+        // The trampolines share blocks of a page, and the detours are the library's.
+        if (overlaps(hook.target - 5, 13) || overlaps(hook.trampoline & ~uintptr_t{0xfff}, 0x1000) || overlaps(hook.detour, 16))
+            return true;
+    }
+    return false;
 }
 
 bool BindWindow(HWND window) {

@@ -7,6 +7,7 @@
 #include "remote_memory.h"
 #include "remote_advanced.h"
 #include "remote_time.h"
+#include "remote_code.h"
 #define UIH_TEST_TOOLS_HOOK
 #include "remote_tools.h"
 
@@ -1220,10 +1221,16 @@ int RemoteScenario(bool memory, bool advanced, Frame&& frame) {
                 advancedFailure = CheckRemoteAdvanced(client);
                 if (advancedFailure.empty())
                     advancedFailure = CheckRemoteTime(client, GameMs);
+                // GetAsyncKeyState() starts with the jump to a hook of the overlay.
+                if (advancedFailure.empty())
+                    advancedFailure = CheckRemoteCode(
+                        client, reinterpret_cast<const void*>(GetProcAddress(GetModuleHandleW(L"user32.dll"), "GetAsyncKeyState")), "GetAsyncKeyState",
+                        "this is a hook of the overlay");
             } else if (client.Request("wait 100").rfind("error the advanced features are off", 0) != 0 ||
                      client.Request("type x").rfind("error the advanced features are off", 0) != 0 ||
                      client.Request("chat poll").rfind("error the advanced features are off", 0) != 0 ||
-                     (memory && client.Request("pointer 1000").rfind("error the advanced features are off", 0) != 0))
+                     (memory && client.Request("pointer 1000").rfind("error the advanced features are off", 0) != 0) ||
+                     (memory && client.Request("disasm 1000").rfind("error the advanced features are off", 0) != 0))
                 advancedFailure = "the advanced commands answer while aiAdvancedFeatures is off";
             click = client.Request("click " + std::to_string(g_buttonX) + " " + std::to_string(g_buttonY) + " left 100");
             outside = client.Request("click 800 10");
@@ -2920,6 +2927,8 @@ int main(int argc, char** argv) {
                 printf("Stop() took %llu ms with a remote client connected\n", stopMs);
                 if (stopMs > 3000 || served)
                     result = Fail("uih::Stop() did not end the remote control");
+                if (!PatchRestoredAtStop())
+                    result = Fail("uih::Stop() did not restore the code the assistant patched");
             }
             if (ImGui::GetCurrentContext() || uih::ActiveBackend() != uih::Backend::None)
                 result = Fail("hook did not release its resources");

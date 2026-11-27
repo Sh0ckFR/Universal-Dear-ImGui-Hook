@@ -48,7 +48,7 @@ Sections marked with ▶ expand on click. What changed in each version is listed
 - **Multiple windows**: when the game presents to more than one window or swap chain, the overlay stays on one of them and follows the focus.
 - **Readable on any display**: the interface follows the game window's DPI, or a fixed scale, with correct colors on sRGB, floating-point and HDR10 back buffers, where the overlay is as bright as the SDR content Windows shows.
 - **No injector needed**: the DLL can be loaded as `dinput8.dll`, and the Linux library with `LD_PRELOAD`.
-- **No dependencies**: Dear ImGui, MinHook and the Vulkan headers are vendored, and the C and C++ runtimes are linked statically.
+- **No dependencies**: Dear ImGui, MinHook, Zydis and the Vulkan headers are vendored, and the C and C++ runtimes are linked statically.
 - **Tested in real games**: on every commit, the CI loads the library into [DDNet](https://ddnet.org/) and a [Godot](https://godotengine.org/) project on Windows and Linux, with Direct3D 11, Direct3D 12, Vulkan and OpenGL, and plays them through the MCP server on Linux. It also runs the Windows build of Godot under Wine with the DLL as `dinput8.dll`, with OpenGL, Direct3D 11 and Vulkan.
 
 ## Quick start
@@ -321,6 +321,7 @@ On Linux, use `python3 /path/to/Universal-Dear-ImGui-Hook/remote/uih_mcp.py`. Wi
 - *Find my money in memory and set it to 99999.* (with `remoteMemory`)
 - *Type "gg" in the chat, then wait for the next round to start.* (with `aiAdvancedFeatures`)
 - *Find my health, keep it at 100, and find a pointer to it that survives a restart.* (with both)
+- *Find the instruction that takes my health away, show me the code around it, and patch it out.* (with both)
 
 ### Tools
 
@@ -365,7 +366,10 @@ and, with `remoteMemory` too:
 | `memory_pointer` | Follows a pointer chain, `[[game.exe+1a2b]+10]+8`, and shows each pointer it reads |
 | `memory_pointer_scan` | Finds the pointers to an address, those stored in a module first: `[game.exe+offset]+delta` finds the value again after a restart |
 | `memory_watch`, `memory_freeze` | A watch list of values, each with a type and a label; a frozen value is written again every frame |
-| `memory_what_writes` | The instructions that write a value, or read it, with their hit counts: hardware breakpoints on every thread, like a debugger's data breakpoint |
+| `memory_what_writes` | The instructions that write a value, or read it, decoded, with their hit counts: hardware breakpoints on every thread, like a debugger's data breakpoint |
+| `memory_disassemble` | x86 and x64 instructions at an address, and optionally those before it, with module+offset, bytes, exported functions, and the module+offset and symbol of the addresses they branch to or read |
+| `memory_patch`, `memory_unpatch` | Changes the game's code, such as `nop` over the instruction that takes health away, and puts the original bytes back; removing the overlay restores every patch |
+| `memory_signature` | A byte pattern unique in its module, with `??` over the offsets that change when the game is rebuilt: `memory_pattern` finds the code again after an update |
 
 The example menu then shows an **AI Advanced Features** button, which opens a window provided by the library, `uih::DrawAIAdvancedFeatures()`:
 
@@ -374,7 +378,8 @@ The example menu then shows an **AI Advanced Features** button, which opens a wi
 - two switches that pause the assistant's input (keys, clicks, typing, mouse) or its memory tools, without rebuilding, and the speed of the game, to resume a game the assistant paused;
 - **Watch list**: the values watched by the assistant or the player, updated live, with a checkbox to freeze each one, a value to write, and a form to add one;
 - **Pointers**: a pointer chain followed as you type it, and a pointer scan whose results go to the watch list in one click;
-- **What writes**: the instruction watch on an address, with each instruction, its hit count and the bytes before it.
+- **What writes**: the instruction watch on an address, with each instruction, decoded, its hit count and the bytes before it;
+- **Patches**: the code the assistant patched, with a button that restores each patch, or all of them.
 
 ### Tools of your own
 
@@ -406,6 +411,8 @@ uih::RegisterTool("teleport", "Moves the player to x, y, z in world units, and r
 - With `remoteMemory`, any program you run can also read and write the game's memory through the pipe or the socket; on Linux, that bypasses Yama's ptrace restrictions for programs of your user. A value scan also finds copies of the value: change it in the game and narrow the scan until one address is left.
 - Typed text reaches games that read text input, as chat boxes do; games that read the keys themselves see only Enter and Tab, so use `press_key` for them. On Linux, a character missing from the keyboard layout is mapped to a free keycode while it is typed, which the X server's other applications see too.
 - `memory_what_writes` sets debug register 3 of every thread of the game on Windows: a debugger attached to the game, or a game that uses that register, sees the change. On Linux, it asks the kernel for a hardware breakpoint on each thread (perf events), which unprivileged processes get while `kernel.perf_event_paranoid` is 2 or lower. Ubuntu sets 4, so run `sudo sysctl kernel.perf_event_paranoid=2` once per boot. Threads started later are watched within half a second.
+- `memory_patch` changes code that the game's threads may be running. On Windows, they are suspended while the bytes change, and the patch waits for none of them to be inside those bytes; on Linux, they keep running, and a patch of up to 8 bytes within an aligned 8-byte word is written at once. A thread that returns into the middle of patched bytes, from a call they hold, still runs a cut instruction. Code generated at run time, by a JIT, may be generated again over a patch.
+- `memory_disassemble` and `memory_signature` decode x86 and x64 code only: on ARM64 Linux, they answer that the processor is not supported, and `memory_patch` does not check where the instructions end.
 - Screenshots of HDR back buffers, with more than 10 bits per channel, fail.
 
 </details>
@@ -580,7 +587,7 @@ Bug reports, fixes and features are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) 
 
 ## Credits
 
-Built with [Dear ImGui](https://github.com/ocornut/imgui), [MinHook](https://github.com/TsudaKageyu/minhook), [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) and [stb_image](https://github.com/nothings/stb) (the example's picture).
+Built with [Dear ImGui](https://github.com/ocornut/imgui), [MinHook](https://github.com/TsudaKageyu/minhook), [Zydis](https://github.com/zyantific/zydis) (the disassembler of the memory tools), [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) and [stb_image](https://github.com/nothings/stb) (the example's picture).
 
 | Who | What |
 | --- | --- |
