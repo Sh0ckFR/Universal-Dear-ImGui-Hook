@@ -384,6 +384,67 @@ TOOLS += [
     },
 ]
 
+TOOLS += [
+    {
+        "name": "memory_disassemble",
+        "description": "Disassembles the code of the game at an address: each x86 or x64 instruction in Intel syntax with its address, "
+        "module+offset and bytes, the exported function it starts when known, and the module+offset and symbol of the addresses it "
+        "branches to or reads. before also shows the instructions that lead to the address, as for one found by memory_what_writes. "
+        "Not on ARM64." + MEMORY_NOTE + ADVANCED_NOTE,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "address": ADDRESS,
+                "count": {"type": "integer", "description": "Instructions from the address on, 20 by default.", "minimum": 1, "maximum": 200},
+                "before": {"type": "integer", "description": "Instructions before the address, 0 by default.", "minimum": 0, "maximum": 50},
+            },
+            "required": ["address"],
+        },
+    },
+    {
+        "name": "memory_patch",
+        "description": "Changes the code of the game: writes bytes over its instructions, such as 90 (nop) over an instruction that "
+        "takes health away, and keeps the original bytes, which memory_unpatch puts back, as removing the overlay does. Shows the "
+        "new instructions. Refuses data, the code of the overlay and its hooks, and another patch. On Windows, waits for a moment "
+        "when no thread of the game runs the bytes being changed." + MEMORY_NOTE + ADVANCED_NOTE,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "address": ADDRESS,
+                "bytes": {"type": "string", "description": "Hexadecimal, up to 256 bytes, such as 90 90 90 or b8 01 00 00 00 c3."},
+            },
+            "required": ["address", "bytes"],
+        },
+    },
+    {
+        "name": "memory_unpatch",
+        "description": "Puts back the original bytes of a patch of memory_patch, or of all of them. Without arguments, lists the "
+        "patches." + MEMORY_NOTE + ADVANCED_NOTE,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer", "description": "The patch to restore, given by memory_patch."},
+                "all": {"type": "boolean", "description": "Restores every patch."},
+            },
+        },
+    },
+    {
+        "name": "memory_signature",
+        "description": "Makes a signature of the code at an address: a byte pattern found once in its module, with ?? over the "
+        "offsets and addresses that change when the game is rebuilt or loaded elsewhere. memory_pattern finds the code again after "
+        "a restart or an update of the game, where its module+offset changes. x86 and x64." + MEMORY_NOTE + ADVANCED_NOTE,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "address": ADDRESS,
+                "length": {"type": "integer", "description": "Bytes the pattern covers at least; it grows until it is unique.",
+                           "minimum": 1, "maximum": 128},
+            },
+            "required": ["address"],
+        },
+    },
+]
+
 # The font of the overlay covers Latin-1: typographic signs outside it become their ASCII forms.
 TYPOGRAPHY = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"', "\u2013": "-", "\u2014": "-", "\u2026": "...", "\u00a0": " ", "\u202f": " "})
 

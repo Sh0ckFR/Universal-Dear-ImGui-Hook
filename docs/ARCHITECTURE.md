@@ -10,14 +10,15 @@ The internals of Universal-Dear-ImGui-Hook, for contributors and the curious. To
 | `include/uih_c.h`, `src/c_api.cpp` | The same API for C and the languages that call C |
 | `src/uih.cpp`, `src/internal.h` | Platform-independent core: lifecycle, frame, textures, scale |
 | `src/remote.cpp`, `src/memory.cpp` | Remote control commands, and its memory commands |
+| `src/code.cpp`, `src/zydis_build.c` | The code commands: disassembler, patches and signatures, with Zydis compiled into the library on x86 and x64; the pages and threads are handled in `src/windows/code.cpp` and `src/linux/code.cpp` |
 | `src/engine.cpp`, `src/unreal.cpp` | Engine commands: the objects of Unity games through the C API of Mono or IL2CPP, and of Unreal Engine games from their object array |
 | `src/advanced.cpp` | Advanced features: chat, watch list, frozen values, instruction watch, the AI Advanced Features window |
 | `src/tools.cpp` | Tools of the game for the assistant, `uih::RegisterTool()`, and the small JSON reader of `uih::ToolArgument()` |
 | `src/timing.cpp` | Speed of the game's clocks, the `time` command; the clocks are hooked in `src/windows/clocks.cpp` and `src/linux/clocks.cpp` |
 | `src/vulkan.cpp` | Vulkan renderer, shared by both platforms |
 | `src/gl_state.h` | OpenGL state saved while the overlay draws, and the frame capture shared by WGL, GLX and EGL |
-| `src/windows/` | MinHook, Direct3D, WGL, Win32 input, DirectInput, XInput, remote control (`remote.cpp`), instruction watch (`breakpoints.cpp`) |
-| `src/linux/` | Symbol interposition, GLX, EGL, X11 input and the game's events (`events.cpp`), Wayland input (`wayland.cpp`), remote control (`remote.cpp`), instruction watch (`breakpoints.cpp`), `exports.map` |
+| `src/windows/` | MinHook, Direct3D, WGL, Win32 input, DirectInput, XInput, remote control (`remote.cpp`), instruction watch (`breakpoints.cpp`), code patches and exports (`code.cpp`) |
+| `src/linux/` | Symbol interposition, GLX, EGL, X11 input and the game's events (`events.cpp`), Wayland input (`wayland.cpp`), remote control (`remote.cpp`), instruction watch (`breakpoints.cpp`), code patches and dynamic symbols (`code.cpp`), `exports.map` |
 | `remote/` | `uih_mcp.py`, the MCP server of the remote control and its DLL injector; `uih_chat.py`, the bridge between the in-game chat and Claude Code; [`PROTOCOL.md`](../remote/PROTOCOL.md) |
 | `example/` | The library that gets built: `config.cpp` (settings), `menu.cpp` (the widget tour), `image.cpp` and `image.rc` (`imgui.png` embedded), `dllmain.cpp`, `proxy.cpp`, `preload.cpp` |
 | `tests/` | `uih_host`, `uih_game`, `game.sh` and `game_mcp.py` for real games, the Godot project they run, the `FetchContent` consumer, `check_docs.py` for the Markdown files, `check_sources.py` for the sources of the two build systems, the fake Unity runtime `fake_unity.cpp` and the C# game `mono/Game.cs` for the engine commands: see [`tests/README.md`](../tests/README.md) |
