@@ -23,7 +23,7 @@ jobs:
       matrix:
         arch: [x64, Win32]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Configure
         run: cmake -S . -B build -A ${{ matrix.arch }} -DUIH_BUILD_TESTS=ON
       - name: Build
@@ -32,7 +32,7 @@ jobs:
         run: build\tests\Release\uih_host.exe --api d3d11 --warp
       - name: Proxy test
         run: build\tests\Release\uih_host.exe --proxy build\Release\Universal-ImGui-Hook.dll
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Universal-ImGui-Hook-msvc-${{ matrix.arch }}
           path: build/Release/Universal-ImGui-Hook.dll
@@ -43,7 +43,7 @@ jobs:
           cmake --build build-ai --config Release --target uih_example
       - name: Proxy test of the AI library
         run: build\tests\Release\uih_host.exe --proxy build-ai\Release\Universal-ImGui-Hook.dll
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Universal-ImGui-Hook-msvc-${{ matrix.arch }}-ai
           path: build-ai/Release/Universal-ImGui-Hook.dll
@@ -74,7 +74,7 @@ jobs:
       # Crashes of uih_host write minidumps there, kept with the binaries and their symbols.
       UIH_TEST_DUMPS: ${{ github.workspace }}\dumps
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Not released: built with symbols for the minidumps.
       - name: Configure
         run: >-
@@ -146,7 +146,7 @@ jobs:
           ctest --test-dir build -C Release -V -R vulkan --timeout 120 > ctest-validation.log 2>&1 || true
           grep -E "Test +#|VALIDATION ERROR|tests passed" ctest-validation.log
           if grep -qE "Skipped|Failed|VALIDATION ERROR" ctest-validation.log; then exit 1; fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: windows-tests-${{ matrix.arch }}
@@ -169,8 +169,8 @@ jobs:
       matrix:
         platform: [x64, x86]
     steps:
-      - uses: actions/checkout@v4
-      - uses: microsoft/setup-msbuild@v2
+      - uses: actions/checkout@v7
+      - uses: microsoft/setup-msbuild@v3
       - name: Build
         run: msbuild Universal-ImGui-Hook.sln -m -p:Configuration=Release -p:Platform=${{ matrix.platform }}
       - name: Smoke test (WARP)
@@ -206,7 +206,7 @@ jobs:
             arch: i686
             preset: mingw-x86
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install toolchain
         if: runner.os == 'Linux'
         uses: ./.github/actions/apt-install
@@ -221,7 +221,7 @@ jobs:
         run: cmake --build --preset ${{ matrix.preset }}
       - name: Check the proxy export
         run: ${{ matrix.arch }}-w64-mingw32-objdump -p build/${{ matrix.preset }}/Universal-ImGui-Hook.dll | grep -E ' DirectInput8Create$'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: matrix.os == 'ubuntu-latest'
         with:
           name: Universal-ImGui-Hook-mingw-${{ matrix.arch }}
@@ -254,7 +254,7 @@ jobs:
       CC: ${{ matrix.cc }}
       CXX: ${{ matrix.cxx }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install dependencies
         uses: ./.github/actions/apt-install
         with:
@@ -291,7 +291,7 @@ jobs:
           xvfb-run -a -s "-screen 0 1280x720x24" ctest --test-dir build/linux -V -R vulkan > ctest-validation.log 2>&1 || true
           grep -E "Test +#|VALIDATION ERROR|tests passed" ctest-validation.log
           if grep -qE "Skipped|Failed|VALIDATION ERROR" ctest-validation.log; then exit 1; fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: linux-tests-${{ matrix.compiler }}-${{ matrix.arch }}
@@ -305,7 +305,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install dependencies
         uses: ./.github/actions/apt-install
         with:
@@ -339,7 +339,7 @@ jobs:
           - arch: aarch64
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install dependencies
         run: |
           dnf install -y pkgconf-pkg-config libxcb-devel libX11-devel libXtst-devel libglvnd-devel mesa-libGL-devel mesa-libEGL-devel \
@@ -363,7 +363,7 @@ jobs:
           xvfb-run -a -s "-screen 0 1280x720x24" ctest --test-dir build/linux --output-on-failure | tee ctest.log
           # The EGL of these distributions has no swap_buffers_with_damage.
           if grep -E 'preload_(glx|egl).*Skipped' ctest.log | grep -v swap_with_damage; then exit 1; fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Universal-ImGui-Hook-linux-${{ matrix.arch }}
           path: build/linux/Universal-ImGui-Hook.so
@@ -373,12 +373,12 @@ jobs:
           cmake --preset linux -B build/linux-ai -DUIH_EXAMPLE_AI=ON
           cmake --build build/linux-ai --target uih_example
           if readelf -d build/linux-ai/Universal-ImGui-Hook.so | grep -E 'libstdc\+\+|libgcc_s'; then exit 1; fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Universal-ImGui-Hook-linux-${{ matrix.arch }}-ai
           path: build/linux-ai/Universal-ImGui-Hook.so
       # The library with the remote control on, for games-linux: not released.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: uih-remote-preload-linux-${{ matrix.arch }}
           path: build/linux/tests/libuih_remote_preload.so
@@ -398,11 +398,11 @@ jobs:
       DDNET: DDNet-20.1.1-linux_x86_64
       GODOT: Godot_v4.7.2-stable_linux.x86_64
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: Universal-ImGui-Hook-linux-x86_64
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: uih-remote-preload-linux-x86_64
       # The distribution package of DDNet brings the libraries the official build needs.
@@ -443,7 +443,7 @@ jobs:
             set -- ./$GODOT --path "$PWD/tests/godot" --rendering-driver vulkan
           fi
           xvfb-run -a -s "-screen 0 1280x800x24" python3 tests/game_mcp.py libuih_remote_preload.so ${{ matrix.backend }} mcp.png "$@"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: ${{ matrix.game }}-linux-${{ matrix.backend }}
@@ -469,7 +469,7 @@ jobs:
       DDNET: DDNet-20.1.1-win64
       GODOT: Godot_v4.7.2-stable_win64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Configure
         run: cmake -S . -B build -A x64 -DUIH_BUILD_TESTS=ON
       - name: Build
@@ -516,7 +516,7 @@ jobs:
       - name: Godot with D3D11
         if: matrix.game == 'Godot' && !cancelled()
         run: build\tests\Release\uih_game.exe --dll build\Release\Universal-ImGui-Hook.dll --backend D3D11 --captures godot-d3d11 -- "$env:GODOT\$env:GODOT.exe" --path "$pwd\tests\godot" --rendering-driver opengl3_angle --rendering-method gl_compatibility
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: ${{ matrix.game }}-windows
@@ -540,8 +540,8 @@ jobs:
       WINE: 11.0.0.0~noble-1
       WINEPREFIX: ${{ github.workspace }}/prefix
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: Universal-ImGui-Hook-msvc-x64
       - name: Add the WineHQ repository
@@ -584,7 +584,7 @@ jobs:
         run: |
           xvfb-run -a -s "-screen 0 1280x800x24" sh tests/wine.sh Universal-ImGui-Hook.dll Vulkan godot-vulkan \
             godot/$GODOT.exe --path "Z:$PWD/tests/godot" --audio-driver Dummy --rendering-driver vulkan
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: Godot-wine
@@ -596,21 +596,26 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Configure
         run: cmake -S tests/consumer -B build -A x64 -DUIH_GIT_REPOSITORY=${{ github.server_url }}/${{ github.repository }}.git -DUIH_GIT_TAG=${{ github.event.pull_request.head.sha || github.sha }}
       - name: Build
         run: cmake --build build --config Release
 
-  # Links, anchors, tables and code spans of the Markdown files.
+  # Links, anchors, tables and code spans of the Markdown files, and the
+  # sources of the two build systems.
   docs:
-    name: Docs
+    name: Docs and sources
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check the Markdown files
         run: python3 tests/check_docs.py
+      # A source in CMakeLists.txt and not in vs/, or the other way round,
+      # fails to link on one side only: as when a merge drops a line.
+      - name: Check CMake and the Visual Studio solution build the same sources
+        run: python3 tests/check_sources.py
 
   release:
     name: Release
@@ -624,7 +629,7 @@ jobs:
       attestations: write
     steps:
       # Only MSVC builds of the Windows DLL survive an exception in the overlay.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
           pattern: Universal-ImGui-Hook-*
@@ -636,7 +641,7 @@ jobs:
           done
           (cd release && sha256sum Universal-ImGui-Hook-* > SHA256SUMS && cat SHA256SUMS)
           ls -l release
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-checksums: release/SHA256SUMS
       # The message of an annotated tag, without its first line when that line
@@ -657,7 +662,7 @@ jobs:
             fi
           fi
           cat highlights.md
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: release/*
           body_path: highlights.md
