@@ -1,7 +1,11 @@
 // The Engine tab of the "AI Advanced Features" window: the classes, structs
 // and enums of a Unity or Unreal Engine game, the properties and functions
 // of one, its objects and their values, live and editable, a form to call a
-// function, and the C++ SDK of an Unreal game (src/sdk.cpp).
+// function, and the C++ SDK of an Unreal game (src/sdk.cpp). The list on the
+// left shows the types, or the functions or properties of every class whose
+// name holds the filter (engine search): one of them opens its class, with
+// the function ready in the Call section, or the property among the values
+// of the class's first object.
 //
 // It runs the engine commands of src/engine.cpp, as the assistant does, on a
 // thread of its own: they read the memory of the game, which may take a
@@ -31,7 +35,7 @@ namespace {
 using Clock = std::chrono::steady_clock;
 
 // What the tab asks: one command at a time per slot, the last one wins.
-enum SlotId { kInfo, kTypes, kClass, kInstances, kValues, kSet, kCall, kDump, kSlotCount };
+enum SlotId { kInfo, kTypes, kClass, kInstances, kValues, kSet, kCall, kDump, kSearch, kSlotCount };
 
 struct Slot {
     bool pending = false;
@@ -288,6 +292,19 @@ struct Instance {
     std::string label;
 };
 
+// A line of engine search: function|property <package> <Class>::<Name> <detail>.
+struct SearchResult {
+    bool function = false;
+    std::string package;
+    std::string owner;
+    std::string name;
+    std::string label;
+    std::string detail;
+};
+
+// What the list on the left shows.
+enum ListMode { kListTypes, kListFunctions, kListProperties };
+
 struct View {
     bool started = false;
     unsigned seen[kSlotCount] = {};
@@ -299,6 +316,28 @@ struct View {
     char filter[128] = {};
     std::string appliedFilter = "\x01";
     std::vector<int> filtered;
+
+    int mode = kListTypes;
+    // The search last asked, and when the filter last changed: a search
+    // waits until the filter stays the same for a moment.
+    std::string searched;
+    std::string editedFilter;
+    Clock::time_point editedAt;
+    std::vector<SearchResult> results;
+    size_t moreResults = 0;
+    std::string searchStatus;
+    int chosen = -1;
+    // The member of the class being opened, selected once the class is read.
+    std::string openFunction;
+    std::string openProperty;
+    bool pickFirstObject = false;
+    // The member to show: highlighted, scrolled to, and its section opened.
+    std::string shownProperty;
+    bool scrollToFunction = false;
+    bool scrollToProperty = false;
+    bool openCall = false;
+    bool openValues = false;
+    bool openProperties = false;
 
     int selected = -1;
     std::string reference;
@@ -359,7 +398,70 @@ void SelectType(View& view, int index) {
     view.setStatus.clear();
     view.function = -1;
     view.callResult.clear();
+    view.openFunction.clear();
+    view.openProperty.clear();
+    view.pickFirstObject = false;
+    view.shownProperty.clear();
     Submit(kClass, "class " + view.reference);
+}
+
+void ChooseObject(View& view, const std::string& address) {
+    view.object = address;
+    view.values.clear();
+    view.valuesError.clear();
+    view.setStatus.clear();
+    view.valuesAt = Clock::time_point();
+}
+
+// Opens the class of a search result, and then its member.
+void OpenResult(View& view, int index) {
+    const SearchResult& result = view.results[static_cast<size_t>(index)];
+    for (size_t i = 0; i < view.types.size(); ++i) {
+        if (view.types[i].name != result.owner || view.types[i].package != result.package)
+            continue;
+        view.chosen = index;
+        view.searchStatus.clear();
+        SelectType(view, static_cast<int>(i));
+        (result.function ? view.openFunction : view.openProperty) = result.name;
+        return;
+    }
+    view.searchStatus = result.package + ":" + result.owner + " is not in the list of the types yet: Reload.";
+}
+
+// The name of a line of the properties: <offset> <type> <name>[ (bit ...)][  (<class>)].
+std::string PropertyName(const std::string& line) {
+    size_t at = 0;
+    ReadToken(line, at, " ");
+    ReadToken(line, at, " ");
+    return ReadToken(line, at, " ");
+}
+
+// The search results, from the answer of engine search.
+void ParseResults(View& view, const std::string& text) {
+    view.results.clear();
+    view.moreResults = 0;
+    for (const std::string& line : Lines(text)) {
+        if (line.rfind("+", 0) == 0) {
+            view.moreResults = strtoull(line.c_str() + 1, nullptr, 10);
+            continue;
+        }
+        size_t at = 0;
+        SearchResult result;
+        std::string kind = ReadToken(line, at, " ");
+        result.function = kind == "function";
+        result.package = ReadToken(line, at, " ");
+        std::string member = ReadToken(line, at, " ");
+        size_t separator = member.find("::");
+        if ((!result.function && kind != "property") || separator == std::string::npos)
+            continue;
+        result.owner = member.substr(0, separator);
+        result.name = member.substr(separator + 2);
+        result.label = member;
+        while (at < line.size() && line[at] == ' ')
+            ++at;
+        result.detail = line.substr(at);
+        view.results.push_back(result);
+    }
 }
 
 void SelectByName(View& view, const std::string& name) {
@@ -464,6 +566,28 @@ void Collect(View& view) {
             ParseClass(view, text);
         else
             view.classError = text;
+        if (ok && !view.openFunction.empty()) {
+            for (size_t i = 0; i < view.functions.size(); ++i)
+                if (view.functions[i].name == view.openFunction) {
+                    view.function = static_cast<int>(i);
+                    view.inputs.clear();
+                    view.scrollToFunction = true;
+                    view.openCall = true;
+                    break;
+                }
+        }
+        if (ok && !view.openProperty.empty()) {
+            // Its value, live and editable, in the first object of the class.
+            view.shownProperty = view.openProperty;
+            view.scrollToProperty = true;
+            view.openValues = true;
+            view.openProperties = true;
+            view.pickFirstObject = view.kind == "class";
+            if (view.pickFirstObject)
+                Submit(kInstances, "instances " + view.reference + " 1000");
+        }
+        view.openFunction.clear();
+        view.openProperty.clear();
     }
     if (Answered(kInstances, view.seen[kInstances], ok, text)) {
         view.instances.clear();
@@ -475,7 +599,10 @@ void Collect(View& view) {
             }
             if (view.instances.empty())
                 view.instancesStatus = "No object of this class is loaded.";
+            if (view.pickFirstObject && !view.instances.empty() && view.object.empty())
+                ChooseObject(view, view.instances[0].address);
         }
+        view.pickFirstObject = false;
     }
     if (Answered(kValues, view.seen[kValues], ok, text)) {
         view.valuesError = ok ? "" : text;
@@ -491,6 +618,14 @@ void Collect(View& view) {
         view.callResult = text;
         view.valuesAt = Clock::time_point();
     }
+    if (Answered(kSearch, view.seen[kSearch], ok, text)) {
+        view.chosen = -1;
+        view.searchStatus = ok ? "" : text;
+        if (ok)
+            ParseResults(view, text);
+        else
+            view.results.clear();
+    }
     if (Answered(kDump, view.seen[kDump], ok, text)) {
         view.dumpOk = ok;
         view.dumpResult = text;
@@ -498,9 +633,74 @@ void Collect(View& view) {
     }
 }
 
+void DrawResults(View& view) {
+    std::string text = view.filter;
+    text.erase(0, text.find_first_not_of(' '));
+    text.erase(text.find_last_not_of(' ') + 1);
+    if (text != view.editedFilter) {
+        view.editedFilter = text;
+        view.editedAt = Clock::now();
+    }
+    std::string command = text.empty() ? "" : "search " + Word(text) + (view.mode == kListFunctions ? " functions" : " properties");
+    if (command != view.searched && Clock::now() - view.editedAt > std::chrono::milliseconds(250)) {
+        view.searched = command;
+        view.results.clear();
+        view.moreResults = 0;
+        view.chosen = -1;
+        view.searchStatus.clear();
+        if (!command.empty())
+            Submit(kSearch, command);
+    }
+    const char* what = view.mode == kListFunctions ? "functions" : "properties";
+    if (text.empty()) {
+        ImGui::TextWrapped("Type a part of the name of the %s to find in every class; Class::Name searches those of the classes named so.", what);
+        return;
+    }
+    if (Busy(kSearch) || command != view.searched)
+        ImGui::TextDisabled("Searching...");
+    else if (!view.searchStatus.empty())
+        ImGui::TextWrapped("%s", view.searchStatus.c_str());
+    else if (view.results.empty())
+        ImGui::TextDisabled("No %s matches.", what);
+    else if (view.moreResults)
+        ImGui::TextDisabled("first %d of %d", static_cast<int>(view.results.size()), static_cast<int>(view.results.size() + view.moreResults));
+    else
+        ImGui::TextDisabled("%d %s", static_cast<int>(view.results.size()), what);
+    if (!ImGui::BeginChild("search_list", ImVec2(0, 0), false))
+        return ImGui::EndChild();
+    ImGuiListClipper clipper;
+    clipper.Begin(static_cast<int>(view.results.size()));
+    while (clipper.Step()) {
+        for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+            const SearchResult& result = view.results[static_cast<size_t>(row)];
+            ImGui::PushID(row);
+            if (ImGui::Selectable(result.label.c_str(), view.chosen == row))
+                OpenResult(view, row);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s\n%s", result.detail.c_str(), result.package.c_str());
+            if (!result.function) {
+                ImGui::SameLine();
+                ImGui::TextDisabled("%s", result.detail.c_str());
+            }
+            ImGui::PopID();
+        }
+    }
+    ImGui::EndChild();
+}
+
 void DrawTypes(View& view) {
+    ImGui::RadioButton("Types", &view.mode, kListTypes);
+    ImGui::SameLine();
+    ImGui::RadioButton("Functions", &view.mode, kListFunctions);
+    ImGui::SameLine();
+    ImGui::RadioButton("Properties", &view.mode, kListProperties);
     ImGui::SetNextItemWidth(-FLT_MIN);
-    ImGui::InputTextWithHint("##filter", "search classes, structs, enums, packages", view.filter, sizeof(view.filter));
+    const char* hint = view.mode == kListFunctions    ? "search functions of every class"
+                       : view.mode == kListProperties ? "search properties of every class"
+                                                      : "search classes, structs, enums, packages";
+    ImGui::InputTextWithHint("##filter", hint, view.filter, sizeof(view.filter));
+    if (view.mode != kListTypes)
+        return DrawResults(view);
     std::string filter = Lowered(view.filter);
     if (filter != view.appliedFilter) {
         view.appliedFilter = filter;
@@ -560,13 +760,28 @@ void DrawValues(View& view) {
     ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthFixed, 150.0f);
     ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
     ImGui::TableHeadersRow();
+    int highlighted = -1;
+    for (size_t i = 0; i < view.values.size() && !view.shownProperty.empty(); ++i)
+        if (view.values[i].name == view.shownProperty) {
+            highlighted = static_cast<int>(i);
+            break;
+        }
     ImGuiListClipper clipper;
     clipper.Begin(static_cast<int>(view.values.size()));
+    if (highlighted >= 0 && view.scrollToProperty)
+        clipper.IncludeItemByIndex(highlighted);
     while (clipper.Step()) {
         for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
             const ValueRow& row = view.values[static_cast<size_t>(i)];
             ImGui::PushID(i);
             ImGui::TableNextRow();
+            if (i == highlighted) {
+                ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1, ImGui::GetColorU32(ImGuiCol_TextSelectedBg));
+                if (view.scrollToProperty) {
+                    ImGui::SetScrollHereY(0.3f);
+                    view.scrollToProperty = false;
+                }
+            }
             ImGui::TableNextColumn();
             ImGui::TextUnformatted(row.offset.c_str());
             ImGui::TableNextColumn();
@@ -673,13 +888,32 @@ void DrawClass(View& view) {
         }
     }
     std::string propertiesTitle = (view.kind == "enum" ? "Values (" : "Properties (") + std::to_string(view.properties.size()) + ")###properties";
+    // Opened on the property a search result opens, and scrolled to it.
+    int listed = -1;
+    for (size_t i = 0; i < view.properties.size() && view.openProperties; ++i)
+        if (PropertyName(view.properties[i]) == view.shownProperty) {
+            listed = static_cast<int>(i);
+            break;
+        }
+    if (view.openProperties)
+        ImGui::SetNextItemOpen(true);
+    view.openProperties = false;
     if (ImGui::CollapsingHeader(propertiesTitle.c_str())) {
         if (ImGui::BeginChild("properties", ImVec2(0, 160.0f), true)) {
             ImGuiListClipper clipper;
             clipper.Begin(static_cast<int>(view.properties.size()));
+            if (listed >= 0)
+                clipper.IncludeItemByIndex(listed);
             while (clipper.Step())
-                for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
-                    ImGui::TextUnformatted(view.properties[static_cast<size_t>(i)].c_str());
+                for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
+                    const std::string& line = view.properties[static_cast<size_t>(i)];
+                    if (!view.shownProperty.empty() && PropertyName(line) == view.shownProperty)
+                        ImGui::TextColored(ImGui::GetStyleColorVec4(ImGuiCol_PlotLinesHovered), "%s", line.c_str());
+                    else
+                        ImGui::TextUnformatted(line.c_str());
+                    if (i == listed)
+                        ImGui::SetScrollHereY(0.3f);
+                }
         }
         ImGui::EndChild();
     }
@@ -688,20 +922,29 @@ void DrawClass(View& view) {
     if (view.kind != "class")
         return;
     std::string functionsTitle = "Functions (" + std::to_string(view.functions.size()) + ")###functions";
+    if (view.scrollToFunction)
+        ImGui::SetNextItemOpen(true);
     if (ImGui::CollapsingHeader(functionsTitle.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
         if (ImGui::BeginChild("functions", ImVec2(0, 140.0f), true)) {
             for (size_t i = 0; i < view.functions.size(); ++i) {
                 ImGui::PushID(static_cast<int>(i));
-                if (ImGui::Selectable(view.functions[i].line.c_str(), view.function == static_cast<int>(i))) {
+                bool selected = view.function == static_cast<int>(i);
+                if (ImGui::Selectable(view.functions[i].line.c_str(), selected)) {
                     view.function = static_cast<int>(i);
                     view.inputs.clear();
                     view.callResult.clear();
                 }
+                if (selected && view.scrollToFunction)
+                    ImGui::SetScrollHereY(0.3f);
                 ImGui::PopID();
             }
         }
         ImGui::EndChild();
     }
+    view.scrollToFunction = false;
+    if (view.openValues)
+        ImGui::SetNextItemOpen(true);
+    view.openValues = false;
     if (ImGui::CollapsingHeader("Instances and values", ImGuiTreeNodeFlags_DefaultOpen)) {
         bool pending = Busy(kInstances);
         ImGui::BeginDisabled(pending);
@@ -719,13 +962,8 @@ void DrawClass(View& view) {
                 for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
                     const Instance& instance = view.instances[static_cast<size_t>(i)];
                     std::string label = instance.address + "  " + instance.label + "##" + std::to_string(i);
-                    if (ImGui::Selectable(label.c_str(), view.object == instance.address)) {
-                        view.object = instance.address;
-                        view.values.clear();
-                        view.valuesError.clear();
-                        view.setStatus.clear();
-                        view.valuesAt = Clock::time_point();
-                    }
+                    if (ImGui::Selectable(label.c_str(), view.object == instance.address))
+                        ChooseObject(view, instance.address);
                 }
             }
             ImGui::EndChild();
@@ -734,6 +972,9 @@ void DrawClass(View& view) {
         }
         DrawValues(view);
     }
+    if (view.openCall)
+        ImGui::SetNextItemOpen(true);
+    view.openCall = false;
     if (ImGui::CollapsingHeader("Call", ImGuiTreeNodeFlags_DefaultOpen))
         DrawCall(view);
 }
@@ -784,6 +1025,8 @@ void DrawExplorer() {
         Submit(kInfo, "info");
         Submit(kTypes, "classes *");
         view.typesStatus = "Loading...";
+        // Searched again, in the classes loaded since.
+        view.searched = "\x01";
     }
     if (view.infoOk && view.info.rfind("unreal", 0) == 0)
         DrawDump(view);
