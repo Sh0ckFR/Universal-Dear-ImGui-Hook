@@ -118,22 +118,19 @@ int32_t Int(uintptr_t address, int32_t fallback = -1) {
     return Read(address, value) ? value : fallback;
 }
 
-// The readable memory outside the modules, sorted, where the engine allocates.
+// The readable memory that no module maps, sorted, where the engine allocates.
 struct Heap {
     std::vector<MemoryRegion> regions;
-    std::vector<LoadedModule> modules;
 
-    Heap() : regions(MemoryRegions()), modules(SortedModules()) {
+    Heap() : regions(MemoryRegions()) {
+        regions.erase(std::remove_if(regions.begin(), regions.end(), [](const MemoryRegion& r) { return r.image; }), regions.end());
         std::sort(regions.begin(), regions.end(), [](const MemoryRegion& a, const MemoryRegion& b) { return a.base < b.base; });
     }
     bool Contains(uintptr_t address) const {
         if (!address || address % P)
             return false;
         auto region = std::upper_bound(regions.begin(), regions.end(), address, [](uintptr_t value, const MemoryRegion& r) { return value < r.base; });
-        if (region == regions.begin() || address - std::prev(region)->base >= std::prev(region)->size)
-            return false;
-        auto module = std::upper_bound(modules.begin(), modules.end(), address, [](uintptr_t value, const LoadedModule& m) { return value < m.base; });
-        return module == modules.begin() || address - std::prev(module)->base >= std::prev(module)->size;
+        return region != regions.begin() && address - std::prev(region)->base < std::prev(region)->size;
     }
 };
 
