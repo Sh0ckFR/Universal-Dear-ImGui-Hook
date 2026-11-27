@@ -117,6 +117,9 @@ struct Unreal {
     bool processEventSearched = false;
     int processEventIndex = -1;
     uintptr_t processEventAddress = 0;
+    // The entries of the virtual table whose code tests FUNC_Native, in order:
+    // the check of the first call keeps the first that returns its sum.
+    std::vector<std::pair<int, uintptr_t>> processEventCandidates;
     std::string processEventFailure;
     // 1 once a call of KismetMathLibrary:Add_IntInt returned its sum, -1 when it did not.
     int processEventVerified = 0;

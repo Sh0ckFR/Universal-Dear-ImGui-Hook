@@ -1366,9 +1366,9 @@ std::string Call(const Runtime& runtime, const std::string& rest, std::vector<ui
         }
         Handle exception = nullptr;
         Handle result = nullptr;
-        bool ran = Guarded([&] { result = rt.invoke(method, reinterpret_cast<Handle>(object), slots.empty() ? nullptr : slots.data(), &exception); });
+        bool ran = GuardedCall([&] { result = rt.invoke(method, reinterpret_cast<Handle>(object), slots.empty() ? nullptr : slots.data(), &exception); });
         if (!ran)
-            return "error the call faulted, which removed the overlay";
+            return "error the call faulted in the game's code";
         if (exception)
             return FormatException(rt, exception);
         std::string type = returned ? rt.TypeName(returned) : "?";

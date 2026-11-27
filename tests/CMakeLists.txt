@@ -50,6 +50,10 @@ function(uih_add_sdk_test generation dump_test api)
     endif()
     uih_add_host_test(sdk${generation}_run --api ${api} --unreal ${generation} --sdk-test ${library})
     set_tests_properties(sdk${generation}_run PROPERTIES FIXTURES_REQUIRED sdk${generation}_library)
+    # The fake game keeps its strings for the life of the process, as a game does.
+    if(UIH_SANITIZER_OPTIONS)
+        set_tests_properties(sdk${generation}_run PROPERTIES ENVIRONMENT "${UIH_SANITIZER_OPTIONS}")
+    endif()
 endfunction()
 
 # A fake Unity scripting runtime for the engine commands of the remote control,

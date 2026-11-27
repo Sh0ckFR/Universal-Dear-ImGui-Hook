@@ -471,6 +471,20 @@ bool Guarded(Work&& work) {
     return ok;
 }
 
+// While true on a thread, a fault there is the game's code failing a call
+// the assistant made: OnFault() leaves the overlay running.
+void SetInGameCall(bool inCall);
+
+// Runs a call of the game's own code, such as an engine call, guarded like
+// the overlay's work: false when it faulted, and the overlay stays.
+template <typename Work>
+bool GuardedCall(Work&& work) {
+    SetInGameCall(true);
+    bool ok = Guarded(work);
+    SetInGameCall(false);
+    return ok;
+}
+
 // Draws the overlay with `render` when `swapchain` is its target.
 template <typename Render>
 void DrawOverlay(uint64_t swapchain, NativeWindow window, Render&& render) {

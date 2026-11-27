@@ -18,6 +18,8 @@ if(NOT EXISTS ${UIH_SDK_DIR}/uih_sdk.hpp)
 endif()
 
 add_library(uih_sdk_test SHARED sdk_test.cpp)
+# Each run dumps the SDK again: rebuild with it, whatever the build tool tracks.
+set_source_files_properties(sdk_test.cpp PROPERTIES OBJECT_DEPENDS ${UIH_SDK_DIR}/uih_sdk.hpp)
 target_include_directories(uih_sdk_test PRIVATE ${UIH_SDK_DIR})
 target_compile_features(uih_sdk_test PRIVATE cxx_std_17)
 set_target_properties(uih_sdk_test PROPERTIES PREFIX "" CXX_EXTENSIONS OFF

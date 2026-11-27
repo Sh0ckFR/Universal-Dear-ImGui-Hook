@@ -698,6 +698,11 @@ bool CodeTestsBits(uintptr_t function, uint32_t displacement, uint32_t mask, siz
     };
     size_t reach = 0;
     for (size_t at = 0; at < std::min(size, length);) {
+        // endbr64 or endbr32 past every branch: the next function, after one
+        // that ended with a call that does not return, such as a sanitizer's report.
+        if (at > 0 && at >= reach && at + 4 <= size && bytes[at] == 0xf3 && bytes[at + 1] == 0x0f && bytes[at + 2] == 0x1e &&
+            (bytes[at + 3] == 0xfa || bytes[at + 3] == 0xfb))
+            break;
         Instruction in;
         if (!decoder.Decode(bytes.data() + at, size - at, in))
             break;

@@ -1350,8 +1350,8 @@ std::string RunCalls(int index, std::vector<PreparedCall> calls, std::shared_ptr
             if (!code)
                 return "error the object has no virtual table: it may have been destroyed";
             void* parms = call.parms.empty() ? nullptr : call.parms.data();
-            if (!Guarded([&] { CallProcessEvent(code, call.object, call.function, parms); }))
-                return "error the call faulted, which removed the overlay";
+            if (!GuardedCall([&] { CallProcessEvent(code, call.object, call.function, parms); }))
+                return "error the call faulted in the game's code";
             uint32_t size = static_cast<uint32_t>(call.parms.size());
             out.append(reinterpret_cast<const char*>(&size), sizeof(size));
             out.append(reinterpret_cast<const char*>(call.parms.data()), call.parms.size());
@@ -1465,23 +1465,38 @@ std::string Call(Unreal& ue, const std::string& rest, std::vector<uint8_t>& payl
                    ")";
     }
     if (ue.processEventVerified < 0)
-        return "error the library did not find how this game calls its functions: the check of UObject::ProcessEvent failed";
+        return ue.processEventFailure;
     // Before the first call, one whose result is known: the sum of KismetMathLibrary:Add_IntInt.
     PreparedCall check;
     size_t checkResult = 0;
     std::string answer;
     if (ue.processEventVerified == 0 && PrepareCheck(ue, check, checkResult)) {
-        std::vector<PreparedCall> checked{check};
-        answer = RunCalls(ue.processEventIndex, checked, strings);
-        if (answer.rfind("ok\n", 0) != 0)
-            return answer;
-        int32_t sum = 0;
-        if (!ReadCallResults(answer, checked) || (memcpy(&sum, checked[0].parms.data() + checkResult, 4), sum != 42)) {
-            ue.processEventVerified = -1;
-            return "error the library did not find how this game calls its functions: KismetMathLibrary:Add_IntInt(20, 22) did not return 42 "
-                   "through the virtual function " + std::to_string(ue.processEventIndex);
+        // Each candidate in turn: one that faults or returns another sum is not ProcessEvent.
+        std::string tried;
+        for (const std::pair<int, uintptr_t>& candidate : ue.processEventCandidates) {
+            std::vector<PreparedCall> checked{check};
+            answer = RunCalls(candidate.first, checked, strings);
+            int32_t sum = 0;
+            bool ok = answer.rfind("ok\n", 0) == 0 && ReadCallResults(answer, checked);
+            if (ok)
+                memcpy(&sum, checked[0].parms.data() + checkResult, 4);
+            if (ok && sum == 42) {
+                ue.processEventIndex = candidate.first;
+                ue.processEventAddress = candidate.second;
+                ue.processEventVerified = 1;
+                break;
+            }
+            // The game thread did not run it: no answer about this candidate.
+            if (answer.rfind("error ", 0) == 0 && answer.rfind("error the call faulted", 0) != 0)
+                return answer;
+            tried += (tried.empty() ? "" : ", ") + std::to_string(candidate.first) + (ok ? " returned " + std::to_string(sum) : " faulted");
         }
-        ue.processEventVerified = 1;
+        if (ue.processEventVerified != 1) {
+            ue.processEventVerified = -1;
+            ue.processEventFailure = "error the library did not find how this game calls its functions: KismetMathLibrary:Add_IntInt(20, 22) did not "
+                                     "return 42 through the virtual functions that test FUNC_Native (" + tried + ")";
+            return ue.processEventFailure;
+        }
     }
     std::vector<PreparedCall> calls{call};
     answer = RunCalls(ue.processEventIndex, calls, strings);
@@ -1665,17 +1680,20 @@ std::string DiscoverProcessEvent(Unreal& ue) {
     ue.defaultObject = DefaultObject(ue, ue.objectClass);
     uintptr_t object = ue.defaultObject ? ue.defaultObject : ue.package;
     uintptr_t vtable = Ptr(object);
-    for (int i = 0; vtable && i < 0x200; ++i) {
+    // Other virtual functions may test the same flag: each is a candidate,
+    // which the check of the first call confirms or rules out.
+    for (int i = 0; vtable && i < 0x200 && ue.processEventCandidates.size() < 8; ++i) {
         uintptr_t entry = Ptr(vtable + static_cast<uintptr_t>(i) * P);
         if (!entry || !IsCode(entry, 1))
             break;
-        if (CodeTestsBits(entry, static_cast<uint32_t>(ue.functionFlagsOffset), kFuncNative, 0x600)) {
-            ue.processEventIndex = i;
-            ue.processEventAddress = entry;
-            return "";
-        }
+        if (CodeTestsBits(entry, static_cast<uint32_t>(ue.functionFlagsOffset), kFuncNative, 0x600))
+            ue.processEventCandidates.push_back({i, entry});
     }
-    return ue.processEventFailure = "error the library did not find UObject::ProcessEvent, which calls the functions of the objects, in their virtual table";
+    if (ue.processEventCandidates.empty())
+        return ue.processEventFailure = "error the library did not find UObject::ProcessEvent, which calls the functions of the objects, in their virtual table";
+    ue.processEventIndex = ue.processEventCandidates.front().first;
+    ue.processEventAddress = ue.processEventCandidates.front().second;
+    return "";
 }
 
 Property Describe(Unreal& ue, uintptr_t address, uintptr_t owner) {
