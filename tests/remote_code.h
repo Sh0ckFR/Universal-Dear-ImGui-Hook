@@ -17,8 +17,14 @@
 #endif
 
 // The function the assistant patches: called through a pointer, so that the
-// calls are not folded into constants.
-UIH_NOINLINE inline int PatchTarget(int value) {
+// calls are not folded into constants. Left out of the sanitizers, whose
+// checks would push its ret past the instructions the test disassembles.
+#if defined(__GNUC__) || defined(__clang__)
+#define UIH_TEST_NO_SANITIZE __attribute__((no_sanitize("address", "undefined")))
+#else
+#define UIH_TEST_NO_SANITIZE
+#endif
+UIH_NOINLINE UIH_TEST_NO_SANITIZE inline int PatchTarget(int value) {
     volatile int kept = value;
     return kept * 3 + 7;
 }
