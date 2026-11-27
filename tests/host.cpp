@@ -57,6 +57,9 @@ void Release(T*& object) {
 
 // Renders like many D3D9 games: several scenes per frame, one of them into a
 // texture that is still bound when the frame is presented.
+// 0 with --bench: the frames are not held to the refresh rate.
+UINT g_syncInterval = 1;
+
 struct D3D9Host : Host {
     bool ex = false;
     bool srgb = false;
@@ -122,6 +125,8 @@ struct D3D9Host : Host {
         srgb = options.format == "srgb";
         present.Windowed = TRUE;
         present.SwapEffect = D3DSWAPEFFECT_DISCARD;
+        if (options.benchFrames > 0)
+            present.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
         present.hDeviceWindow = window;
         if (ex) {
             if (FAILED(Direct3DCreate9Ex(D3D_SDK_VERSION, &d3dEx)) ||
@@ -298,7 +303,7 @@ struct D3D10Host : Host {
 
     void Frame() override {
         device->ClearRenderTargetView(target, ClearColor());
-        swapChain->Present(1, 0);
+        swapChain->Present(g_syncInterval, 0);
     }
 
     int ValidationErrors() const override { return DebugErrors<ID3D10InfoQueue, D3D10_MESSAGE>(device); }
@@ -365,7 +370,7 @@ struct D3D11Host : Host {
 
     void Frame() override {
         context->ClearRenderTargetView(target, ClearColor());
-        swapChain->Present(1, 0);
+        swapChain->Present(g_syncInterval, 0);
     }
 
     int ValidationErrors() const override { return DebugErrors<ID3D11InfoQueue, D3D11_MESSAGE>(device); }
@@ -625,7 +630,7 @@ struct D3D12Host : Host {
             ID3D12CommandList* decoyLists[] = {decoyList};
             decoyQueue->ExecuteCommandLists(1, decoyLists);
         }
-        swapChain->Present(1, 0);
+        swapChain->Present(g_syncInterval, 0);
         queue->Signal(fence, ++fenceValue);
         if (!gate)
             WaitForGpu();
@@ -761,6 +766,11 @@ struct OpenGLHost : Host {
         context = wglCreateContext(hdc);
         if (!context || !wglMakeCurrent(hdc, context))
             return false;
+        if (options.benchFrames > 0) {
+            using SwapIntervalFn = BOOL(WINAPI*)(int);
+            if (auto swapInterval = reinterpret_cast<SwapIntervalFn>(reinterpret_cast<void*>(wglGetProcAddress("wglSwapIntervalEXT"))))
+                swapInterval(0);
+        }
         const char* version = reinterpret_cast<const char*>(glGetString(GL_VERSION));
         if (options.format == "srgb")
             glEnable(kFramebufferSrgb);
@@ -989,8 +999,13 @@ std::unique_ptr<Host> CreateHost(const std::string& api) {
     return nullptr;
 }
 
+// False with --bench, which measures frames as fast as they go.
+bool g_pace = true;
+
 // Paces the host at about 60 frames per second, so that frame counts are durations.
 void Pace() {
+    if (!g_pace)
+        return;
     static ULONGLONG next = 0;
     ULONGLONG now = GetTickCount64();
     if (next > now)
@@ -1553,6 +1568,81 @@ int RunDllMode(HWND window, Host& host, const Options& options) {
 
 // Uses the library in-process without a module to free: F11 removes the
 // overlay and INSERT brings it back, twice.
+// Median, mean and 99th percentile of frame times, in milliseconds.
+struct FrameTimes {
+    double median = 0;
+    double mean = 0;
+    double p99 = 0;
+};
+
+FrameTimes MeasureFrames(Host& host, int frames) {
+    LARGE_INTEGER frequency;
+    LARGE_INTEGER previous;
+    QueryPerformanceFrequency(&frequency);
+    std::vector<double> times;
+    times.reserve(frames);
+    QueryPerformanceCounter(&previous);
+    for (int frame = 0; frame < frames; ++frame) {
+        PumpMessages();
+        host.Frame();
+        LARGE_INTEGER now;
+        QueryPerformanceCounter(&now);
+        times.push_back(1000.0 * static_cast<double>(now.QuadPart - previous.QuadPart) / static_cast<double>(frequency.QuadPart));
+        previous = now;
+    }
+    FrameTimes result;
+    if (times.empty())
+        return result;
+    for (double time : times)
+        result.mean += time;
+    result.mean /= static_cast<double>(times.size());
+    std::sort(times.begin(), times.end());
+    result.median = times[times.size() / 2];
+    result.p99 = times[std::min(times.size() - 1, times.size() * 99 / 100)];
+    return result;
+}
+
+// --bench N, vsync off: what the overlay adds to the time of a frame. The
+// phases without it, before Start() and after Stop(), show the noise of the
+// measure; the cost is compared with their mean.
+int RunBenchMode(HWND window, Host& host, const Options& options) {
+    const int frames = options.benchFrames;
+    MeasureFrames(host, 300);
+    FrameTimes before = MeasureFrames(host, frames);
+    StartHook(options);
+    for (ULONGLONG start = GetTickCount64(); uih::ActiveBackend() == uih::Backend::None && GetTickCount64() - start < 10000;)
+        MeasureFrames(host, 1);
+    if (uih::ActiveBackend() == uih::Backend::None)
+        return Fail("the overlay did not start");
+    MeasureFrames(host, 300);
+    FrameTimes closed = MeasureFrames(host, frames);
+    uih::SetMenuOpen(true);
+    MeasureFrames(host, 300);
+    FrameTimes open = MeasureFrames(host, frames);
+    uih::SetMenuOpen(false);
+    uih::Stop();
+    MeasureFrames(host, 300);
+    FrameTimes after = MeasureFrames(host, frames);
+    if (!IsWindow(window))
+        return Fail("the window was closed");
+
+    double base = (before.median + after.median) / 2;
+    printf("bench %s, %d frames per phase, vsync off: median, mean and 99th percentile of a frame, in ms\n", options.api.c_str(), frames);
+    auto line = [&](const char* phase, const FrameTimes& times, bool cost) {
+        printf("  %-28s %8.3f %8.3f %8.3f", phase, times.median, times.mean, times.p99);
+        if (cost)
+            printf("   overlay: %+.3f ms, %.1f%% of a frame at 60 fps, %.1f%% at 144 fps", times.median - base,
+                   100.0 * (times.median - base) / (1000.0 / 60), 100.0 * (times.median - base) / (1000.0 / 144));
+        printf("\n");
+    };
+    line("without the overlay", before, false);
+    line("overlay, menu closed", closed, true);
+    line("overlay, menu open", open, true);
+    line("without the overlay, again", after, false);
+    printf("PASS: %s\n", options.api.c_str());
+    return 0;
+}
+
 int RunRemoveMode(HWND window, Host& host) {
     const int visible = kWidth * kHeight / 100;
     auto run = [&](int frames) {
@@ -2533,6 +2623,7 @@ int main(int argc, char** argv) {
         else if (arg == "--render-thread") options.renderThread = true;
         else if (arg == "--resubclass") options.resubclass = true;
         else if (arg == "--c-api") options.cApi = true;
+        else if (arg == "--bench" && i + 1 < argc) options.benchFrames = atoi(argv[++i]);
         else if (arg == "--recreate-context") options.recreateContext = true;
         else if (arg == "--switch-api" && i + 1 < argc) options.switchApi = argv[++i];
         else if (arg == "--slow-frame" && i + 1 < argc) options.slowFrameMs = atoi(argv[++i]);
@@ -2551,7 +2642,7 @@ int main(int argc, char** argv) {
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--own-hooks before|after] [--fault access|exception|draw] [--second-window [--shared-device]] [--composition] [--capture-frame] [--remote [--remote-memory] [--remote-advanced]] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--c-api] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--own-hooks before|after] [--fault access|exception|draw] [--second-window [--shared-device]] [--composition] [--capture-frame] [--remote [--remote-memory] [--remote-advanced]] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--c-api] [--bench frames] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -2589,7 +2680,11 @@ int main(int argc, char** argv) {
             return Fail(failure);
         printf("C interface: defaults and names checked\n");
     }
-    if (options.injectAt == 0 && options.dll.empty())
+    if (options.benchFrames > 0) {
+        g_syncInterval = 0;
+        g_pace = false;
+    }
+    if (options.injectAt == 0 && options.dll.empty() && options.benchFrames <= 0)
         StartHook(options);
 
     if (options.fullscreen && !getenv("UIH_TEST_FULLSCREEN"))
@@ -2657,6 +2752,12 @@ int main(int argc, char** argv) {
     if (!options.preview.empty()) {
         int result = RunPreviewMode(window, *host, options);
         host.reset();
+        return result;
+    }
+    if (options.benchFrames > 0) {
+        int result = RunBenchMode(window, *host, options);
+        host.reset();
+        DestroyWindow(window);
         return result;
     }
     if (!options.dll.empty()) {

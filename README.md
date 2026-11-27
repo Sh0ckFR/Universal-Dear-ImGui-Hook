@@ -30,7 +30,7 @@ The overlay can also let an AI assistant such as Claude Code [see and play the g
 - [API](#api)
 - [How it works](#how-it-works)
 - [Building](#building)
-- [Tests](#tests)
+- [Tests](#tests), and the [games, APIs and cost of the overlay](docs/COMPATIBILITY.md)
 - [Contributing](#contributing)
 - [Limitations](#limitations)
 - [Credits](#credits), [Support](#support), [License](#license)
@@ -557,6 +557,8 @@ ctest --test-dir build/msvc-x64 -C Release
 Some tests press real keys and move the mouse. They are skipped when the host window does not have the focus, so leave the machine alone while they run.
 
 [tests/README.md](tests/README.md) describes every scenario, how to run the tests without a GPU or under the validation and debug layers, the Linux tests, the real-game tests and what the CI checks.
+
+[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) lists the games, graphics APIs and toolchains the CI tests on every commit. It also gives the cost of the overlay, measured with `uih_host --bench`: at most 0.07 ms per frame on an RTX 4070 SUPER, whatever the API, with the menu open or closed.
 
 ## Contributing
 

@@ -95,6 +95,8 @@ if(WIN32)
     uih_add_host_test(d3d11_float --api d3d11 --format float --capture)
     uih_add_host_test(d3d12_float --api d3d12 --format float --capture)
     uih_add_host_test(d3d11_c_api --api d3d11 --c-api --capture)
+    # The measure only runs: the CI renders without a GPU.
+    uih_add_host_test(d3d11_bench --api d3d11 --bench 200)
     uih_add_host_test(vulkan_srgb --api vulkan --format srgb --capture)
     uih_add_host_test(vulkan_srgb_early --api vulkan --format srgb --capture --inject-at 0 --settle 3000)
     uih_add_host_test(opengl_srgb --api opengl --format srgb --capture)
