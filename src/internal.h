@@ -227,6 +227,10 @@ struct MemoryRegion {
     uintptr_t base;
     size_t size;
     bool writable;
+    // Mapped from an executable or a library, or its .bss. The span of a
+    // module can hold other memory: the loader of glibc 2.28 leaves the gap
+    // between its code and its data free for mmap().
+    bool image = false;
 };
 // Readable memory of the process, without device memory.
 std::vector<MemoryRegion> MemoryRegions();
