@@ -16,6 +16,7 @@
 #include <d3d12sdklayers.h>
 #include <d3d9.h>
 #include <dbghelp.h>
+#include <dcomp.h>
 #include <dxgi1_4.h>
 #include <GL/gl.h>
 #define GL_APIENTRY APIENTRY
@@ -140,7 +141,9 @@ struct D3D9Host : Host {
     void Frame() override {
         device->SetRenderTarget(0, backBuffer);
         device->SetRenderState(D3DRS_SRGBWRITEENABLE, srgb);
-        device->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_XRGB(26, 51, 77), 1.0f, 0);
+        const float* clear = ClearColor();
+        auto channel = [&](int i) { return static_cast<int>(clear[i] * 255.0f + 0.5f); };
+        device->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_XRGB(channel(0), channel(1), channel(2)), 1.0f, 0);
         device->BeginScene();
         device->EndScene();
         device->SetRenderTarget(0, offscreen);
@@ -204,6 +207,26 @@ DXGI_SWAP_CHAIN_DESC1 CompositionDesc() {
     desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
     return desc;
 }
+
+// Shows a swap chain made for composition in the window with DirectComposition,
+// as the programs that make one do: nothing of it reaches the screen otherwise.
+struct CompositionVisual {
+    IDCompositionDevice* device = nullptr;
+    IDCompositionTarget* target = nullptr;
+    IDCompositionVisual* visual = nullptr;
+
+    bool Show(HWND window, IUnknown* swapChain) {
+        return SUCCEEDED(DCompositionCreateDevice(nullptr, IID_PPV_ARGS(&device))) && SUCCEEDED(device->CreateTargetForHwnd(window, TRUE, &target)) &&
+               SUCCEEDED(device->CreateVisual(&visual)) && SUCCEEDED(visual->SetContent(swapChain)) && SUCCEEDED(target->SetRoot(visual)) &&
+               SUCCEEDED(device->Commit());
+    }
+
+    ~CompositionVisual() {
+        Release(visual);
+        Release(target);
+        Release(device);
+    }
+};
 
 // With UIH_TEST_D3D_DEBUG set, the D3D10, 11 and 12 hosts create their
 // device with the debug layer, which also checks what the hook does on that
@@ -317,6 +340,7 @@ struct D3D11Host : Host {
     ID3D11DeviceContext* context = nullptr;
     IDXGISwapChain* swapChain = nullptr;
     ID3D11RenderTargetView* target = nullptr;
+    CompositionVisual composition;
 
     bool CreateTarget() {
         ID3D11Texture2D* buffer = nullptr;
@@ -334,7 +358,7 @@ struct D3D11Host : Host {
 
     bool Fullscreen(bool on) override { return DxgiFullscreen(swapChain, on) && Resize(0, 0); }
 
-    bool InitComposition(D3D_DRIVER_TYPE driver, UINT flags) {
+    bool InitComposition(HWND window, D3D_DRIVER_TYPE driver, UINT flags) {
         if (FAILED(D3D11CreateDevice(nullptr, driver, nullptr, flags, nullptr, 0, D3D11_SDK_VERSION, &device, nullptr, &context)))
             return false;
         IDXGIDevice* dxgiDevice = nullptr;
@@ -349,7 +373,7 @@ struct D3D11Host : Host {
         Release(adapter);
         Release(dxgiDevice);
         swapChain = swapChain1;
-        return swapChain && CreateTarget();
+        return swapChain && composition.Show(window, swapChain) && CreateTarget();
     }
 
     bool Init(HWND window, const Options& options) override {
@@ -357,7 +381,7 @@ struct D3D11Host : Host {
         D3D_DRIVER_TYPE driver = options.warp ? D3D_DRIVER_TYPE_WARP : D3D_DRIVER_TYPE_HARDWARE;
         UINT flags = D3DDebug() ? D3D11_CREATE_DEVICE_DEBUG : 0;
         if (options.composition)
-            return InitComposition(driver, flags);
+            return InitComposition(window, driver, flags);
         if (FAILED(D3D11CreateDeviceAndSwapChain(nullptr, driver, nullptr, flags, nullptr, 0, D3D11_SDK_VERSION, &desc, &swapChain, &device, nullptr, &context)))
             return false;
         return CreateTarget();
@@ -435,6 +459,7 @@ struct D3D12Host : Host {
     ID3D12Device* device = nullptr;
     ID3D12CommandQueue* queue = nullptr;
     IDXGISwapChain3* swapChain = nullptr;
+    CompositionVisual composition;
     bool hdr10 = false;
     int framesSinceColorSpace = 0;
     ID3D12DescriptorHeap* heap = nullptr;
@@ -533,6 +558,8 @@ struct D3D12Host : Host {
             return false;
         swapChain1->QueryInterface(IID_PPV_ARGS(&swapChain));
         swapChain1->Release();
+        if (options.composition && !composition.Show(window, swapChain))
+            return false;
         // As an HDR game does: the overlay must then draw its colors with the PQ curve.
         hdr10 = options.format == "hdr10";
         if (hdr10 && FAILED(swapChain->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)))
@@ -1185,7 +1212,7 @@ int64_t GameMs() {
 // shows the game without the overlay, the message is drawn, and the keys reach
 // the window once the menu is closed.
 template <typename Frame>
-int RemoteScenario(bool memory, bool advanced, Frame&& frame) {
+int RemoteScenario(HWND window, bool memory, bool advanced, Frame&& frame) {
     std::string info;
     std::string screenshot;
     std::string text;
@@ -1197,6 +1224,13 @@ int RemoteScenario(bool memory, bool advanced, Frame&& frame) {
     std::string outside;
     std::vector<uint8_t> rgb;
     int clicksBefore = g_buttonClicks;
+    // A window always on top, as other programs have, covers the button: the
+    // click must reach the menu all the same, also while the game has the focus.
+    POINT button{g_buttonX, g_buttonY};
+    ClientToScreen(window, &button);
+    HWND cover = CreateWindowExW(WS_EX_TOPMOST | WS_EX_NOACTIVATE, L"EDIT", L"", WS_POPUP, button.x - 50, button.y - 50, 100, 100, nullptr, nullptr,
+                                 nullptr, nullptr);
+    ShowWindow(cover, SW_SHOWNOACTIVATE);
     WhileRendering(
         [&] {
             RemoteClient client;
@@ -1233,7 +1267,8 @@ int RemoteScenario(bool memory, bool advanced, Frame&& frame) {
         frame();
     for (int i = 0; i < 10; ++i)
         frame();
-    printf("click on the button of the menu at %d,%d: %s, %d clicks\nclick outside: %s\n", g_buttonX.load(), g_buttonY.load(), click.c_str(),
+    DestroyWindow(cover);
+    printf("click on the button of the menu at %d,%d under another window: %s, %d clicks\nclick outside: %s\n", g_buttonX.load(), g_buttonY.load(), click.c_str(),
            g_buttonClicks - clicksBefore, outside.c_str());
     if (click.rfind("ok ", 0) != 0 || g_buttonClicks == clicksBefore)
         return Fail("the click of the remote control did not reach the menu");
@@ -2767,7 +2802,7 @@ int main(int argc, char** argv) {
                     break;
             }
             if (options.remote) {
-                result = RemoteScenario(options.remoteMemory, options.remoteAdvanced, [&] {
+                result = RemoteScenario(window, options.remoteMemory, options.remoteAdvanced, [&] {
                     PumpMessages();
                     host->Frame();
                 });

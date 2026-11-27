@@ -5,7 +5,7 @@ endfunction()
 
 if(WIN32)
     add_executable(uih_host host.cpp host_vulkan.cpp c_api.c)
-    target_link_libraries(uih_host PRIVATE uih minhook d3d9 d3d10 d3d11 d3d12 dxgi opengl32 dinput8 dxguid)
+    target_link_libraries(uih_host PRIVATE uih minhook d3d9 d3d10 d3d11 d3d12 dxgi dcomp opengl32 dinput8 dxguid)
     target_compile_definitions(uih_host PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 
     # A controller the tests drive, in its own directory so that only the
@@ -39,8 +39,8 @@ if(WIN32)
     uih_add_host_test(vulkan_second_window_shared --api vulkan --second-window --shared-device)
     # Frames of the overlay are still in flight when it moves to the other swap chain.
     uih_add_host_test(d3d12_second_window_shared --api d3d12 --second-window --shared-device --gpu-latency 50)
-    uih_add_host_test(d3d11_composition --api d3d11 --composition)
-    uih_add_host_test(d3d12_composition --api d3d12 --composition)
+    uih_add_host_test(d3d11_composition --api d3d11 --composition --capture)
+    uih_add_host_test(d3d12_composition --api d3d12 --composition --capture)
     uih_add_host_test(opengl --api opengl)
     foreach(api d3d9 d3d9ex d3d10 d3d11 d3d12 vulkan opengl)
         uih_add_host_test(${api}_resize --api ${api} --resize --capture)
