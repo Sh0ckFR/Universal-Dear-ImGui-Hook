@@ -113,6 +113,7 @@ else()
         src/linux/clocks.cpp
         src/linux/x11.cpp
         src/linux/events.cpp
+        src/linux/wayland.cpp
         src/linux/opengl.cpp
         src/linux/remote.cpp
         src/linux/breakpoints.cpp

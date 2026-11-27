@@ -30,7 +30,52 @@ uint8_t XInputOpcode();
 bool OwnConnection(const void* connection);
 // Turns of the mouse wheel the application did not see, for the menu.
 void AddWheel(int x, int y);
+// Dear ImGui key of an X11 or xkbcommon keysym, ImGuiKey_None for others.
+ImGuiKey KeysymToImGuiKey(uint32_t keysym);
 } // namespace input
+
+// Input of native Wayland applications (wayland.cpp), which the overlay reads
+// instead of the X server's when the application has a wl_pointer or a
+// wl_keyboard and the overlay does not draw on an X11 window.
+namespace wayland {
+bool Active();
+void Attach();
+void Detach();
+void SetSurfaceSize(uint32_t width, uint32_t height);
+// A wl_surface the application draws on with Vulkan or EGL.
+void RecordSurface(const void* surface);
+void NewFrame();
+bool IsKeyDown(int keysym);
+bool IsFocused();
+bool KeyDownInApplication(int keysym);
+
+// Kept alive by the hooks of presents and acquires: the graphics libraries
+// read their own Wayland events there, where the application does not expect
+// its input.
+class GraphicsCall {
+public:
+    GraphicsCall();
+    ~GraphicsCall();
+    GraphicsCall(const GraphicsCall&) = delete;
+    GraphicsCall& operator=(const GraphicsCall&) = delete;
+};
+
+// The remote control: events handed to the application's listeners the next
+// time it reads its events. Size of the surface the overlay draws on, and
+// whether the application has the keyboard focus; false without a seat.
+bool Window(uint32_t& width, uint32_t& height, bool& focused);
+// The evdev code of the key that types `keysym` in the application's keymap, with or without Shift.
+bool KeyFor(int keysym, uint32_t& code, bool& shift);
+bool InjectKey(uint32_t code, bool down);
+bool InjectShift(bool down);
+bool InjectMotion(int x, int y);
+// Button 1 left, 2 middle, 3 right.
+bool InjectButton(int button, bool down);
+// Leaves the surface the events above entered, when the application had neither the focus nor the pointer.
+void InjectEnd();
+// False when the application did not read the events within `timeoutMs`: they are dropped.
+bool WaitInjected(unsigned timeoutMs);
+} // namespace wayland
 
 namespace interpose {
 
@@ -57,6 +102,7 @@ extern const Library kGlx;
 extern const Library kEgl;
 extern const Library kVulkan;
 extern const Library kXcb;
+extern const Library kWayland;
 
 } // namespace interpose
 

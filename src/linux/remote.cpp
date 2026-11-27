@@ -1,6 +1,7 @@
 // Remote control on Linux: the protocol of src/remote.cpp on the Unix socket
 // $XDG_RUNTIME_DIR/<Config::remotePipe>, which only the user can open, and
-// the keys sent to the X server.
+// the keys sent to the X server, or to the listeners of a native Wayland
+// application (wayland.cpp).
 #include "internal.h"
 
 #include <fcntl.h>
@@ -471,6 +472,133 @@ void Serve() {
     DisconnectX();
 }
 
+// Wayland -------------------------------------------------------------------
+// The events go to the listeners of the application, which the overlay wraps:
+// the menu sees them too, as it sees the input of XTEST.
+
+constexpr unsigned kDeliveryMs = 1000;
+const char kNotRead[] = "error the game does not read its Wayland events";
+const char kNoPointer[] = "error the game has no Wayland pointer, or does not read its events";
+
+bool OnWayland() { return wayland::Active() && BoundWindow() == 0; }
+
+bool WaylandFocused() {
+    uint32_t width = 0;
+    uint32_t height = 0;
+    bool focused = false;
+    wayland::Window(width, height, focused);
+    return focused;
+}
+
+std::string WaylandKeys(const std::vector<int>& keys, unsigned ms) {
+    std::vector<uint32_t> codes;
+    for (int keysym : keys) {
+        uint32_t code = 0;
+        bool shift = false;
+        if (!wayland::KeyFor(keysym, code, shift))
+            return "error the keyboard layout of the game has no key for one of these keys";
+        codes.push_back(code);
+    }
+    bool focused = WaylandFocused();
+    for (uint32_t code : codes)
+        wayland::InjectKey(code, true);
+    if (!wayland::WaitInjected(kDeliveryMs))
+        return kNotRead;
+    Sleep(static_cast<int>(ms));
+    for (size_t i = codes.size(); i-- > 0;)
+        wayland::InjectKey(codes[i], false);
+    wayland::InjectEnd();
+    if (!wayland::WaitInjected(kDeliveryMs))
+        return kNotRead;
+    return focused ? "ok sent as keyboard input, the game has the focus" : "ok sent as Wayland events, the game does not have the focus: it may ignore them";
+}
+
+bool WaylandMove(int x, int y) { return wayland::InjectMotion(x, y) && wayland::WaitInjected(kDeliveryMs); }
+
+std::string WaylandClick(int x, int y, int button, unsigned ms) {
+    bool focused = WaylandFocused();
+    if (!WaylandMove(x, y))
+        return kNoPointer;
+    // Games read the pointer once per frame.
+    Sleep(50);
+    wayland::InjectButton(button, true);
+    if (!wayland::WaitInjected(kDeliveryMs))
+        return kNotRead;
+    Sleep(static_cast<int>(ms));
+    wayland::InjectButton(button, false);
+    wayland::InjectEnd();
+    if (!wayland::WaitInjected(kDeliveryMs))
+        return kNotRead;
+    return focused ? "ok sent as mouse input, the game has the focus" : "ok sent as Wayland events, the game does not have the focus";
+}
+
+std::string WaylandType(const std::vector<uint32_t>& text) {
+    bool focused = WaylandFocused();
+    size_t typed = 0;
+    for (uint32_t point : text) {
+        if (StopRequested())
+            break;
+        uint32_t code = 0;
+        bool shift = false;
+        if (!wayland::KeyFor(static_cast<int>(KeysymOf(point)), code, shift))
+            continue;
+        if (shift)
+            wayland::InjectShift(true);
+        wayland::InjectKey(code, true);
+        wayland::InjectKey(code, false);
+        if (shift)
+            wayland::InjectShift(false);
+        if (!wayland::WaitInjected(kDeliveryMs))
+            return kNotRead;
+        ++typed;
+        // Games read text once per frame, some only the last character.
+        Sleep(10);
+    }
+    wayland::InjectEnd();
+    wayland::WaitInjected(kDeliveryMs);
+    std::string count = std::to_string(typed);
+    if (typed < text.size())
+        return "ok typed " + count + " of " + std::to_string(text.size()) + " characters: the keyboard layout of the game has no key for the others";
+    return focused ? "ok typed " + count + " characters as keyboard input, the game has the focus"
+                   : "ok typed " + count + " characters as Wayland events, the game does not have the focus";
+}
+
+std::string WaylandMoveTo(int x, int y) {
+    bool focused = WaylandFocused();
+    bool moved = WaylandMove(x, y);
+    // Games read the pointer once per frame.
+    Sleep(50);
+    wayland::InjectEnd();
+    wayland::WaitInjected(kDeliveryMs);
+    if (!moved)
+        return kNoPointer;
+    return focused ? "ok moved the pointer, the game has the focus" : "ok sent as a Wayland event, the game does not have the focus";
+}
+
+std::string WaylandDrag(int x0, int y0, int x1, int y1, int button, unsigned ms) {
+    constexpr unsigned kStepMs = 16;
+    bool focused = WaylandFocused();
+    if (!WaylandMove(x0, y0))
+        return kNoPointer;
+    Sleep(50);
+    wayland::InjectButton(button, true);
+    unsigned steps = std::max(1u, ms / kStepMs);
+    for (unsigned i = 1; i <= steps; ++i) {
+        if (!wayland::WaitInjected(kDeliveryMs) || !Sleep(static_cast<int>(ms / steps)))
+            break;
+        int x = x0 + static_cast<int>((static_cast<int64_t>(x1 - x0) * i) / steps);
+        int y = y0 + static_cast<int>((static_cast<int64_t>(y1 - y0) * i) / steps);
+        wayland::InjectMotion(x, y);
+    }
+    wayland::WaitInjected(kDeliveryMs);
+    Sleep(50);
+    wayland::InjectButton(button, false);
+    wayland::InjectEnd();
+    if (!wayland::WaitInjected(kDeliveryMs))
+        return kNotRead;
+    return focused ? "ok sent as mouse input, the game has the focus" : "ok sent as Wayland events, the game does not have the focus";
+}
+
 bool Served(const sockaddr_un& address) {
     int probe = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
     if (probe < 0)
@@ -511,6 +639,8 @@ int KeyCode(const std::string& name) {
 // the game window as events, which games that poll the keyboard state do not
 // see. Stop() releases the keys at once.
 std::string HoldKeys(const std::vector<int>& keys, unsigned ms) {
+    if (OnWayland())
+        return WaylandKeys(keys, ms);
     xcb_window_t window = XCB_NONE;
     uint32_t width = 0;
     uint32_t height = 0;
@@ -540,6 +670,8 @@ std::string HoldKeys(const std::vector<int>& keys, unsigned ms) {
 // button is pressed, which the overlay menu sees too. Otherwise events sent to
 // the game window, which the menu does not read.
 std::string ClickAt(int x, int y, int button, unsigned ms) {
+    if (OnWayland())
+        return WaylandClick(x, y, button, ms);
     xcb_window_t window = XCB_NONE;
     uint32_t width = 0;
     uint32_t height = 0;
@@ -573,6 +705,8 @@ std::string ClickAt(int x, int y, int button, unsigned ms) {
 // A character the layout lacks goes to a free keycode for the time of the
 // text, as xdotool does: the other clients of the X server see the change.
 std::string TypeText(const std::vector<uint32_t>& text) {
+    if (OnWayland())
+        return WaylandType(text);
     xcb_window_t window = XCB_NONE;
     uint32_t width = 0;
     uint32_t height = 0;
@@ -644,6 +778,8 @@ bool ToRoot(xcb_window_t window, int x, int y, int16_t& rootX, int16_t& rootY) {
 } // namespace
 
 std::string MoveTo(int x, int y) {
+    if (OnWayland())
+        return WaylandMoveTo(x, y);
     xcb_window_t window = XCB_NONE;
     uint32_t width = 0;
     uint32_t height = 0;
@@ -665,6 +801,8 @@ std::string MoveTo(int x, int y) {
 }
 
 std::string DragTo(int x0, int y0, int x1, int y1, int button, unsigned ms) {
+    if (OnWayland())
+        return WaylandDrag(x0, y0, x1, y1, button, ms);
     constexpr unsigned kStepMs = 16;
     xcb_window_t window = XCB_NONE;
     uint32_t width = 0;
@@ -708,6 +846,8 @@ std::string DragTo(int x0, int y0, int x1, int y1, int button, unsigned ms) {
 }
 
 bool GameWindow(uint32_t& width, uint32_t& height, bool& focused) {
+    if (OnWayland())
+        return wayland::Window(width, height, focused);
     xcb_window_t window = XCB_NONE;
     if (!FindWindow(window, width, height))
         return false;

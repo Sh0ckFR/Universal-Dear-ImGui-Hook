@@ -78,7 +78,9 @@ On Linux, `uih_host` does not link the hook: each test preloads the `.so`, opens
 - Vulkan swap chain images for transfers only (`--transfer-only`) and device functions from `vkGetDeviceProcAddr` (`--device-proc-addr`);
 - the Vulkan loader opened as `libvulkan.so` (`--vulkan-library`).
 
-They need `libx11-dev libxtst-dev libgl-dev libegl-dev`. Without a display, run `xvfb-run -a ctest --test-dir build/linux`. With `-DUIH_SANITIZE=ON`, the preload tests load the sanitizer runtime before the library, and any memory error or undefined behavior in the hook fails them.
+With `libwayland-dev` and `wayland-protocols` installed, `uih_host_wayland` (`tests/host_wayland.cpp`) is built too: a native Wayland client, with EGL on a `wl_egl_window` or a Vulkan Wayland surface, which reads its own pointer and keyboard. Its tests, labelled `wayland`, run in Weston nested in the X server, where XTEST input reaches the client and the X server's screen shows its frames: `xvfb-run -a sh tests/wayland.sh ctest --test-dir build/linux -L wayland`. They check that the overlay draws and that `F11` removes it (`--reload` repeats it), what the client reads while the menu is open (`--input wayland`: no press or motion, the release of a key held when the menu opened, and a click that the menu receives at `kClickProbe`), and the remote control (`--remote`): keys, typing with Shift, a move, a right click and a drag delivered as Wayland events to the client, then hidden from it once `insert` opened the menu. They skip without `WAYLAND_DISPLAY`. `tests/wayland.sh [--size WxH] command` starts Weston and runs the command with `WAYLAND_DISPLAY` set; it needs `weston`.
+
+They need `libx11-dev libxtst-dev libgl-dev libegl-dev`. Without a display, run `xvfb-run -a ctest --test-dir build/linux -LE wayland`. With `-DUIH_SANITIZE=ON`, the preload tests load the sanitizer runtime before the library, and any memory error or undefined behavior in the hook fails them.
 
 ## Real games
 
@@ -86,7 +88,7 @@ They need `libx11-dev libxtst-dev libgl-dev libegl-dev`. Without a display, run 
 
 `uih_game --dll <path> --backend <name> -- game.exe [arguments]` runs a game and injects the DLL once its window shows, as an injector does: the backend must become active, `INSERT` must show the menu on screen and `F11` remove it while the game keeps running. It reads the DLL's log as DebugView does, so DebugView must not run at the same time. It saves its captures as `game-before.bmp`, `game-menu.bmp` and `game-after.bmp` (`--captures <prefix>`).
 
-`tests/game.sh` runs the same scenario on a Linux game, such as [DDNet](https://ddnet.org/) or a [Godot](https://godotengine.org/) project.
+`tests/game.sh` runs the same scenario on a Linux game, such as [DDNet](https://ddnet.org/) or a [Godot](https://godotengine.org/) project. For a native Wayland game, run it in `tests/wayland.sh` and the game with `env -u DISPLAY`, such as `sh tests/wayland.sh --size 1024x768 sh tests/game.sh Universal-ImGui-Hook.so Vulkan game.png env -u DISPLAY ./godot --display-driver wayland`; `tests/game_mcp.py` too.
 
 `tests/wine.sh Universal-ImGui-Hook.dll <backend> <prefix> game.exe [arguments]` runs it on a Windows game under Wine, as a Linux or Steam Deck player does: the DLL is copied next to the game as `dinput8.dll` and loaded with `WINEDLLOVERRIDES="dinput8=n,b"`. It reads the DLL's log on Wine's debug output (`WINEDEBUG=+debugstr`), checks with `+loaddll` that Wine loaded this `dinput8.dll` rather than its own, and saves its screen captures as `<prefix>-before.png`, `<prefix>-menu.png` and `<prefix>-after.png`. On a failure, it prints the backtrace of every Wine thread (`winedbg --command "bt all"`), which shows where a hung game waits. It needs Wine, an X server, xdotool and ImageMagick.
 
@@ -104,8 +106,9 @@ The [CI](../.github/workflows/build.yml) runs on every pull request, on `master`
 | MinGW-w64 on Ubuntu and macOS | Cross-compiled DLLs, proxy export |
 | Linux GCC, Clang x86_64, GCC aarch64 | The preload tests under Xvfb with llvmpipe and lavapipe, including resizes, the overlay brought back after `F11` and, with `kernel.perf_event_paranoid` set to 2, the instruction watch; then the Vulkan ones under the validation layer |
 | Linux sanitizers | The preload tests with the library built with AddressSanitizer and UndefinedBehaviorSanitizer |
+| Linux Wayland, with and without sanitizers | The `wayland` tests in Weston nested in Xvfb (`tests/wayland.sh`), with EGL and Vulkan: the overlay drawn, `F11`, the menu's input and the remote control; none may be skipped |
 | Linux portable x86_64, aarch64 | The released libraries, built and tested against glibc 2.28 |
-| DDNet, Godot on Linux | The released library preloaded into [DDNet](https://ddnet.org/) and an empty [Godot](https://godotengine.org/) project (`tests/godot`), with OpenGL and Vulkan; then the same games played through the MCP server (`tests/game_mcp.py`) |
+| DDNet, Godot on Linux | The released library preloaded into [DDNet](https://ddnet.org/) and an empty [Godot](https://godotengine.org/) project (`tests/godot`), with OpenGL and Vulkan, as X11 clients and as native Wayland clients of Weston (`SDL_VIDEODRIVER=wayland`, `--display-driver wayland`); then the same games played through the MCP server (`tests/game_mcp.py`) |
 | DDNet, Godot on Windows | The DLL injected into the same games once they render, without a GPU: DDNet with OpenGL and Vulkan, Godot with Direct3D 12, Vulkan and Direct3D 11 (its OpenGL renderer through ANGLE) |
 | Godot under Wine | The released x64 DLL as `dinput8.dll` next to the Windows build of Godot, run with `WINEDLLOVERRIDES="dinput8=n,b"` under Wine 11 and Xvfb (`tests/wine.sh`), with OpenGL, Direct3D 11 (ANGLE on Wine's Direct3D) and Vulkan on llvmpipe and lavapipe: Wine must load the DLL, the backend become active, `INSERT` show the menu on screen and `F11` remove it while the game keeps running |
 | FetchContent consumer | The repository as a CMake dependency |
