@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <type_traits>
@@ -278,6 +279,11 @@ bool HandleEngine(const std::string& command, const std::string& rest, std::vect
 // Runs the engine call waiting for the game's main thread, if any: called by
 // the window procedure on Windows and by the X event hooks on Linux.
 void RunGameThreadCalls();
+// Calls `visit` with the readable memory of [base, base + size), region by
+// region, in pieces of at most 1 MB that overlap by `overlap` bytes, which
+// may be fewer; stops when `visit` returns false. Modules have unreadable
+// gaps between their segments on some systems, such as Linux on ARM64.
+void ForEachReadable(uintptr_t base, size_t size, size_t overlap, const std::function<bool(uintptr_t, const uint8_t*, size_t)>& visit);
 // Implemented once per platform, for the engine commands:
 // a module loaded in the process by its file name, such as mono-2.0-bdwgc.dll; null when it is not.
 void* FindModule(const char* name);

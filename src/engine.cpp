@@ -932,17 +932,13 @@ std::string Info(Runtime& runtime) {
             if (module.main)
                 names.push_back(module.name);
         names.push_back(runtime.module);
-        std::vector<uint8_t> chunk(kChunk + 32);
         for (const std::string& name : names) {
             for (const LoadedModule& module : modules) {
                 if (Lower(module.name) != Lower(name) || !runtime.version.empty())
                     continue;
-                for (size_t offset = 0; offset < module.size && runtime.version.empty(); offset += kChunk) {
-                    size_t length = std::min(chunk.size(), module.size - offset);
-                    if (!ReadMemory(module.base + offset, chunk.data(), length))
-                        continue;
+                ForEachReadable(module.base, module.size, 32, [&](uintptr_t, const uint8_t* bytes, size_t length) {
                     for (size_t i = 1; i + 10 < length && runtime.version.empty(); ++i) {
-                        const char* c = reinterpret_cast<const char*>(chunk.data()) + i;
+                        const char* c = reinterpret_cast<const char*>(bytes) + i;
                         auto digit = [&](size_t at) { return i + at < length && isdigit(static_cast<unsigned char>(c[at])); };
                         if (!((c[0] == '2' && c[1] == '0') || c[0] == '6') || !digit(0) || !digit(1) || !digit(2) || !digit(3) || c[4] != '.' ||
                             isalnum(static_cast<unsigned char>(c[-1])) || c[-1] == '.')
@@ -967,7 +963,8 @@ std::string Info(Runtime& runtime) {
                             continue;
                         runtime.version.assign(c, at);
                     }
-                }
+                    return runtime.version.empty();
+                });
             }
         }
     }
@@ -1144,6 +1141,27 @@ bool Passes(const Runtime& runtime, uintptr_t candidate, const std::vector<Check
     }
     return true;
 }
+
+} // namespace
+
+void ForEachReadable(uintptr_t base, size_t size, size_t overlap, const std::function<bool(uintptr_t, const uint8_t*, size_t)>& visit) {
+    std::vector<uint8_t> chunk;
+    for (const MemoryRegion& region : MemoryRegions()) {
+        uintptr_t start = std::max(region.base, base);
+        uintptr_t end = std::min(region.base + region.size, base + size);
+        for (uintptr_t at = start; at < end;) {
+            size_t length = static_cast<size_t>(std::min<uintptr_t>(kChunk + overlap, end - at));
+            chunk.resize(length);
+            if (ReadMemory(at, chunk.data(), length) && !visit(at, chunk.data(), length))
+                return;
+            if (at + length >= end)
+                break;
+            at += length - std::min(overlap, length / 2);
+        }
+    }
+}
+
+namespace {
 
 bool InModule(uintptr_t address, const std::vector<LoadedModule>& sorted) {
     auto after = std::upper_bound(sorted.begin(), sorted.end(), address, [](uintptr_t value, const LoadedModule& module) { return value < module.base; });
