@@ -863,11 +863,16 @@ std::vector<MemoryRegion> MemoryRegions() {
         // Device memory, such as the GPU's, and the kernel's pages.
         if (permissions[0] != 'r' || strncmp(path, "/dev/", 5) == 0 || strncmp(path, "[vvar", 5) == 0 || strncmp(path, "[vsyscall]", 10) == 0)
             continue;
-        bool anonymous = path[0] == '\0' || path[0] == '\n' || path[0] == '[';
-        if (anonymous && end - start > kLargeAnonymous)
-            AddResidentRuns(regions, start, end, permissions[1] == 'w');
+        bool unnamed = path[0] == '\0' || path[0] == '\n';
+        bool anonymous = unnamed || path[0] == '[';
+        bool writable = permissions[1] == 'w';
+        // The .bss of a module: unnamed memory right after its writable data.
+        bool bss = unnamed && writable && !regions.empty() && regions.back().image && regions.back().writable &&
+                   regions.back().base + regions.back().size == start;
+        if (anonymous && !bss && end - start > kLargeAnonymous)
+            AddResidentRuns(regions, start, end, writable);
         else
-            regions.push_back({start, end - start, permissions[1] == 'w'});
+            regions.push_back({start, end - start, writable, !anonymous || bss});
     }
     fclose(maps);
     return regions;

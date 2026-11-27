@@ -473,7 +473,7 @@ std::vector<MemoryRegion> MemoryRegions() {
     MEMORY_BASIC_INFORMATION info{};
     while (address < system.lpMaximumApplicationAddress && VirtualQuery(address, &info, sizeof(info)) == sizeof(info)) {
         if (info.State == MEM_COMMIT && (info.Protect & kReadable) && !(info.Protect & kSkipped))
-            regions.push_back({reinterpret_cast<uintptr_t>(info.BaseAddress), info.RegionSize, (info.Protect & kWritable) != 0});
+            regions.push_back({reinterpret_cast<uintptr_t>(info.BaseAddress), info.RegionSize, (info.Protect & kWritable) != 0, info.Type == MEM_IMAGE});
         address = static_cast<uint8_t*>(info.BaseAddress) + info.RegionSize;
     }
     return regions;

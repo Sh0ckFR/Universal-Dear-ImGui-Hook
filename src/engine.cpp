@@ -1163,11 +1163,6 @@ void ForEachReadable(uintptr_t base, size_t size, size_t overlap, const std::fun
 
 namespace {
 
-bool InModule(uintptr_t address, const std::vector<LoadedModule>& sorted) {
-    auto after = std::upper_bound(sorted.begin(), sorted.end(), address, [](uintptr_t value, const LoadedModule& module) { return value < module.base; });
-    return after != sorted.begin() && address - std::prev(after)->base < std::prev(after)->size;
-}
-
 std::string Instances(const Runtime& runtime, const std::string& rest, std::vector<uint8_t>& payload) {
     size_t at = 0;
     std::string className = NextWord(rest, at);
@@ -1183,7 +1178,6 @@ std::string Instances(const Runtime& runtime, const std::string& rest, std::vect
     if (!header)
         return "error the runtime has no objects of " + className + ": an abstract or generic class has none of its own";
     std::vector<Check> checks = ChecksOf(runtime, klass);
-    std::vector<LoadedModule> modules = SortedModules();
     // Out of the heap, which it would find copies of the objects in.
     static uint8_t* chunk = static_cast<uint8_t*>(AllocateScanMemory(kChunk));
     if (!chunk)
@@ -1191,7 +1185,7 @@ std::string Instances(const Runtime& runtime, const std::string& rest, std::vect
     auto own = reinterpret_cast<uintptr_t>(chunk);
     std::vector<uintptr_t> found;
     for (const MemoryRegion& region : MemoryRegions()) {
-        if (!region.writable || (region.base <= own && own < region.base + region.size) || InModule(region.base, modules))
+        if (!region.writable || region.image || (region.base <= own && own < region.base + region.size))
             continue;
         for (size_t offset = 0; offset < region.size && found.size() < limit; offset += kChunk) {
             if (StopRequested())
@@ -1204,7 +1198,7 @@ std::string Instances(const Runtime& runtime, const std::string& rest, std::vect
             for (size_t i = 0; i + sizeof(uintptr_t) <= length && found.size() < limit; i += runtime.objectAlign) {
                 uintptr_t word = 0;
                 memcpy(&word, chunk + i, sizeof(word));
-                if (word == header && !InModule(base + i, modules) && ObjectClass(runtime, base + i) == klass &&
+                if (word == header && ObjectClass(runtime, base + i) == klass &&
                     Passes(runtime, base + i, checks))
                     found.push_back(base + i);
             }
