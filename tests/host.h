@@ -111,6 +111,9 @@ struct Options {
     bool resubclass = false;
     // Starts the hook through the C interface of include/uih_c.h (tests/c_api.c).
     bool cApi = false;
+    // --bench N: the time of N frames, vsync off, without the overlay, with
+    // its menu closed, with it open, and without it again after Stop().
+    int benchFrames = 0;
     // Deletes the OpenGL context while the menu is open and renders with a
     // new one, as games do when the video settings change.
     bool recreateContext = false;
