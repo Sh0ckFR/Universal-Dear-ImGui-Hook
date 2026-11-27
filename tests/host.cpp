@@ -1014,17 +1014,21 @@ std::wstring RemotePipePath() { return L"\\\\.\\pipe\\uih-host-" + std::to_wstri
 
 // tests/c_api.c, compiled as C.
 extern "C" const char* uih_test_check_c_api(void);
-extern "C" void uih_test_start_c_api(void (*render)(void), void (*setup)(void), float scale);
+extern "C" void uih_test_start_c_api(void (*render)(void), void (*setup)(void), float scale, const char* pipe, bool memory, bool advanced);
+extern "C" bool uih_test_register_c_tools(void (*ran)(void));
 
 void StartHook(const Options& options) {
+    std::string pipe = RemotePipe();
     if (options.cApi) {
+        if (options.remote && !uih_test_register_c_tools([] { g_toolFrame = ImGui::GetCurrentContext() ? ImGui::GetFrameCount() : -1; }))
+            printf("uih_register_tool() refused a valid tool or accepted an invalid one: the remote scenario fails\n");
         g_hookStarted = true;
-        uih_test_start_c_api(DrawTestMenu, [] { g_setupCalled = true; }, options.scale);
+        uih_test_start_c_api(DrawTestMenu, [] { g_setupCalled = true; }, options.scale, options.remote ? pipe.c_str() : nullptr,
+                             options.remoteMemory, options.remoteAdvanced);
         return;
     }
     uih::Config config;
     config.scale = options.scale;
-    std::string pipe = RemotePipe();
     config.remoteControl = options.remote;
     config.remoteMemory = options.remoteMemory;
     config.aiAdvancedFeatures = options.remoteAdvanced;

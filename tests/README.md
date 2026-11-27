@@ -56,8 +56,8 @@ One option per scenario:
 | `--recreate-context` | The OpenGL context is deleted with the menu open and a new one, with its own textures, takes over: the overlay comes back and leaves them alone |
 | `--input raw\|directinput` | What the game reads while the menu is open, and in its window procedure: a key released while the menu is open must not stay down, Alt+F4 still closes the window, and the cursor is confined again when the menu closes, or when `uih::Stop()` closes it |
 | `--gamepad <fake xinput1_4.dll>` | Controller toggling the menu and hidden from the game while it is open |
-| `--c-api` | Starts the hook through the C interface of `include/uih_c.h`, from `tests/c_api.c` compiled as C, after checking its defaults and names |
-| `--resubclass` | The host subclasses its window after the overlay: with `--reload`, the overlay starts again without calling itself through the host's procedure; with `--dll`, the unload key unloads the DLL all the same, the procedures still chain, and `--reload` injects it again |
+| `--c-api` | Starts the hook through the C interface of `include/uih_c.h`, from `tests/c_api.c` compiled as C, after checking its defaults, names and `uih_tool_argument()`; with `--remote`, the tools of the scenario are registered through `uih_register_tool()` and must answer as the C++ ones do (`UIH_TEST_C_TOOLS=1` does the same in `uih_remote_preload` on Linux) |
+| `--resubclass` | The host subclasses its window after the overlay: with `--reload`, the overlay starts again without calling itself through the host's procedure; with `--dll`, the unload key leaves the DLL loaded and the procedures still chain |
 | `--render-thread` | The host presents from its own thread while the window thread dispatches a flood of input messages, and the hook starts and stops 20 times: no access violation may occur, and on x64 freed Dear ImGui memory is made inaccessible so that any use of it faults |
 | `--dll <path>` | Loads the real DLL and drives it with `INSERT` and `F11` |
 | `--menu-key <vk>`, `--unload-key <vk>` | The keys used by a DLL built with other settings, such as `0x70` for F1 (X11 keysyms on Linux) |

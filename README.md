@@ -467,6 +467,23 @@ void start_overlay(void) {
 
 `uih_capture_frame()` hands the pixels to a callback instead of filling a `std::vector`, and `uih_create_texture()` returns the `ImTextureData*` as a `void*`. No exception leaves these functions.
 
+[Tools of your own](#tools-of-your-own) work the same way. The callback answers through `uih_tool_answer()`, or through `uih_tool_fail()` for an error. `uih_tool_argument()` copies a value into your buffer and returns its length, as `snprintf()` does. There is nothing to free:
+
+```c
+static void teleport(const char* arguments, uih_tool_result* result, void* context) {
+    char x[32];
+    uih_tool_argument(arguments, "x", x, sizeof(x));
+    if (!move_player(atof(x)))
+        uih_tool_fail(result, "the player cannot move there");
+    else
+        uih_tool_answer(result, "moved");
+}
+
+uih_register_tool("teleport", "Moves the player to x.",
+                  "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"}},\"required\":[\"x\"]}",
+                  teleport, NULL);
+```
+
 ## How it works
 
 In short: `Start()` hooks the present function of each graphics API (`Present`, `vkQueuePresentKHR`, `*SwapBuffers`), found through dummy objects with MinHook on Windows and by symbol interposition on Linux. In each present, the overlay runs your `render` callback and draws the ImGui data on the game's back buffer. While the menu is open, the game's input functions report nothing, and faults in the overlay are caught so they remove the overlay instead of crashing the game.

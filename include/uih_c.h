@@ -81,6 +81,27 @@ bool uih_capture_frame(uih_frame_callback receive, void* context, uint32_t timeo
 bool uih_ai_advanced_features_enabled(void);
 void uih_draw_ai_advanced_features(bool* open);
 
+// A tool of your own for the assistant, as uih::RegisterTool(): the callback
+// receives the arguments as a JSON object, and answers with uih_tool_answer()
+// or uih_tool_fail() on `result`, valid during the call only. It runs in the
+// frame of the overlay, on the thread of the render callback. Nothing to free.
+typedef struct uih_tool_result uih_tool_result;
+typedef void (*uih_tool_callback)(const char* arguments, uih_tool_result* result, void* context);
+// The text the assistant reads; a later call replaces it.
+void uih_tool_answer(uih_tool_result* result, const char* text);
+// Answers `message` as an error instead, as a C++ tool that throws.
+void uih_tool_fail(uih_tool_result* result, const char* message);
+// The name, description and JSON Schema rules of uih::RegisterTool(); NULL
+// `parameters` for none. `context` is handed to every call. False when the
+// name or the schema is not valid, or `call` is NULL.
+bool uih_register_tool(const char* name, const char* description, const char* parameters, uih_tool_callback call, void* context);
+void uih_unregister_tool(const char* name);
+// Copies the value of `key` in the JSON object `arguments`, as
+// uih::ToolArgument(), into `buffer` with its terminating zero, cut to `size`.
+// Returns the length of the whole value, as snprintf() does: call it with a
+// NULL buffer and a size of 0 to get it. 0 when the key is missing.
+size_t uih_tool_argument(const char* arguments, const char* key, char* buffer, size_t size);
+
 #ifdef __cplusplus
 }
 #endif
