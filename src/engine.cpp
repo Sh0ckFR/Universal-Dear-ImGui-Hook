@@ -8,6 +8,9 @@
 //   engine get <class> <field> [object]      -> ok <bytes>, then: <type> <value>
 //   engine set <class> <field> <object|-> <value> -> ok <bytes>, then: <type> <value>, as read back
 //   engine instances <class> [count]         -> ok <bytes>, then lines: <address>
+//   engine search <text> [functions|properties|all] -> ok <bytes>, then lines:
+//       function <assembly> <Class>::<Method> <signature>
+//       property <assembly> <Class>::<Field> <offset|static|const> <type>
 //   engine dump [game|all|packages]          -> ok <bytes>, then the path of the C++ SDK, what it holds
 // and with Config::aiAdvancedFeatures:
 //   engine call <class> <method> <object|-> [JSON array] -> ok <bytes>, then: <type> <value>
@@ -16,6 +19,12 @@
 // A name with spaces, such as a blueprint's on Unreal, goes between double
 // quotes. On Unreal (src/unreal.cpp), `engine get <class> * <object>` reads
 // every property of the object, a line each; `engine dump` is src/sdk.cpp.
+// engine search finds the methods and fields (on Unreal, the functions and
+// properties) whose name contains the text, ignoring case, in every class:
+// first those named so, then those whose name starts with it. Class::Name
+// searches the members of the classes whose name contains Class. The names
+// are listed once, then again when other classes loaded; at most 1000 lines,
+// then +<count> more.
 //
 // The commands run on the server thread, attached to the runtime for their
 // duration. Instances are found by a scan of the writable memory for the
@@ -1004,9 +1013,99 @@ std::string ListClasses(const Runtime& runtime, const std::string& rest, std::ve
     return Payload(text, payload);
 }
 
+std::string FieldPlace(const Field& field) { return field.flags & kFieldLiteral ? "const" : field.flags & kFieldStatic ? "static" : Hex(field.offset); }
+
 std::string DescribeField(const Runtime& runtime, const Field& field) {
-    std::string where = field.flags & kFieldLiteral ? "const" : field.flags & kFieldStatic ? "static" : Hex(field.offset);
-    return where + " " + runtime.TypeName(field.type) + " " + runtime.fieldName(field.field);
+    return FieldPlace(field) + " " + runtime.TypeName(field.type) + " " + runtime.fieldName(field.field);
+}
+
+// [static ][abstract ]<return type> <name>(<type> <name>, ...)
+std::string MethodLine(const Runtime& runtime, Handle method) {
+    uint32_t implementation = 0;
+    uint32_t flags = runtime.methodFlags(method, &implementation);
+    Handle returned = runtime.ReturnType(method);
+    std::string text = std::string(flags & kMethodStatic ? "static " : "") + (flags & kMethodAbstract ? "abstract " : "") +
+                       (returned ? runtime.TypeName(returned) : "?") + " " + runtime.methodName(method) + "(";
+    bool first = true;
+    for (const auto& parameter : runtime.Parameters(method)) {
+        text += (first ? "" : ", ") + runtime.TypeName(parameter.first) + (parameter.second.empty() ? "" : " " + parameter.second);
+        first = false;
+    }
+    return text + ")";
+}
+
+// The names of the methods and fields of every class, for engine search,
+// made again when Index() listed other classes.
+struct Member {
+    // In Runtime::classes.
+    size_t klass = 0;
+    Handle handle = nullptr;
+    bool method = false;
+    std::string name;
+};
+
+struct MemberIndex {
+    const Runtime* runtime = nullptr;
+    size_t classes = SIZE_MAX;
+    size_t assemblies = SIZE_MAX;
+    std::vector<Member> members;
+};
+MemberIndex g_members;
+
+const std::vector<Member>& Members(const Runtime& runtime) {
+    if (g_members.runtime == &runtime && g_members.classes == runtime.classes.size() && g_members.assemblies == runtime.indexedAssemblies)
+        return g_members.members;
+    g_members = MemberIndex();
+    for (size_t i = 0; i < runtime.classes.size(); ++i) {
+        Handle klass = runtime.classes[i].klass;
+        void* iterator = nullptr;
+        while (Handle field = runtime.classFields(klass, &iterator))
+            if (const char* name = runtime.fieldName(field))
+                g_members.members.push_back({i, field, false, name});
+        iterator = nullptr;
+        while (Handle method = runtime.classMethods(klass, &iterator))
+            if (const char* name = runtime.methodName(method))
+                g_members.members.push_back({i, method, true, name});
+    }
+    g_members.runtime = &runtime;
+    g_members.classes = runtime.classes.size();
+    g_members.assemblies = runtime.indexedAssemblies;
+    return g_members.members;
+}
+
+std::string Search(const Runtime& runtime, const std::string& rest, std::vector<uint8_t>& payload) {
+    EngineSearch search;
+    std::string error;
+    if (!ParseEngineSearch(rest, search, error))
+        return error;
+    const std::vector<Member>& members = Members(runtime);
+    std::vector<std::pair<int, size_t>> found;
+    for (size_t i = 0; i < members.size(); ++i) {
+        const Member& member = members[i];
+        if (!(member.method ? search.functions : search.properties))
+            continue;
+        int rank = EngineSearchRank(search, runtime.classes[member.klass].name, member.name);
+        if (rank >= 0)
+            found.push_back({rank, i});
+    }
+    std::stable_sort(found.begin(), found.end(), [](const std::pair<int, size_t>& a, const std::pair<int, size_t>& b) { return a.first < b.first; });
+    size_t limit = EngineSearchLimit();
+    std::string text;
+    for (size_t i = 0; i < found.size() && i < limit; ++i) {
+        const Member& member = members[found[i].second];
+        const Runtime::ClassEntry& owner = runtime.classes[member.klass];
+        std::string detail;
+        if (member.method) {
+            detail = MethodLine(runtime, member.handle);
+        } else {
+            Field field{member.handle, runtime.fieldType(member.handle), owner.klass, runtime.FieldOffset(member.handle), runtime.FieldFlags(member.handle)};
+            detail = FieldPlace(field) + " " + runtime.TypeName(field.type);
+        }
+        text += EngineSearchLine(member.method, owner.assembly, owner.name, member.name, detail);
+    }
+    if (found.size() > limit)
+        text += "+" + std::to_string(found.size() - limit) + " more\n";
+    return Payload(text, payload);
 }
 
 std::string Describe(const Runtime& runtime, const std::string& rest, std::vector<uint8_t>& payload) {
@@ -1032,19 +1131,8 @@ std::string Describe(const Runtime& runtime, const std::string& rest, std::vecto
     }
     text += "methods:\n";
     void* iterator = nullptr;
-    while (Handle method = runtime.classMethods(klass, &iterator)) {
-        uint32_t implementation = 0;
-        uint32_t flags = runtime.methodFlags(method, &implementation);
-        Handle returned = runtime.ReturnType(method);
-        text += std::string("  ") + (flags & kMethodStatic ? "static " : "") + (flags & kMethodAbstract ? "abstract " : "") +
-                (returned ? runtime.TypeName(returned) : "?") + " " + runtime.methodName(method) + "(";
-        bool first = true;
-        for (const auto& parameter : runtime.Parameters(method)) {
-            text += (first ? "" : ", ") + runtime.TypeName(parameter.first) + (parameter.second.empty() ? "" : " " + parameter.second);
-            first = false;
-        }
-        text += ")\n";
-    }
+    while (Handle method = runtime.classMethods(klass, &iterator))
+        text += "  " + MethodLine(runtime, method) + "\n";
     if (lineage.size() > 1)
         text += "methods of " + FullName(runtime, lineage[1]) + ": engine class " + FullName(runtime, lineage[1]) + "\n";
     return Payload(text, payload);
@@ -1392,6 +1480,86 @@ size_t& EngineListLimit() {
     return limit;
 }
 
+size_t EngineSearchLimit() { return std::min(EngineListLimit(), kMaxListed); }
+
+bool ParseEngineSearch(const std::string& arguments, EngineSearch& search, std::string& error) {
+    std::string text = arguments;
+    auto trim = [](std::string& value) {
+        value.erase(0, value.find_first_not_of(' '));
+        value.erase(value.find_last_not_of(' ') + 1);
+    };
+    trim(text);
+    size_t space = text.rfind(' ');
+    if (space != std::string::npos) {
+        std::string kind = text.substr(space + 1);
+        bool functions = kind == "functions" || kind == "methods";
+        bool properties = kind == "properties" || kind == "fields";
+        if (functions || properties || kind == "all") {
+            search.functions = !properties;
+            search.properties = !functions;
+            text.erase(space);
+            trim(text);
+        }
+    }
+    // Between double quotes, where \" and \\ stand for a quote and a backslash.
+    if (text.size() >= 2 && text.front() == '"' && text.back() == '"') {
+        std::string inner;
+        for (size_t i = 1; i + 1 < text.size(); ++i) {
+            if (text[i] == '\\' && i + 2 < text.size())
+                ++i;
+            inner += text[i];
+        }
+        text = inner;
+    }
+    text = Lower(text);
+    size_t separator = text.find("::");
+    search.owner = separator == std::string::npos ? "" : text.substr(0, separator);
+    search.member = separator == std::string::npos ? text : text.substr(separator + 2);
+    if (text.empty() || text == "::") {
+        error = "error give a part of the name of a function or a property, then functions, properties or all (the default)";
+        return false;
+    }
+    return true;
+}
+
+namespace {
+
+// Where `lower`, lowercase, is in `text` ignoring case, or npos.
+size_t FindNoCase(const std::string& text, const std::string& lower) {
+    if (lower.empty())
+        return 0;
+    auto at = std::search(text.begin(), text.end(), lower.begin(), lower.end(),
+                          [](char a, char b) { return tolower(static_cast<unsigned char>(a)) == b; });
+    return at == text.end() ? std::string::npos : static_cast<size_t>(at - text.begin());
+}
+
+} // namespace
+
+int EngineSearchRank(const EngineSearch& search, const std::string& owner, const std::string& name) {
+    if (!search.owner.empty() && FindNoCase(owner, search.owner) == std::string::npos)
+        return -1;
+    if (search.member.empty())
+        return 2;
+    size_t at = FindNoCase(name, search.member);
+    if (at == std::string::npos)
+        return -1;
+    return at != 0 ? 2 : name.size() == search.member.size() ? 0 : 1;
+}
+
+std::string EngineSearchLine(bool function, const std::string& package, const std::string& owner, const std::string& name, const std::string& detail) {
+    std::string member = owner + "::" + name;
+    if (member.find_first_of(" \t\"") != std::string::npos) {
+        std::string quoted = "\"";
+        for (char c : member) {
+            if (c == '"' || c == '\\')
+                quoted += '\\';
+            quoted += c;
+        }
+        member = quoted + "\"";
+    }
+    return std::string(function ? "function " : "property ") + package + " " + member + " " + detail + "\n";
+}
+
 void RunGameThreadCalls() {
     if (!g_callPending.load(std::memory_order_acquire) || t_inCall)
         return;
@@ -1431,9 +1599,9 @@ bool HandleEngine(const std::string& command, const std::string& rest, std::vect
         answer = "error the player paused the memory tools in the AI Advanced Features window of the overlay";
     if (!answer.empty())
         return true;
-    static const char* const kCommands[] = {"info", "assemblies", "classes", "class", "get", "set", "instances", "call", "dump"};
+    static const char* const kCommands[] = {"info", "assemblies", "classes", "class", "search", "get", "set", "instances", "call", "dump"};
     if (std::find_if(std::begin(kCommands), std::end(kCommands), [&](const char* name) { return sub == name; }) == std::end(kCommands)) {
-        answer = "error unknown engine command: info, assemblies, classes, class, get, set, instances, call or dump";
+        answer = "error unknown engine command: info, assemblies, classes, class, search, get, set, instances, call or dump";
         return true;
     }
     std::lock_guard<std::mutex> lock(g_engineMutex);
@@ -1462,6 +1630,8 @@ bool HandleEngine(const std::string& command, const std::string& rest, std::vect
         answer = ListClasses(*runtime, arguments, payload);
     else if (sub == "class")
         answer = Describe(*runtime, arguments, payload);
+    else if (sub == "search")
+        answer = Search(*runtime, arguments, payload);
     else if (sub == "get")
         answer = Get(*runtime, arguments, payload);
     else if (sub == "set")
