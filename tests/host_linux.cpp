@@ -689,7 +689,6 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
             if (!client.Open())
                 return;
             info = client.Request("info");
-            text = client.Request("text 600 hello\\nworld");
             screenshot = client.Request("screenshot 400");
             if (screenshot == "ok 400 300") {
                 rgb.resize(400 * 300 * 3);
@@ -708,6 +707,8 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
                 engineFailure = CheckRealMono(client, g_mono, true);
             else if (client.Request("engine info") != "ok none")
                 engineFailure = "engine info answers without a Unity runtime";
+            // Last: chat say replaces the message with one of a few seconds.
+            text = client.Request("text 60 hello\\nworld");
         },
         frame);
     for (int i = 0; i < 10; ++i)

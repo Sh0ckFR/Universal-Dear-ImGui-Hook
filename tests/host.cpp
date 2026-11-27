@@ -1218,7 +1218,6 @@ int RemoteScenario(bool memory, bool advanced, Frame&& frame) {
                 if (!client.Read(rgb.data(), rgb.size()))
                     rgb.clear();
             }
-            text = client.Request("text 600 hello\\nworld");
             unknownKey = client.Request("key nokey 50");
             toolsFailure = CheckRemoteTools(client, [] { return ImGui::GetFrameCount(); });
             if (g_engineLoaded)
@@ -1242,6 +1241,8 @@ int RemoteScenario(bool memory, bool advanced, Frame&& frame) {
                 advancedFailure = "the advanced commands answer while aiAdvancedFeatures is off";
             click = client.Request("click " + std::to_string(g_buttonX) + " " + std::to_string(g_buttonY) + " left 100");
             outside = client.Request("click 800 10");
+            // Last: chat say replaces the message with one of a few seconds.
+            text = client.Request("text 60 hello\\nworld");
         },
         frame);
     for (ULONGLONG start = GetTickCount64(); GetTickCount64() - start < 1000 && g_buttonClicks == clicksBefore;)
