@@ -1092,7 +1092,7 @@ int main(int argc, char** argv) {
     Display* display = XOpenDisplay(nullptr);
     if (!display)
         return Skip("no X server");
-    // The SDK's test runs without the hook, as a trainer of a game would.
+    // The SDK's test runs without the hook, as a DLL of a user would.
     if (options.sdkTest.empty() && !CallerSeenThroughHook())
         return Fail("the hook is not preloaded, or its dlsym() hides the caller from the C library");
 

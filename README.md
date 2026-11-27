@@ -59,7 +59,7 @@ Sections marked with ▶ expand on click. What changed in each version is listed
 - 🤖 **AI remote control.** Through [MCP](#remote-control-by-an-ai-assistant), an assistant such as Claude Code sees the game, shows messages to the player, presses keys and clicks. Your menu can give it [tools of your own](#tools-of-your-own), such as *teleport* or *spawn an item*, which it calls like the built-in ones.
 - 🔬 **Memory and code tools.** With the [memory](#memory-tools) and [advanced](#advanced-features-and-the-ai-advanced-features-window) tools, it scans values, follows pointer chains, freezes values and finds the code that writes them. It also disassembles and patches that code, and builds signatures that survive an update.
 - ⏸️ **Plays at its own pace.** It types text, drags the mouse, waits for the screen to change, and pauses or slows down the game while it thinks. The *AI Advanced Features* window shows everything it does.
-- 🧩 **Unity and Unreal Engine objects.** With the [engine tools](#engine-tools), the assistant lists the classes of a Unity (Mono or IL2CPP) or Unreal Engine 4 or 5 game, finds their live objects, and reads and writes their fields by name instead of by address. On Unreal, the **Engine** tab of the AI Advanced Features window does the same in the game, calls its functions, and writes a [C++ SDK](#a-c-sdk-of-an-unreal-engine-game) of the game for a trainer of your own.
+- 🧩 **Unity and Unreal Engine objects.** With the [engine tools](#engine-tools), the assistant lists the classes of a Unity (Mono or IL2CPP) or Unreal Engine 4 or 5 game, finds their live objects, and reads and writes their fields by name instead of by address. On Unreal, the **Engine** tab of the AI Advanced Features window does the same in the game, calls its functions, and writes a [C++ SDK](#a-c-sdk-of-an-unreal-engine-game) of the game for a mod, a tool or an automated test of your own.
 
 **Shipping it**
 
@@ -457,7 +457,7 @@ Unreal names may have spaces, such as the blueprint function `Get Health Ratio`:
 
 ### A C++ SDK of an Unreal Engine game
 
-`engine_dump`, or the **Dump C++ SDK** button of the **Engine** tab, writes the classes, structs, enums and functions of the running game to one header, such as `%TEMP%\MyGame-SDK-5.3-20261127-164021.hpp`, and gives its full path. The header needs nothing else, neither Unreal's headers nor this library: include it in a DLL of your own, C++17, built with MSVC, MinGW-w64, GCC or Clang, and inject that DLL into the game, as a trainer.
+`engine_dump`, or the **Dump C++ SDK** button of the **Engine** tab, writes the classes, structs, enums and functions of the running game to one header, such as `%TEMP%\MyGame-SDK-5.3-20261127-164021.hpp`, and gives its full path. The header needs nothing else, neither Unreal's headers nor this library: include it in a DLL of your own, C++17, built with MSVC, MinGW-w64, GCC or Clang, and inject that DLL into the game: a mod, a tool or an automated test.
 
 - `uesdk::WaitForInit()` finds the engine again at each launch: the name table, the object array and `ProcessEvent`, and checks they are those of the game that was dumped, the same build. Until then, and when it fails, `uesdk::LastError()` says why.
 - Each property is an accessor, `player->Health()`, that reads and writes the game's memory; each function a wrapper, `player->Heal(50)`, whose out parameters are references. Offsets are found again by name when the game's are not those of the dump. An accessor reads the object's memory directly, as the game does: use objects found again recently, since the game frees those it destroys.
@@ -468,13 +468,13 @@ Unreal names may have spaces, such as the blueprint function `Get Health Ratio`:
 ```cpp
 #include "MyGame-SDK-5.3-20261127-164021.hpp"
 
-DWORD WINAPI Trainer(void* module) {
+DWORD WINAPI TestThread(void* module) {
     if (!uesdk::WaitForInit(30000))
         return 1;  // uesdk::LastError() says why
     while (!(GetAsyncKeyState(VK_END) & 1)) {
         for (SDK::APlayerCharacter_C* player : uesdk::Instances<SDK::APlayerCharacter_C>())
-            player->Health() = player->Health_Max();  // infinite health
-        if (GetAsyncKeyState(VK_F5) & 1)
+            player->Health() = player->Health_Max();  // keeps the player alive while testing a level
+        if (GetAsyncKeyState(VK_F5) & 1)  // moves the player up, to reach a spot to test
             uesdk::GameThread::Run([] {
                 if (auto* player = uesdk::FirstInstance<SDK::APlayerCharacter_C>()) {
                     SDK::FVector at = player->K2_GetActorLocation();
@@ -491,7 +491,7 @@ DWORD WINAPI Trainer(void* module) {
 
 BOOL WINAPI DllMain(HMODULE module, DWORD reason, void*) {
     if (reason == DLL_PROCESS_ATTACH)
-        CloseHandle(CreateThread(nullptr, 0, Trainer, module, 0, nullptr));
+        CloseHandle(CreateThread(nullptr, 0, TestThread, module, 0, nullptr));
     return TRUE;
 }
 ```
