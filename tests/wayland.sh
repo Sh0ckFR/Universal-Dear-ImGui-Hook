@@ -42,7 +42,9 @@ if [ ! -S "$XDG_RUNTIME_DIR/$socket" ]; then
 fi
 # Weston gives the keyboard to its clients while its window has the focus of the X server.
 if command -v xdotool >/dev/null; then
-    timeout 10 xdotool search --sync --onlyvisible --name Weston windowfocus || echo "Weston's window was not found"
+    for window in $(timeout 10 xdotool search --sync --name "Weston Compositor" 2>/dev/null); do
+        xdotool windowfocus "$window" 2>/dev/null || true
+    done
 fi
 
 status=0

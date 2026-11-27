@@ -20,7 +20,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
-#include <unordered_set>
+#include <iterator>
 #include <vector>
 
 namespace uih::detail::wayland {
@@ -60,8 +60,15 @@ namespace {
 // WL_CLOSURE_MAX_ARGS
 constexpr int kMaxArguments = 20;
 constexpr uint32_t kMarshalDestroy = 1;
-// struct wl_proxy starts with its struct wl_object, which starts with its interface.
-const Interface* InterfaceOf(const Proxy* proxy) { return *reinterpret_cast<const Interface* const*>(proxy); }
+// struct wl_proxy starts with its struct wl_object, which starts with its
+// interface, and goes on with its display.
+struct ProxyHeader {
+    const Interface* interface;
+    const void* implementation;
+    uint32_t id;
+    void* display;
+};
+const Interface* InterfaceOf(const Proxy* proxy) { return reinterpret_cast<const ProxyHeader*>(proxy)->interface; }
 
 using Fn = void (*)();
 
@@ -73,6 +80,12 @@ T Next(const char* name) {
 const char* ClassOf(Proxy* proxy) {
     static const auto getClass = Next<const char* (*)(Proxy*)>("wl_proxy_get_class");
     return getClass ? getClass(proxy) : "";
+}
+
+void* DisplayOf(Proxy* proxy) {
+    // libwayland-client 1.23 and later.
+    static const auto getDisplay = Next<void* (*)(Proxy*)>("wl_proxy_get_display");
+    return getDisplay ? getDisplay(proxy) : reinterpret_cast<const ProxyHeader*>(proxy)->display;
 }
 
 uint32_t VersionOf(Proxy* proxy) {
@@ -108,6 +121,8 @@ struct Wrapped {
     Kind kind;
     // The application's listener.
     const void* listener;
+    // Its connection: graphics libraries open and close their own.
+    void* display;
 };
 
 // X11 keysyms (X11/keysymdef.h), which xkbcommon uses too.
@@ -262,7 +277,8 @@ std::atomic<int> g_devices{0};
 Proxy* g_pointer = nullptr;
 Proxy* g_keyboard = nullptr;
 // Surfaces the application draws on with Vulkan or EGL, and the last one it got input on.
-std::unordered_set<const Proxy*> g_renderSurfaces;
+// Surfaces the application draws on, with their connection.
+std::unordered_map<const Proxy*, void*> g_renderSurfaces;
 Proxy* g_lastSurface = nullptr;
 std::atomic<uint32_t> g_width{0};
 std::atomic<uint32_t> g_height{0};
@@ -445,7 +461,6 @@ void Forward(Proxy* proxy, int opcode, void* data, Args... args) {
 
 void PointerEnter(void* data, Proxy* pointer, uint32_t serial, Proxy* surface, int32_t x, int32_t y) {
     NoteInputThread();
-    Log("DEBUG %s %p handler %p", "PointerEnter", static_cast<void*>(surface), reinterpret_cast<void*>(Handler(pointer, 0)));
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         g_pointerSurface = surface;
@@ -614,7 +629,6 @@ void KeyboardKeymap(void* data, Proxy* keyboard, uint32_t format, int32_t fd, ui
 
 void KeyboardEnter(void* data, Proxy* keyboard, uint32_t serial, Proxy* surface, Array* keys) {
     NoteInputThread();
-    Log("DEBUG %s %p handler %p", "KeyboardEnter", static_cast<void*>(surface), reinterpret_cast<void*>(Handler(keyboard, 1)));
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         g_keyboardSurface = surface;
@@ -713,7 +727,7 @@ Proxy* InjectionSurface() {
         return g_pointerSurface;
     if (g_lastSurface)
         return g_lastSurface;
-    return g_renderSurfaces.empty() ? nullptr : const_cast<Proxy*>(*g_renderSurfaces.begin());
+    return g_renderSurfaces.empty() ? nullptr : const_cast<Proxy*>(g_renderSurfaces.begin()->first);
 }
 
 // On the thread that reads the input, through the wrapped listeners: the
@@ -936,8 +950,10 @@ void SetSurfaceSize(uint32_t width, uint32_t height) {
 void RecordSurface(const void* surface) {
     if (!surface)
         return;
+    auto* proxy = static_cast<Proxy*>(const_cast<void*>(surface));
+    void* display = DisplayOf(proxy);
     std::lock_guard<std::mutex> lock(g_mutex);
-    g_renderSurfaces.insert(static_cast<const Proxy*>(surface));
+    g_renderSurfaces[proxy] = display;
 }
 
 void NewFrame() {
@@ -1097,7 +1113,7 @@ UIH_EXPORT int wl_proxy_add_listener(Proxy* proxy, void (**implementation)(void)
     {
         std::lock_guard<std::mutex> lock(wayland::g_mutex);
         wayland::ForgetLocked(proxy);
-        wayland::g_wrapped[proxy] = {kind, reinterpret_cast<const void*>(implementation)};
+        wayland::g_wrapped[proxy] = {kind, reinterpret_cast<const void*>(implementation), wayland::DisplayOf(proxy)};
         if (kind == wayland::Kind::Pointer || kind == wayland::Kind::Keyboard) {
             ++wayland::g_devices;
             (kind == wayland::Kind::Pointer ? wayland::g_pointer : wayland::g_keyboard) = proxy;
@@ -1182,23 +1198,38 @@ UIH_EXPORT int wl_display_roundtrip_queue(void* display, void* queue) {
     return next(display, queue);
 }
 
+// Forgets the objects of the connection. Graphics libraries, such as Mesa's
+// device selection layer, open and close connections of their own.
 UIH_EXPORT void wl_display_disconnect(void* display) {
     static const auto disconnect = wayland::Next<void (*)(void*)>("wl_display_disconnect");
     {
         std::lock_guard<std::mutex> lock(wayland::g_mutex);
-        wayland::g_wrapped.clear();
-        wayland::g_devices = 0;
-        wayland::g_pointer = nullptr;
-        wayland::g_keyboard = nullptr;
-        wayland::g_renderSurfaces.clear();
-        wayland::g_lastSurface = nullptr;
-        wayland::g_pointerSurface = nullptr;
-        wayland::g_keyboardSurface = nullptr;
-        wayland::g_keys.clear();
-        wayland::g_buttons.clear();
-        wayland::g_syntheticCount -= wayland::g_synthetic.size();
-        wayland::g_synthetic.clear();
-        wayland::g_inputThread = std::thread::id();
+        bool devices = false;
+        for (auto it = wayland::g_wrapped.begin(); it != wayland::g_wrapped.end();) {
+            if (it->second.display != display) {
+                ++it;
+                continue;
+            }
+            if (it->second.kind == wayland::Kind::Pointer || it->second.kind == wayland::Kind::Keyboard) {
+                --wayland::g_devices;
+                devices = true;
+            }
+            it = wayland::g_wrapped.erase(it);
+        }
+        for (auto it = wayland::g_renderSurfaces.begin(); it != wayland::g_renderSurfaces.end();)
+            it = it->second == display ? wayland::g_renderSurfaces.erase(it) : std::next(it);
+        if (devices) {
+            wayland::g_pointer = nullptr;
+            wayland::g_keyboard = nullptr;
+            wayland::g_lastSurface = nullptr;
+            wayland::g_pointerSurface = nullptr;
+            wayland::g_keyboardSurface = nullptr;
+            wayland::g_keys.clear();
+            wayland::g_buttons.clear();
+            wayland::g_syntheticCount -= wayland::g_synthetic.size();
+            wayland::g_synthetic.clear();
+            wayland::g_inputThread = std::thread::id();
+        }
     }
     wayland::g_delivered.notify_all();
     disconnect(display);
