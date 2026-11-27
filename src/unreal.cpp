@@ -898,9 +898,13 @@ std::string FormatValue(Unreal& ue, const Property& property, uintptr_t address,
         return Read(address, value) ? std::to_string(value) : "?";
     }
     if (kind == "EnumProperty") {
-        int64_t value = 0;
+        uint64_t raw = 0;
         int32_t size = std::clamp(property.size, 1, 8);
-        return ReadMemory(address, &value, static_cast<size_t>(size)) ? std::to_string(size < 8 ? value << (64 - 8 * size) >> (64 - 8 * size) : value) : "?";
+        if (!ReadMemory(address, &raw, static_cast<size_t>(size)))
+            return "?";
+        // Sign-extended from its size.
+        int shift = 64 - 8 * size;
+        return std::to_string(static_cast<int64_t>(raw << shift) >> shift);
     }
     if (kind == "BoolProperty") {
         uint8_t layout[4] = {};
