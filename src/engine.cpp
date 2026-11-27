@@ -1178,6 +1178,7 @@ std::string Instances(const Runtime& runtime, const std::string& rest, std::vect
     if (!header)
         return "error the runtime has no objects of " + className + ": an abstract or generic class has none of its own";
     std::vector<Check> checks = ChecksOf(runtime, klass);
+    std::vector<AddressRange> modules = ModuleMemory();
     // Out of the heap, which it would find copies of the objects in.
     static uint8_t* chunk = static_cast<uint8_t*>(AllocateScanMemory(kChunk));
     if (!chunk)
@@ -1185,7 +1186,8 @@ std::string Instances(const Runtime& runtime, const std::string& rest, std::vect
     auto own = reinterpret_cast<uintptr_t>(chunk);
     std::vector<uintptr_t> found;
     for (const MemoryRegion& region : MemoryRegions()) {
-        if (!region.writable || region.image || (region.base <= own && own < region.base + region.size))
+        if (!region.writable || (region.base <= own && own < region.base + region.size) ||
+            (InRanges(modules, region.base) && InRanges(modules, region.base + region.size - 1)))
             continue;
         for (size_t offset = 0; offset < region.size && found.size() < limit; offset += kChunk) {
             if (StopRequested())
@@ -1198,7 +1200,7 @@ std::string Instances(const Runtime& runtime, const std::string& rest, std::vect
             for (size_t i = 0; i + sizeof(uintptr_t) <= length && found.size() < limit; i += runtime.objectAlign) {
                 uintptr_t word = 0;
                 memcpy(&word, chunk + i, sizeof(word));
-                if (word == header && ObjectClass(runtime, base + i) == klass &&
+                if (word == header && !InRanges(modules, base + i) && ObjectClass(runtime, base + i) == klass &&
                     Passes(runtime, base + i, checks))
                     found.push_back(base + i);
             }
