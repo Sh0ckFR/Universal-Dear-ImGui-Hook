@@ -50,6 +50,8 @@ std::vector<UserTexture> g_textures;
 // A texture created by the render callback is drawn in the same frame, so it
 // is registered at once instead of before the next frame.
 thread_local bool t_inRenderCallback = false;
+// Set by GuardedCall() around a call of the game's code.
+thread_local bool t_inGameCall = false;
 
 // One CaptureFrame() at a time waits for the rendering thread.
 std::mutex g_captureCall;
@@ -450,8 +452,15 @@ void StopUntilMenuInput() {
 
 bool StoppingToResume() { return g_stoppingToResume; }
 
+void SetInGameCall(bool inCall) { t_inGameCall = inCall; }
+
 void OnFault(unsigned long code) {
     t_inRenderCallback = false;
+    if (t_inGameCall) {
+        t_inGameCall = false;
+        Log("Exception 0x%08lX in a call of the game's code: the call failed, the overlay stays", code);
+        return;
+    }
     Log("Exception 0x%08lX in the overlay", code);
     if (g_faulted.exchange(true) || g_state != State::Running)
         return;

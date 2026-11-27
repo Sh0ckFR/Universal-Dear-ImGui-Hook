@@ -955,6 +955,7 @@ void Tick() {
 }
 
 void StopAdvanced() {
+    StopExplorer();
     g_scanCancel = true;
     if (g_scanThread.joinable())
         g_scanThread.join();
@@ -1016,9 +1017,9 @@ void DrawAIAdvancedFeatures(bool* open) {
             DrawActivity();
             ImGui::EndTabItem();
         }
-        const char* const kMemoryTabs[] = {"Watch list", "Pointers", "What writes", "Patches"};
-        void (*const kDraw[])() = {DrawWatchList, DrawPointers, DrawWrites, DrawPatches};
-        for (int i = 0; i < 4; ++i) {
+        const char* const kMemoryTabs[] = {"Engine", "Watch list", "Pointers", "What writes", "Patches"};
+        void (*const kDraw[])() = {DrawExplorer, DrawWatchList, DrawPointers, DrawWrites, DrawPatches};
+        for (int i = 0; i < 5; ++i) {
             if (!ImGui::BeginTabItem(kMemoryTabs[i]))
                 continue;
             if (MemoryOn())

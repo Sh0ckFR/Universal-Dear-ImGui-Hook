@@ -10,6 +10,52 @@ function(uih_add_host_test name)
     set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT ${UIH_TEST_TIMEOUT} RUN_SERIAL TRUE)
 endfunction()
 
+# The C++ SDK that `engine dump` writes of the fake Unreal game, in the
+# directory sdk<generation>: `dump_test` copies it there, then tests/sdk is
+# built against it by the compiler of this build, as a trainer would be, and
+# uih_host --sdk-test runs it against the same fake game.
+get_property(UIH_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(UIH_MULTI_CONFIG)
+    set(UIH_SDK_CONFIG $<CONFIG>)
+elseif(CMAKE_BUILD_TYPE)
+    set(UIH_SDK_CONFIG ${CMAKE_BUILD_TYPE})
+else()
+    set(UIH_SDK_CONFIG Release)
+endif()
+function(uih_add_sdk_test generation dump_test api)
+    set(dir ${CMAKE_CURRENT_BINARY_DIR}/sdk${generation})
+    file(MAKE_DIRECTORY ${dir})
+    set(generator --build-generator ${CMAKE_GENERATOR})
+    if(CMAKE_GENERATOR_PLATFORM)
+        list(APPEND generator --build-generator-platform ${CMAKE_GENERATOR_PLATFORM})
+    endif()
+    if(CMAKE_GENERATOR_TOOLSET)
+        list(APPEND generator --build-generator-toolset ${CMAKE_GENERATOR_TOOLSET})
+    endif()
+    if(CMAKE_MAKE_PROGRAM AND NOT UIH_MULTI_CONFIG)
+        list(APPEND generator --build-makeprogram ${CMAKE_MAKE_PROGRAM})
+    endif()
+    add_test(NAME sdk${generation}_build
+             COMMAND ${CMAKE_CTEST_COMMAND} --build-and-test ${CMAKE_CURRENT_SOURCE_DIR}/sdk ${dir}/build ${generator}
+                     --build-config ${UIH_SDK_CONFIG} --build-noclean
+                     --build-options -DCMAKE_BUILD_TYPE=${UIH_SDK_CONFIG} -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+                                     -DUIH_SDK_DIR=${dir} -DUIH_SDK_OUTPUT=${dir}/out)
+    set_tests_properties(${dump_test} PROPERTIES FIXTURES_SETUP sdk${generation}_header)
+    set_tests_properties(sdk${generation}_build PROPERTIES TIMEOUT 600 SKIP_REGULAR_EXPRESSION UIH_SDK_SKIPPED
+                         FIXTURES_REQUIRED sdk${generation}_header FIXTURES_SETUP sdk${generation}_library)
+    if(WIN32)
+        set(library ${dir}/out/uih_sdk_test.dll)
+    else()
+        set(library ${dir}/out/uih_sdk_test.so)
+    endif()
+    uih_add_host_test(sdk${generation}_run --api ${api} --unreal ${generation} --sdk-test ${library})
+    set_tests_properties(sdk${generation}_run PROPERTIES FIXTURES_REQUIRED sdk${generation}_library)
+    # The fake game keeps its strings for the life of the process, as a game does.
+    if(UIH_SANITIZER_OPTIONS)
+        set_tests_properties(sdk${generation}_run PROPERTIES ENVIRONMENT "${UIH_SANITIZER_OPTIONS}")
+    endif()
+endfunction()
+
 # A fake Unity scripting runtime for the engine commands of the remote control,
 # under the names of Mono's and IL2CPP's libraries, each in its own directory.
 add_library(uih_fake_mono SHARED fake_unity.cpp)
@@ -87,8 +133,11 @@ if(WIN32)
     uih_add_host_test(remote_il2cpp --api d3d11 --remote-advanced --engine $<TARGET_FILE:uih_fake_il2cpp>)
     uih_add_host_test(remote_mono_memory --api d3d11 --remote-memory --engine $<TARGET_FILE:uih_fake_mono>)
     # The objects of an Unreal Engine 5.8 and 4.22 game, laid out in the host.
-    uih_add_host_test(remote_unreal5 --api d3d11 --remote-memory --unreal 5)
-    uih_add_host_test(remote_unreal4 --api d3d11 --remote-advanced --unreal 4)
+    uih_add_host_test(remote_unreal5 --api d3d11 --remote-memory --unreal 5 --dump-sdk ${CMAKE_CURRENT_BINARY_DIR}/sdk5/uih_sdk.hpp)
+    uih_add_host_test(remote_unreal4 --api d3d11 --remote-advanced --unreal 4 --dump-sdk ${CMAKE_CURRENT_BINARY_DIR}/sdk4/uih_sdk.hpp)
+    # A library built against the SDK of each, calling the fake game's functions.
+    uih_add_sdk_test(5 remote_unreal5 d3d11)
+    uih_add_sdk_test(4 remote_unreal4 opengl)
     uih_add_host_test(remote_c_api --api d3d11 --remote --c-api)
     # Recovery from a crash of the overlay needs structured exception handling.
     if(MSVC)
@@ -232,8 +281,11 @@ else()
         # The objects of a Unity game, on the fake runtime.
         uih_add_remote_test(preload_glx_remote_mono --api opengl --engine $<TARGET_FILE:uih_fake_mono>)
         uih_add_remote_test(preload_vulkan_remote_il2cpp --api vulkan --engine $<TARGET_FILE:uih_fake_il2cpp>)
-        uih_add_remote_test(preload_glx_remote_unreal5 --api opengl --unreal 5)
-        uih_add_remote_test(preload_vulkan_remote_unreal4 --api vulkan --unreal 4)
+        uih_add_remote_test(preload_glx_remote_unreal5 --api opengl --unreal 5 --dump-sdk ${CMAKE_CURRENT_BINARY_DIR}/sdk5/uih_sdk.hpp)
+        uih_add_remote_test(preload_vulkan_remote_unreal4 --api vulkan --unreal 4 --dump-sdk ${CMAKE_CURRENT_BINARY_DIR}/sdk4/uih_sdk.hpp)
+        # A library built against the SDK of each, run without the hook.
+        uih_add_sdk_test(5 preload_glx_remote_unreal5 opengl)
+        uih_add_sdk_test(4 preload_vulkan_remote_unreal4 vulkan)
         # A real Mono runtime, as a Unity player embeds its own, running
         # tests/mono/Game.cs: when the system has Mono and its C# compiler.
         find_program(UIH_MCS mcs)

@@ -59,7 +59,7 @@ Sections marked with ▶ expand on click. What changed in each version is listed
 - 🤖 **AI remote control.** Through [MCP](#remote-control-by-an-ai-assistant), an assistant such as Claude Code sees the game, shows messages to the player, presses keys and clicks. Your menu can give it [tools of your own](#tools-of-your-own), such as *teleport* or *spawn an item*, which it calls like the built-in ones.
 - 🔬 **Memory and code tools.** With the [memory](#memory-tools) and [advanced](#advanced-features-and-the-ai-advanced-features-window) tools, it scans values, follows pointer chains, freezes values and finds the code that writes them. It also disassembles and patches that code, and builds signatures that survive an update.
 - ⏸️ **Plays at its own pace.** It types text, drags the mouse, waits for the screen to change, and pauses or slows down the game while it thinks. The *AI Advanced Features* window shows everything it does.
-- 🧩 **Unity and Unreal Engine objects.** With the [engine tools](#engine-tools), the assistant lists the classes of a Unity (Mono or IL2CPP) or Unreal Engine 4 or 5 game, finds their live objects, and reads and writes their fields by name instead of by address.
+- 🧩 **Unity and Unreal Engine objects.** With the [engine tools](#engine-tools), the assistant lists the classes of a Unity (Mono or IL2CPP) or Unreal Engine 4 or 5 game, finds their live objects, and reads and writes their fields by name instead of by address. On Unreal, the **Engine** tab of the AI Advanced Features window does the same in the game, calls its functions, and writes a [C++ SDK](#a-c-sdk-of-an-unreal-engine-game) of the game for a trainer of your own.
 
 **Shipping it**
 
@@ -428,7 +428,7 @@ Addresses are hexadecimal or `module+offset`, such as `game.exe+1a2b3c`. With `a
 
 With `remoteMemory`, the assistant also sees the objects of Unity and Unreal Engine games, by their classes and fields instead of bytes:
 - **Unity**: the library finds the runtime of the game's scripts, Mono or IL2CPP, and calls its C API, which it does not link.
-- **Unreal Engine 4 and 5**: it finds the engine's name table and object array in the game's memory, and reads the classes and properties from them.
+- **Unreal Engine 4.22 to 5.x**: it finds the engine's name table and object array in the game's memory, and reads the classes, structs, enums, properties and functions from them. It calls functions through `UObject::ProcessEvent`, which it finds in the virtual table of the objects.
 
 | Tool | Effect |
 | --- | --- |
@@ -437,9 +437,55 @@ With `remoteMemory`, the assistant also sees the objects of Unity and Unreal Eng
 | `engine_class` | A class: its parents, its fields with their type and offset (or static, const), inherited ones included, and its methods with their parameters |
 | `engine_instances` | The live objects of a class, such as every `Game.Player`, found by a scan of the memory checked against the layout of the class, or in the object array on Unreal |
 | `engine_field` | Reads a field of an object or a static field, and writes it when given a value: numbers, booleans, strings, enums, structs such as `Vector3` (`position.x`), references to other objects |
-| `engine_call` | Calls a method on the game's main thread and returns its result, or the exception it threw: Unity only. Needs `aiAdvancedFeatures` too |
+| `engine_call` | Calls a method on the game's main thread and returns its result, or the exception it threw; on Unreal, a function of an object or a static one, with structs as JSON objects (`{"X": 1, "Y": 2, "Z": 3}`), and its out parameters after its result. Needs `aiAdvancedFeatures` too |
+| `engine_dump` | Unreal: writes a [C++ SDK](#a-c-sdk-of-an-unreal-engine-game) of the game, its own packages by default or `all` of them, to a header in the temporary directory, and gives its full path |
 
 Ask, for example: *Find the player object, tell me its health, and set its speed to 10.* The assistant lists the classes of `Assembly-CSharp`, describes the player's class, finds its instance and reads or writes the fields.
+
+Unreal names may have spaces, such as the blueprint function `Get Health Ratio`: in the commands of the [protocol](remote/PROTOCOL.md), they go between double quotes.
+
+### A C++ SDK of an Unreal Engine game
+
+`engine_dump`, or the **Dump C++ SDK** button of the **Engine** tab, writes the classes, structs, enums and functions of the running game to one header, such as `%TEMP%\MyGame-SDK-5.3-20261127-164021.hpp`, and gives its full path. The header needs nothing else, neither Unreal's headers nor this library: include it in a DLL of your own, C++17, built with MSVC, MinGW-w64, GCC or Clang, and inject that DLL into the game, as a trainer.
+
+- `uesdk::WaitForInit()` finds the engine again at each launch: the name table, the object array and `ProcessEvent`, and checks they are those of the game that was dumped, the same build. Until then, and when it fails, `uesdk::LastError()` says why.
+- Each property is an accessor, `player->Health()`, that reads and writes the game's memory; each function a wrapper, `player->Heal(50)`, whose out parameters are references. Offsets are found again by name when the game's are not those of the dump. An accessor reads the object's memory directly, as the game does: use objects found again recently, since the game frees those it destroys.
+- `uesdk::Instances<SDK::APlayer>()`, `uesdk::FindObject()` and `SDK::APlayer::StaticClass()` find the objects.
+- Functions must run on the game thread: `uesdk::GameThread::Run()` runs code there and waits for it, `Post()` does not wait. A call that faults in the game's code returns false with MSVC builds, and the game goes on.
+- Call `uesdk::Shutdown()` before the DLL unloads.
+
+```cpp
+#include "MyGame-SDK-5.3-20261127-164021.hpp"
+
+DWORD WINAPI Trainer(void* module) {
+    if (!uesdk::WaitForInit(30000))
+        return 1;  // uesdk::LastError() says why
+    while (!(GetAsyncKeyState(VK_END) & 1)) {
+        for (SDK::APlayerCharacter_C* player : uesdk::Instances<SDK::APlayerCharacter_C>())
+            player->Health() = player->Health_Max();  // infinite health
+        if (GetAsyncKeyState(VK_F5) & 1)
+            uesdk::GameThread::Run([] {
+                if (auto* player = uesdk::FirstInstance<SDK::APlayerCharacter_C>()) {
+                    SDK::FVector at = player->K2_GetActorLocation();
+                    at.Z() += 500;
+                    SDK::FHitResult hit{};  // an out parameter
+                    player->K2_SetActorLocation(at, false, hit, true);
+                }
+            });
+        Sleep(100);
+    }
+    uesdk::Shutdown();
+    FreeLibraryAndExitThread(static_cast<HMODULE>(module), 0);
+}
+
+BOOL WINAPI DllMain(HMODULE module, DWORD reason, void*) {
+    if (reason == DLL_PROCESS_ATTACH)
+        CloseHandle(CreateThread(nullptr, 0, Trainer, module, 0, nullptr));
+    return TRUE;
+}
+```
+
+The names are the game's: a property `Health Max` becomes `Health_Max()`, a blueprint class gets the prefix `A` for actors, `U` for other objects and `F` for structs, as in Unreal's C++. Dump the SDK again after each update of the game: the header refuses another build. On Linux, the header works the same, except `GameThread`, which has nothing to run on: call the functions from a hook of the game's own.
 
 ### Advanced features and the AI Advanced Features window
 
@@ -475,6 +521,7 @@ The example menu then shows an **AI Advanced Features** button, which opens a wi
 | **Pointers** | A pointer chain followed as you type it, and a pointer scan whose results go to the watch list in one click |
 | **What writes** | The instruction watch on an address, with each instruction, decoded, its hit count and the bytes before it |
 | **Patches** | The code the assistant patched, with a button that restores each patch, or all of them |
+| **Engine** | Unreal Engine games: their classes, structs and enums with a filter; a class's parents, properties with offsets, enum values and functions with their signatures; its live objects; the values of an object's properties, updated live and written on Enter; a form that calls a function on the game thread; and the **Dump C++ SDK** button, with the path of the header and a button that copies it |
 
 ### Tools of your own
 
@@ -536,8 +583,11 @@ uih::RegisterTool("teleport", "Moves the player to x, y, z in world units, and r
 <summary>Unity and Unreal Engine</summary>
 
 - `engine_instances` lists the objects of the exact class: ask for each subclass by its name. Destroyed Unity objects are left out. An object is recognized by its header and checked against its fields, so for a class with no reference or boolean field, and not a Unity object, a freed object whose memory was not reused yet can still be listed.
-- On Unreal Engine, the library finds the name table and the object array by their contents and checks every offset it uses against objects all games have, but it was tested on layouts built from Epic's engine headers (5.8 and 4.22), not on shipped games: a game whose engine was modified, or whose object array is encrypted, gets an error. It reads properties of every type and writes numbers, enums, bools and object references, not strings; it does not call functions, and does not list the values of enums.
-- `engine_call` waits for the game's main thread: on Windows, the thread of its window, which runs the call in its next message; on Linux, the thread reading its X events. A game whose main thread is stuck, such as during a loading screen, answers after 10 seconds with an error. Structs cannot be passed as arguments.
+- On Unreal Engine, the library finds the name table and the object array by their contents and checks every offset it uses against objects all games have. It was tested on layouts built from Epic's engine headers (5.8 and 4.22) and on a shipped Unreal Engine 4.27 game; a game whose engine was modified, or whose object array or names are encrypted, gets an error. It reads properties of every type and writes numbers, enums, bools, names, structs and object references, not strings, arrays or maps.
+- Unreal functions are called through `UObject::ProcessEvent`, found as the virtual function that tests `FUNC_Native` in the function's flags, and checked by a call of `KismetMathLibrary::Add_IntInt` before the first one: when other virtual functions test the same flag, the first that returns the right sum is kept. Finding it decodes the game's x86, x64 or ARM64 code. Arguments are numbers, bools, enums, names, strings, structs and objects; delegates, arrays, maps and sets cannot be passed, and a fault in the game's code fails the call without stopping the game or the overlay, on Linux and with MSVC builds on Windows.
+- `engine_call` waits for the game's main thread: on Windows, the thread of its window, which runs the call in its next message; on Linux, the thread reading its X events. A game whose main thread is stuck, such as during a loading screen, answers after 10 seconds with an error. On Unity, structs cannot be passed as arguments.
+- The C++ SDK maps the properties it knows the C++ type of: numbers, bools (bitfields as `BitRef`), enums, names, strings, objects, classes, weak pointers, arrays and structs. Delegates, texts, maps, sets and the like are opaque bytes of their size. By default it holds the game's own packages and the engine types they use; `all` writes every package, several megabytes, which a compiler takes some seconds to read.
+- Only one copy of the hook runs in a process: a second DLL built from this library, injected beside the first, does not start until the first is unloaded, since both would hook the same functions.
 
 </details>
 

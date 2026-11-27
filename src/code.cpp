@@ -18,6 +18,10 @@
 #include <cstdlib>
 #include <cstring>
 
+#ifdef __linux__
+#include <link.h>
+#endif
+
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
 #define UIH_DISASSEMBLER 1
 // As src/zydis_build.c compiles it.
@@ -579,6 +583,262 @@ std::string InstructionBefore(uintptr_t next) {
 #else
     (void)next;
     return "";
+#endif
+}
+
+namespace {
+
+#if UIH_DISASSEMBLER
+#if defined(__x86_64__) || defined(_M_X64)
+constexpr ZydisMachineMode kMode = ZYDIS_MACHINE_MODE_LONG_64;
+#else
+constexpr ZydisMachineMode kMode = ZYDIS_MACHINE_MODE_LEGACY_32;
+#endif
+
+// [register + displacement], without an index: a member of an object.
+bool IsMember(const ZydisDecodedOperand& operand) {
+    return operand.type == ZYDIS_OPERAND_TYPE_MEMORY && operand.mem.base != ZYDIS_REGISTER_NONE && operand.mem.base != ZYDIS_REGISTER_RIP &&
+           operand.mem.base != ZYDIS_REGISTER_EIP && operand.mem.index == ZYDIS_REGISTER_NONE;
+}
+
+bool IsHighByte(ZydisRegister reg) { return reg == ZYDIS_REGISTER_AH || reg == ZYDIS_REGISTER_BH || reg == ZYDIS_REGISTER_CH || reg == ZYDIS_REGISTER_DH; }
+
+// The function a jump at `address` goes to, or `address` when it is no jump.
+uintptr_t FollowJumps(uintptr_t address) {
+    for (int hop = 0; hop < 4; ++hop) {
+        uint8_t bytes[kMaxInstruction];
+        size_t size = ReadUpTo(address, bytes, sizeof(bytes));
+        Instruction in;
+        if (!size || !GetDecoder().Decode(bytes, size, in) || in.decoded.mnemonic != ZYDIS_MNEMONIC_JMP)
+            break;
+        ZyanU64 target = 0;
+        const ZydisDecodedOperand& operand = in.operands[0];
+        if (!ZYAN_SUCCESS(ZydisCalcAbsoluteAddress(&in.decoded, &operand, address, &target)))
+            break;
+        // jmp [rip + x], to an imported function.
+        if (operand.type == ZYDIS_OPERAND_TYPE_MEMORY) {
+            uintptr_t pointer = 0;
+            if (!ReadMemory(static_cast<uintptr_t>(target), &pointer, sizeof(pointer)))
+                break;
+            target = pointer;
+        }
+        address = static_cast<uintptr_t>(target);
+    }
+    return address;
+}
+#endif
+
+// The bytes from `address` to the end of its function, from the unwind
+// tables compilers write for every function, 0 when unknown: the .pdata of
+// 64-bit Windows modules, and the sorted table of .eh_frame_hdr on Linux,
+// where the next function's start bounds the function. Decoding stops there:
+// the end of a function is not always a ret, after a conditional tail call
+// or a call that does not return.
+size_t FunctionExtent(uintptr_t address) {
+#if defined(_WIN64)
+    DWORD64 base = 0;
+    PRUNTIME_FUNCTION entry = RtlLookupFunctionEntry(static_cast<DWORD64>(address), &base, nullptr);
+    if (!entry || base + entry->EndAddress <= address)
+        return 0;
+    return static_cast<size_t>(base + entry->EndAddress - address);
+#elif defined(__linux__)
+    struct Query {
+        uintptr_t address;
+        size_t extent;
+    } query{address, 0};
+    dl_iterate_phdr(
+        [](dl_phdr_info* info, size_t, void* data) -> int {
+            auto* query = static_cast<Query*>(data);
+            const ElfW(Phdr)* frame = nullptr;
+            bool inside = false;
+            for (int i = 0; i < info->dlpi_phnum; ++i) {
+                const ElfW(Phdr)& header = info->dlpi_phdr[i];
+                uintptr_t start = info->dlpi_addr + header.p_vaddr;
+                if (header.p_type == PT_LOAD && query->address >= start && query->address < start + header.p_memsz)
+                    inside = true;
+                if (header.p_type == PT_GNU_EH_FRAME)
+                    frame = &header;
+            }
+            if (!inside)
+                return 0;
+            if (!frame)
+                return 1;
+            // Version 1, the encodings of eh_frame_ptr, fde_count and the table,
+            // which is pairs of int32 (start, FDE) relative to the header.
+            const auto* hdr = reinterpret_cast<const uint8_t*>(info->dlpi_addr + frame->p_vaddr);
+            uint8_t pointer = hdr[1] & 0x0f;
+            size_t pointerSize = pointer == 0x03 || pointer == 0x0b ? 4 : pointer == 0x04 || pointer == 0x0c ? 8 : 0;
+            if (hdr[0] != 1 || !pointerSize || hdr[2] != 0x03 || hdr[3] != 0x3b)
+                return 1;
+            uint32_t count = 0;
+            memcpy(&count, hdr + 4 + pointerSize, sizeof(count));
+            const uint8_t* table = hdr + 8 + pointerSize;
+            auto startAt = [&](uint32_t index) {
+                int32_t offset = 0;
+                memcpy(&offset, table + static_cast<size_t>(index) * 8, sizeof(offset));
+                return reinterpret_cast<uintptr_t>(hdr) + static_cast<intptr_t>(offset);
+            };
+            // The first function that starts after the address.
+            uint32_t low = 0;
+            uint32_t high = count;
+            while (low < high) {
+                uint32_t middle = low + (high - low) / 2;
+                if (startAt(middle) <= query->address)
+                    low = middle + 1;
+                else
+                    high = middle;
+            }
+            if (low > 0 && low < count)
+                query->extent = static_cast<size_t>(startAt(low) - query->address);
+            return 1;
+        },
+        &query);
+    return query.extent;
+#else
+    (void)address;
+    return 0;
+#endif
+}
+
+#if defined(__aarch64__) || defined(_M_ARM64)
+// ldr wT, [xN, #imm], ldrb, ldur, then tbz/tbnz wT, #bit or tst wT, #mask.
+bool TestsBitsArm64(uintptr_t function, uint32_t displacement, uint32_t mask, size_t length) {
+    if (size_t extent = FunctionExtent(function))
+        length = std::min(length, extent);
+    std::vector<uint32_t> code(length / 4);
+    if (code.empty() || !ReadMemory(function, code.data(), code.size() * 4))
+        return false;
+    // The byte of the value each register holds, -1 when none.
+    int loaded[32];
+    for (int& shift : loaded)
+        shift = -1;
+    int64_t reach = 0;
+    for (size_t i = 0; i < code.size(); ++i) {
+        uint32_t in = code[i];
+        uint32_t rt = in & 0x1f;
+        int64_t offset = -1;
+        if ((in & 0xffc00000) == 0xb9400000)
+            offset = ((in >> 10) & 0xfff) * 4;  // ldr w, [x, #imm]
+        else if ((in & 0xffc00000) == 0x39400000)
+            offset = (in >> 10) & 0xfff;  // ldrb w, [x, #imm]
+        else if ((in & 0xffe00c00) == 0xb8400000)
+            offset = static_cast<int64_t>(static_cast<int32_t>(in << 11) >> 23);  // ldur w, [x, #simm9]
+        if (offset >= 0) {
+            int64_t delta = offset - static_cast<int64_t>(displacement);
+            loaded[rt] = delta >= 0 && delta < 4 ? static_cast<int>(delta) : -1;
+            continue;
+        }
+        if ((in & 0x7e000000) == 0x36000000 && loaded[rt] >= 0) {
+            uint32_t bit = ((in >> 31) << 5) | ((in >> 19) & 0x1f);
+            if (bit < 32 && (uint64_t{1} << (bit + 8 * loaded[rt])) == mask)
+                return true;
+        }
+        // tst w, #imm (ands wzr): a single bit is imms 0, rotated right by immr.
+        if ((in & 0xffc0001f) == 0x7200001f && loaded[(in >> 5) & 0x1f] >= 0 && ((in >> 10) & 0x3f) == 0) {
+            uint32_t rotate = (in >> 16) & 0x3f;
+            uint32_t bit = (32 - rotate) % 32;
+            if ((uint64_t{1} << (bit + 8 * loaded[(in >> 5) & 0x1f])) == mask)
+                return true;
+        }
+        // The furthest instruction a branch seen so far goes to: a ret or b
+        // after it ends the function, whatever the compiler placed next.
+        int64_t target = -1;
+        if ((in & 0xfc000000) == 0x14000000)
+            target = static_cast<int64_t>(i) + (static_cast<int32_t>(in << 6) >> 6);  // b
+        else if ((in & 0xff000010) == 0x54000000 || (in & 0x7e000000) == 0x34000000)
+            target = static_cast<int64_t>(i) + (static_cast<int32_t>(in << 8) >> 13);  // b.cond, cbz, cbnz
+        else if ((in & 0x7e000000) == 0x36000000)
+            target = static_cast<int64_t>(i) + (static_cast<int32_t>(in << 13) >> 18);  // tbz, tbnz
+        if (target > reach)
+            reach = target;
+        if ((in == 0xd65f03c0 || (in & 0xfc000000) == 0x14000000) && static_cast<int64_t>(i) >= reach)
+            break;  // ret, or a tail call
+        // Another write of the register forgets it.
+        loaded[rt] = -1;
+    }
+    return false;
+}
+#endif
+
+} // namespace
+
+bool CodeTestsBits(uintptr_t function, uint32_t displacement, uint32_t mask, size_t length) {
+#if UIH_DISASSEMBLER
+    const Decoder& decoder = GetDecoder();
+    uintptr_t start = FollowJumps(function);
+    if (size_t extent = FunctionExtent(start))
+        length = std::min(length, extent);
+    std::vector<uint8_t> bytes(length + kMaxInstruction);
+    size_t size = ReadUpTo(start, bytes.data(), bytes.size());
+    // The registers loaded from the value, and the byte of the value they start at.
+    std::vector<std::pair<ZydisRegister, int>> loaded;
+    auto forget = [&](ZydisRegister reg) {
+        loaded.erase(std::remove_if(loaded.begin(), loaded.end(), [&](const std::pair<ZydisRegister, int>& entry) { return entry.first == reg; }),
+                     loaded.end());
+    };
+    size_t reach = 0;
+    for (size_t at = 0; at < std::min(size, length);) {
+        // endbr64 or endbr32 past every branch: the next function, after one
+        // that ended with a call that does not return, such as a sanitizer's report.
+        if (at > 0 && at >= reach && at + 4 <= size && bytes[at] == 0xf3 && bytes[at + 1] == 0x0f && bytes[at + 2] == 0x1e &&
+            (bytes[at + 3] == 0xfa || bytes[at + 3] == 0xfb))
+            break;
+        Instruction in;
+        if (!decoder.Decode(bytes.data() + at, size - at, in))
+            break;
+        const ZydisDecodedInstruction& d = in.decoded;
+        const ZydisDecodedOperand* operands = in.operands;
+        size_t next = at + d.length;
+        // The furthest byte a branch seen so far goes to: a ret or jmp after it
+        // ends the function, whatever the compiler placed next (MSVC pads with
+        // int3, GCC and Clang with multi-byte nops or the next function).
+        bool jump = d.mnemonic == ZYDIS_MNEMONIC_JMP;
+        if ((jump || d.meta.category == ZYDIS_CATEGORY_COND_BR) && d.operand_count_visible >= 1 &&
+            operands[0].type == ZYDIS_OPERAND_TYPE_IMMEDIATE && operands[0].imm.is_relative) {
+            ZyanU64 target = 0;
+            if (ZYAN_SUCCESS(ZydisCalcAbsoluteAddress(&d, &operands[0], start + at, &target)) && target > start + at)
+                reach = std::max<size_t>(reach, static_cast<size_t>(target - start));
+        }
+        if (d.mnemonic == ZYDIS_MNEMONIC_INT3 || ((d.mnemonic == ZYDIS_MNEMONIC_RET || jump) && next > reach))
+            break;
+        bool testing = d.mnemonic == ZYDIS_MNEMONIC_TEST || d.mnemonic == ZYDIS_MNEMONIC_BT || d.mnemonic == ZYDIS_MNEMONIC_AND;
+        if (testing && d.operand_count_visible >= 2 && operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
+            uint64_t immediate = operands[1].imm.value.u;
+            if (operands[0].size < 64)
+                immediate &= (uint64_t{1} << operands[0].size) - 1;
+            if (d.mnemonic == ZYDIS_MNEMONIC_BT)
+                immediate = immediate < 32 ? uint64_t{1} << immediate : 0;
+            int shift = -1;
+            if (IsMember(operands[0])) {
+                int64_t delta = operands[0].mem.disp.value - static_cast<int64_t>(displacement);
+                shift = delta >= 0 && delta < 4 ? static_cast<int>(delta) : -1;
+            } else if (operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER) {
+                ZydisRegister reg = ZydisRegisterGetLargestEnclosing(kMode, operands[0].reg.value);
+                for (const auto& entry : loaded)
+                    if (entry.first == reg)
+                        shift = entry.second + (IsHighByte(operands[0].reg.value) ? 1 : 0);
+            }
+            if (shift >= 0 && immediate && (immediate << (8 * shift)) == mask)
+                return true;
+        }
+        // mov, movzx or movsx of the value into a register.
+        bool load = (d.mnemonic == ZYDIS_MNEMONIC_MOV || d.mnemonic == ZYDIS_MNEMONIC_MOVZX || d.mnemonic == ZYDIS_MNEMONIC_MOVSX) &&
+                    d.operand_count_visible >= 2 && operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER && IsMember(operands[1]);
+        if (operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER && (operands[0].actions & ZYDIS_OPERAND_ACTION_MASK_WRITE)) {
+            ZydisRegister reg = ZydisRegisterGetLargestEnclosing(kMode, operands[0].reg.value);
+            forget(reg);
+            int64_t delta = load ? operands[1].mem.disp.value - static_cast<int64_t>(displacement) : -1;
+            if (delta >= 0 && delta < 4)
+                loaded.push_back({reg, static_cast<int>(delta)});
+        }
+        at = next;
+    }
+    return false;
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    return TestsBitsArm64(function, displacement, mask, length);
+#else
+    (void)function, (void)displacement, (void)mask, (void)length;
+    return false;
 #endif
 }
 

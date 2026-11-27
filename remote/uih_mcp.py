@@ -351,15 +351,16 @@ TOOLS += [
         "description": "Reads a field of an object, or a static field without an object, with its type: numbers, booleans, strings, "
         "enums as numbers, structs such as Vector3 with their fields, references as the address and class of the object. With a "
         "value, writes it first. Reach the fields of a struct with a dot: position.x. Unreal properties belong to objects: give one; "
-        "the library writes numbers, enums, bools and object references there." + MEMORY_NOTE,
+        "the library writes numbers, enums (by value or name), bools, object references and structs, as a JSON object of their "
+        "fields, there." + MEMORY_NOTE,
         "inputSchema": {
             "type": "object",
             "properties": {
                 "class": CLASS,
                 "field": {"type": "string", "description": "Such as health, or position.x."},
                 "object": OBJECT,
-                "value": {"type": ["string", "number", "boolean", "null"], "description": "A number, true or false, a string, null, or "
-                          "the address of an object for a reference."},
+                "value": {"type": ["string", "number", "boolean", "null", "object"], "description": "A number, true or false, a "
+                          "string, null, the address of an object for a reference, or a JSON object for an Unreal struct."},
             },
             "required": ["class", "field"],
         },
@@ -368,13 +369,16 @@ TOOLS += [
         "name": "engine_call",
         "description": "Calls a method of the game's scripts, on its main thread, such as Player.Heal(50) or GameManager.LoadLevel(2), "
         "and returns its result, or the exception it threw. Risky: the method runs as the game would run it, so a wrong call can break "
-        "the game's state. Arguments are numbers, booleans, strings, null or object addresses; structs cannot be passed. Unity only." +
-        MEMORY_NOTE + ADVANCED_NOTE,
+        "the game's state. Arguments are numbers, booleans, strings, null or object addresses. On Unity, structs cannot be passed. On "
+        "Unreal, the function runs through UObject::ProcessEvent: a struct is a JSON object of its fields, such as {\"X\": 1, \"Y\": 2, "
+        "\"Z\": 3}, an enum its value or name, and the out parameters come back after the return value; a static function, such as "
+        "those of KismetMathLibrary, takes no object." + MEMORY_NOTE + ADVANCED_NOTE,
         "inputSchema": {
             "type": "object",
             "properties": {
                 "class": CLASS,
-                "method": {"type": "string", "description": "Its name, such as Heal; a property getter is get_Name."},
+                "method": {"type": "string", "description": "Its name, such as Heal; a property getter is get_Name. Unreal names may "
+                           "have spaces, such as Get Health Ratio."},
                 "object": {**OBJECT, "description": "For a method that is not static: the object it is called on."},
                 "arguments": {"type": "array", "description": "In the order of the parameters; the method is picked by its name and "
                               "number of parameters.", "items": {}},
@@ -385,6 +389,22 @@ TOOLS += [
 ]
 
 TOOLS += [
+    {
+        "name": "engine_dump",
+        "description": "Unreal Engine games: writes a C++ header of the game's classes, structs, enums and functions, an SDK for a "
+        "DLL of the player's own, such as a trainer, injected into the game: it includes the header, calls uesdk::WaitForInit(), reads "
+        "the properties through accessors such as player->Health() and calls the functions through wrappers, on the game thread with "
+        "uesdk::GameThread::Run(). Returns the full path of the file, in the temporary directory, and what it holds. The header finds "
+        "the engine again at each launch and checks it is the same build of the game; dump it again after an update." + MEMORY_NOTE,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "scope": {"type": "string", "description": "game (the default): the game's own packages, /Script/<game> and the /Game/ "
+                          "blueprints, with the engine types they use; all: every package; or packages separated by commas, such as "
+                          "/Script/Engine,/Game."},
+            },
+        },
+    },
     {
         "name": "memory_disassemble",
         "description": "Disassembles the code of the game at an address: each x86 or x64 instruction in Intel syntax with its address, "
@@ -828,10 +848,14 @@ def memory_tool(name, args):
 
 
 def engine_word(value, what):
-    """One word of an engine command: class, field, method and object names have no spaces."""
+    """One word of an engine command: a name with spaces, such as an Unreal blueprint's, goes between double quotes."""
     word = str(value or "").strip()
-    if not word or any(c.isspace() for c in word):
-        raise GameError(f"Give the {what}, without spaces.")
+    if not word:
+        raise GameError(f"Give the {what}.")
+    if any(c.isspace() for c in word):
+        if '"' in word or "\n" in word:
+            raise GameError(f"The {what} cannot hold double quotes or line breaks.")
+        return f'"{word}"'
     return word
 
 
@@ -843,6 +867,8 @@ def engine_value(value):
         return "true" if value else "false"
     if isinstance(value, (int, float)):
         return repr(value)
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
     raw = str(value).strip()
     if raw.lower() in ("true", "false", "null") or re.fullmatch(r"[-+]?(0x[0-9a-fA-F]+|[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)", raw):
         return raw
@@ -863,6 +889,15 @@ def engine_tool(name, args):
         version = f" {words[3]}" if words[3] != "-" else ""
         return (f"{words[1].capitalize()}{version} with {'IL2CPP' if words[2] == 'il2cpp' else 'Mono'} ({words[4]}). "
                 "The game's scripts are usually in the assembly Assembly-CSharp: list its classes with engine_classes.")
+    if name == "engine_dump":
+        scope = str(args.get("scope", "") or "").strip()
+        _, data = request("engine dump" + (f" {engine_word(scope, 'scope')}" if scope else ""), payload=text_payload)
+        lines = data.decode("utf-8", "replace").splitlines()
+        if not lines:
+            raise GameError("The library wrote no SDK.")
+        return (f"The SDK is in {lines[0]}\n" + "\n".join(lines[1:]) +
+                "\nInclude it in the DLL's code (C++17), call uesdk::WaitForInit() on a thread of the DLL, then call the game's "
+                "functions inside uesdk::GameThread::Run(), and uesdk::Shutdown() before the DLL unloads.")
     if name == "engine_classes":
         filter_text = str(args.get("filter", "") or "").strip()
         assembly = str(args.get("assembly", "") or "").strip()
