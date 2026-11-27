@@ -36,17 +36,35 @@ jobs:
         with:
           name: Universal-ImGui-Hook-msvc-${{ matrix.arch }}
           path: build/Release/Universal-ImGui-Hook.dll
-      # The same library with the chat with Claude and every tool on, released as -ai.
-      - name: Build the AI library
+      # The same library with some settings on, released as -remote, -memory,
+      # -advanced and -ai (see example/config.cpp).
+      - name: Build the variants
+        shell: bash
         run: |
-          cmake -S . -B build-ai -A ${{ matrix.arch }} -DUIH_EXAMPLE_AI=ON
-          cmake --build build-ai --config Release --target uih_example
-      - name: Proxy test of the AI library
-        run: build\tests\Release\uih_host.exe --proxy build-ai\Release\Universal-ImGui-Hook.dll
+          for variant in remote memory advanced ai; do
+            # One build folder: only example/config.cpp builds again.
+            cmake -S . -B build-variant -A ${{ matrix.arch }} -DUIH_EXAMPLE_VARIANT=$variant
+            cmake --build build-variant --config Release --target uih_example
+            build/tests/Release/uih_host.exe --proxy build-variant/Release/Universal-ImGui-Hook.dll
+            mkdir -p variants/$variant
+            cp build-variant/Release/Universal-ImGui-Hook.dll variants/$variant/
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Universal-ImGui-Hook-msvc-${{ matrix.arch }}-remote
+          path: variants/remote/Universal-ImGui-Hook.dll
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Universal-ImGui-Hook-msvc-${{ matrix.arch }}-memory
+          path: variants/memory/Universal-ImGui-Hook.dll
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Universal-ImGui-Hook-msvc-${{ matrix.arch }}-advanced
+          path: variants/advanced/Universal-ImGui-Hook.dll
       - uses: actions/upload-artifact@v7
         with:
           name: Universal-ImGui-Hook-msvc-${{ matrix.arch }}-ai
-          path: build-ai/Release/Universal-ImGui-Hook.dll
+          path: variants/ai/Universal-ImGui-Hook.dll
 
   # The CTest suite on a runner without GPU: WARP for Direct3D, Mesa's
   # llvmpipe and lavapipe for OpenGL and Vulkan.
@@ -411,16 +429,34 @@ jobs:
         with:
           name: Universal-ImGui-Hook-linux-${{ matrix.arch }}
           path: build/linux/Universal-ImGui-Hook.so
-      # The same library with the chat with Claude and every tool on, released as -ai.
-      - name: Build the AI library
+      # The same library with some settings on, released as -remote, -memory,
+      # -advanced and -ai (see example/config.cpp).
+      - name: Build the variants
         run: |
-          cmake --preset linux -B build/linux-ai -DUIH_EXAMPLE_AI=ON
-          cmake --build build/linux-ai --target uih_example
-          if readelf -d build/linux-ai/Universal-ImGui-Hook.so | grep -E 'libstdc\+\+|libgcc_s'; then exit 1; fi
+          for variant in remote memory advanced ai; do
+            # One build folder: only example/config.cpp builds again.
+            cmake --preset linux -B build/linux-variant -DUIH_EXAMPLE_VARIANT=$variant
+            cmake --build build/linux-variant --target uih_example
+            if readelf -d build/linux-variant/Universal-ImGui-Hook.so | grep -E 'libstdc\+\+|libgcc_s'; then exit 1; fi
+            mkdir -p variants/$variant
+            cp build/linux-variant/Universal-ImGui-Hook.so variants/$variant/
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Universal-ImGui-Hook-linux-${{ matrix.arch }}-remote
+          path: variants/remote/Universal-ImGui-Hook.so
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Universal-ImGui-Hook-linux-${{ matrix.arch }}-memory
+          path: variants/memory/Universal-ImGui-Hook.so
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Universal-ImGui-Hook-linux-${{ matrix.arch }}-advanced
+          path: variants/advanced/Universal-ImGui-Hook.so
       - uses: actions/upload-artifact@v7
         with:
           name: Universal-ImGui-Hook-linux-${{ matrix.arch }}-ai
-          path: build/linux-ai/Universal-ImGui-Hook.so
+          path: variants/ai/Universal-ImGui-Hook.so
       # The library with the remote control on, for games-linux: not released.
       - uses: actions/upload-artifact@v7
         with:
