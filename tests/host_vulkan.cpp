@@ -7,6 +7,7 @@
 
 #include <vulkan/vulkan.h>
 #ifndef _WIN32
+#include <vulkan/vulkan_wayland.h>
 #include <vulkan/vulkan_xlib.h>
 #endif
 
@@ -46,7 +47,7 @@ bool HasLayer(PFN_vkGetInstanceProcAddr getInstanceProcAddr, const char* name) {
 }
 
 #ifdef _WIN32
-const char* const kSurfaceExtension = VK_KHR_WIN32_SURFACE_EXTENSION_NAME;
+const char* SurfaceExtension(HostWindow) { return VK_KHR_WIN32_SURFACE_EXTENSION_NAME; }
 
 PFN_vkGetInstanceProcAddr LoadGetInstanceProcAddr(const Options&) {
     HMODULE module = LoadLibraryW(L"vulkan-1.dll");
@@ -63,7 +64,7 @@ VkSurfaceKHR CreateSurface(PFN_vkGetInstanceProcAddr getInstanceProcAddr, VkInst
     return create && create(instance, &info, nullptr, &surface) == VK_SUCCESS ? surface : VK_NULL_HANDLE;
 }
 #else
-const char* const kSurfaceExtension = VK_KHR_XLIB_SURFACE_EXTENSION_NAME;
+const char* SurfaceExtension(HostWindow window) { return window.wlSurface ? VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME : VK_KHR_XLIB_SURFACE_EXTENSION_NAME; }
 
 PFN_vkGetInstanceProcAddr LoadGetInstanceProcAddr(const Options& options) {
     void* module = dlopen(options.vulkanLibrary.empty() ? "libvulkan.so.1" : options.vulkanLibrary.c_str(), RTLD_NOW);
@@ -71,6 +72,15 @@ PFN_vkGetInstanceProcAddr LoadGetInstanceProcAddr(const Options& options) {
 }
 
 VkSurfaceKHR CreateSurface(PFN_vkGetInstanceProcAddr getInstanceProcAddr, VkInstance instance, HostWindow window) {
+    if (window.wlSurface) {
+        auto create = reinterpret_cast<PFN_vkCreateWaylandSurfaceKHR>(getInstanceProcAddr(instance, "vkCreateWaylandSurfaceKHR"));
+        VkWaylandSurfaceCreateInfoKHR info{};
+        info.sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR;
+        info.display = static_cast<wl_display*>(window.wlDisplay);
+        info.surface = static_cast<wl_surface*>(window.wlSurface);
+        VkSurfaceKHR surface = VK_NULL_HANDLE;
+        return create && create(instance, &info, nullptr, &surface) == VK_SUCCESS ? surface : VK_NULL_HANDLE;
+    }
     auto create = reinterpret_cast<PFN_vkCreateXlibSurfaceKHR>(getInstanceProcAddr(instance, "vkCreateXlibSurfaceKHR"));
     VkXlibSurfaceCreateInfoKHR info{};
     info.sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR;
@@ -87,6 +97,7 @@ VkSurfaceKHR CreateSurface(PFN_vkGetInstanceProcAddr getInstanceProcAddr, VkInst
     X(vkGetPhysicalDeviceSurfaceSupportKHR)      \
     X(vkGetPhysicalDeviceSurfaceFormatsKHR)      \
     X(vkGetPhysicalDeviceSurfaceCapabilitiesKHR) \
+    X(vkGetPhysicalDeviceSurfacePresentModesKHR) \
     X(vkCreateDevice)                            \
     X(vkGetDeviceProcAddr)
 
@@ -111,6 +122,14 @@ VkSurfaceKHR CreateSurface(PFN_vkGetInstanceProcAddr getInstanceProcAddr, VkInst
     X(vkQueueSubmit)                \
     X(vkQueuePresentKHR)            \
     X(vkDeviceWaitIdle)
+
+// Wayland surfaces take the size of the swap chain: the window's at the start.
+VkExtent2D Extent(const VkSurfaceCapabilitiesKHR& capabilities) {
+    if (capabilities.currentExtent.width != 0xFFFFFFFF)
+        return capabilities.currentExtent;
+    return {std::clamp<uint32_t>(kWidth, capabilities.minImageExtent.width, capabilities.maxImageExtent.width),
+            std::clamp<uint32_t>(kHeight, capabilities.minImageExtent.height, capabilities.maxImageExtent.height)};
+}
 
 struct VulkanHost : Host {
     static constexpr uint32_t kFrames = 2;
@@ -145,7 +164,7 @@ struct VulkanHost : Host {
         VkApplicationInfo appInfo{};
         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
         appInfo.apiVersion = VK_API_VERSION_1_0;
-        std::vector<const char*> instanceExtensions = {VK_KHR_SURFACE_EXTENSION_NAME, kSurfaceExtension};
+        std::vector<const char*> instanceExtensions = {VK_KHR_SURFACE_EXTENSION_NAME, SurfaceExtension(window)};
         const char* const validationLayer = "VK_LAYER_KHRONOS_validation";
         const bool validation = getenv("UIH_TEST_VULKAN_VALIDATION") != nullptr;
         if (validation) {
@@ -256,7 +275,7 @@ struct VulkanHost : Host {
         swapchainInfo.minImageCount = std::max<uint32_t>(2, capabilities.minImageCount);
         swapchainInfo.imageFormat = format.format;
         swapchainInfo.imageColorSpace = format.colorSpace;
-        swapchainInfo.imageExtent = capabilities.currentExtent;
+        swapchainInfo.imageExtent = Extent(capabilities);
         swapchainInfo.imageArrayLayers = 1;
         swapchainInfo.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
         if (!options.transferOnly)
@@ -265,6 +284,16 @@ struct VulkanHost : Host {
         swapchainInfo.preTransform = capabilities.currentTransform;
         swapchainInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
         swapchainInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+        // With --bench, the frames are not held to the refresh rate.
+        if (options.benchFrames > 0) {
+            uint32_t modeCount = 0;
+            vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &modeCount, nullptr);
+            std::vector<VkPresentModeKHR> modes(modeCount);
+            vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &modeCount, modes.data());
+            for (VkPresentModeKHR wanted : {VK_PRESENT_MODE_MAILBOX_KHR, VK_PRESENT_MODE_IMMEDIATE_KHR})
+                if (swapchainInfo.presentMode == VK_PRESENT_MODE_FIFO_KHR && std::find(modes.begin(), modes.end(), wanted) != modes.end())
+                    swapchainInfo.presentMode = wanted;
+        }
         swapchainInfo.clipped = VK_TRUE;
         Settle(options);
         if (vkCreateSwapchainKHR(device, &swapchainInfo, nullptr, &swapchain) != VK_SUCCESS)
@@ -318,7 +347,7 @@ struct VulkanHost : Host {
         vkDeviceWaitIdle(device);
         VkSurfaceCapabilitiesKHR capabilities{};
         vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, swapchainInfo.surface, &capabilities);
-        swapchainInfo.imageExtent = capabilities.currentExtent;
+        swapchainInfo.imageExtent = Extent(capabilities);
         swapchainInfo.oldSwapchain = swapchain;
         VkSwapchainKHR replacement = VK_NULL_HANDLE;
         VkResult result = vkCreateSwapchainKHR(device, &swapchainInfo, nullptr, &replacement);

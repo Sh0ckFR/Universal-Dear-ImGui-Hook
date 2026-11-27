@@ -90,6 +90,7 @@ if(WIN32)
         src/windows/dinput.cpp
         src/windows/remote.cpp
         src/windows/breakpoints.cpp
+        src/windows/code.cpp
         src/windows/xinput.cpp
         src/windows/d3d9.cpp
         src/windows/dxgi.cpp
@@ -109,9 +110,11 @@ else()
         src/linux/clocks.cpp
         src/linux/x11.cpp
         src/linux/events.cpp
+        src/linux/wayland.cpp
         src/linux/opengl.cpp
         src/linux/remote.cpp
-        src/linux/breakpoints.cpp)
+        src/linux/breakpoints.cpp
+        src/linux/code.cpp)
     target_link_libraries(uih PUBLIC uih_imgui PRIVATE PkgConfig::UIH_XCB Threads::Threads ${CMAKE_DL_LIBS})
     # Only the functions the hook stands for are visible to the target process.
     target_link_options(uih INTERFACE LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/src/linux/exports.map)
@@ -120,9 +123,9 @@ else()
     set_target_properties(uih uih_imgui PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()
 if(MSVC)
-    target_compile_options(uih PRIVATE /W4 /permissive-)
+    target_compile_options(uih PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:/W4;/permissive->")
 else()
-    target_compile_options(uih PRIVATE -Wall -Wextra)
+    target_compile_options(uih PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra>")
 endif()
 add_library(uih::uih ALIAS uih)
 

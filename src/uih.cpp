@@ -699,6 +699,8 @@ void Stop() {
     // The application gets its input and its cursor back.
     SetMenuOpen(false);
     remote::Stop();
+    // The code the assistant patched is the game's own again.
+    remote::RestorePatches();
     // The game runs in real time again, from where its clocks stood.
     timing::Reset();
 

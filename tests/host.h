@@ -29,6 +29,9 @@ using HostWindow = HWND;
 struct HostWindow {
     Display* display;
     Window window;
+    // A native Wayland surface instead (tests/host_wayland.cpp): wl_display and wl_surface.
+    void* wlDisplay = nullptr;
+    void* wlSurface = nullptr;
 };
 #endif
 
@@ -51,8 +54,8 @@ struct Options {
     bool decoyQueue = false;
     // "srgb" or "float": a back buffer that stores linear values.
     std::string format;
-    // "raw" or "directinput" on Windows, "x11" on Linux: checks the input the
-    // host reads while the menu is open.
+    // "raw" or "directinput" on Windows, "x11" or "wayland" on Linux: checks
+    // the input the host reads while the menu is open.
     std::string input;
     // Fake xinput1_4.dll driving the controller scenario.
     std::string gamepad;
@@ -118,6 +121,9 @@ struct Options {
     bool resubclass = false;
     // Starts the hook through the C interface of include/uih_c.h (tests/c_api.c).
     bool cApi = false;
+    // --bench N: the time of N frames, vsync off, without the overlay, with
+    // its menu closed, with it open, and without it again after Stop().
+    int benchFrames = 0;
     // Deletes the OpenGL context while the menu is open and renders with a
     // new one, as games do when the video settings change.
     bool recreateContext = false;
@@ -140,6 +146,8 @@ struct Options {
 
 // Pixel of the probe drawn by tests/input_preload.cpp in the Linux input scenario.
 constexpr int kInputProbe[2] = {350, 250};
+// Center of the probe that tests/input_preload.cpp turns green once the menu got a left click on it.
+constexpr int kClickProbe[2] = {550, 250};
 
 // Display mode of the fullscreen scenario.
 constexpr int kFullscreen[2] = {800, 600};

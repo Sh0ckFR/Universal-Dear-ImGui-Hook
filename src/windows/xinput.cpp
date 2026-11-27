@@ -78,8 +78,8 @@ struct XInputHooks {
 
 } // namespace
 
-const Renderer kXInput14Hooks = {"XInput 1.4", kModules[0], XInputHooks<0>::Install, XInputHooks<0>::Uninstall, XInputHooks<0>::Teardown};
-const Renderer kXInput13Hooks = {"XInput 1.3", kModules[1], XInputHooks<1>::Install, XInputHooks<1>::Uninstall, XInputHooks<1>::Teardown};
-const Renderer kXInput910Hooks = {"XInput 9.1.0", kModules[2], XInputHooks<2>::Install, XInputHooks<2>::Uninstall, XInputHooks<2>::Teardown};
+const Renderer kXInput14Hooks = {"XInput 1.4", {kModules[0]}, XInputHooks<0>::Install, XInputHooks<0>::Uninstall, XInputHooks<0>::Teardown};
+const Renderer kXInput13Hooks = {"XInput 1.3", {kModules[1]}, XInputHooks<1>::Install, XInputHooks<1>::Uninstall, XInputHooks<1>::Teardown};
+const Renderer kXInput910Hooks = {"XInput 9.1.0", {kModules[2]}, XInputHooks<2>::Install, XInputHooks<2>::Uninstall, XInputHooks<2>::Teardown};
 
 } // namespace uih::detail

@@ -27,11 +27,26 @@
         vkQueuePresentKHR;
         vkCreateXcbSurfaceKHR;
         vkCreateXlibSurfaceKHR;
+        vkCreateWaylandSurfaceKHR;
         vkDestroySurfaceKHR;
 
         xcb_wait_for_event;
         xcb_poll_for_event;
         xcb_poll_for_queued_event;
+
+        wl_proxy_add_listener;
+        wl_proxy_get_listener;
+        wl_proxy_destroy;
+        wl_proxy_marshal_flags;
+        wl_proxy_marshal_array_flags;
+        wl_display_dispatch;
+        wl_display_dispatch_pending;
+        wl_display_dispatch_queue;
+        wl_display_dispatch_queue_pending;
+        wl_display_roundtrip;
+        wl_display_roundtrip_queue;
+        wl_display_disconnect;
+        wl_egl_window_create;
 
         clock_gettime;
 

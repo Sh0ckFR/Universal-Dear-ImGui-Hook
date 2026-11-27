@@ -13,6 +13,7 @@ typedef unsigned long VisualID;
 #ifndef _WIN32
 #include <vulkan/vulkan_xcb.h>
 #include <vulkan/vulkan_xlib.h>
+#include <vulkan/vulkan_wayland.h>
 #endif
 
 #include <algorithm>
@@ -1247,7 +1248,7 @@ void Uninstall() {
 
 } // namespace
 
-const Renderer kVulkanRenderer = {"Vulkan", L"vulkan-1.dll", Install, Uninstall, Teardown};
+const Renderer kVulkanRenderer = {"Vulkan", {L"vulkan-1.dll"}, Install, Uninstall, Teardown};
 
 bool VulkanPresenting() { return GetTickCount64() - g_lastPresent < 500; }
 
@@ -1257,6 +1258,7 @@ bool VulkanPresenting() { return GetTickCount64() - g_lastPresent < 500; }
 
 PFN_vkCreateXcbSurfaceKHR g_createXcbSurface = nullptr;
 PFN_vkCreateXlibSurfaceKHR g_createXlibSurface = nullptr;
+PFN_vkCreateWaylandSurfaceKHR g_createWaylandSurface = nullptr;
 
 template <typename Fn>
 Fn Next(const char* name) {
@@ -1271,6 +1273,7 @@ void Load() {
         g_destroySurface = Next<PFN_vkDestroySurfaceKHR>("vkDestroySurfaceKHR");
         g_createXcbSurface = Next<PFN_vkCreateXcbSurfaceKHR>("vkCreateXcbSurfaceKHR");
         g_createXlibSurface = Next<PFN_vkCreateXlibSurfaceKHR>("vkCreateXlibSurfaceKHR");
+        g_createWaylandSurface = Next<PFN_vkCreateWaylandSurfaceKHR>("vkCreateWaylandSurfaceKHR");
         Icd loader;
         for (int i = 0; i < kHookCount; ++i)
             loader.originals[i] = interpose::kVulkan.Next(kHookNames[i]);
@@ -1320,6 +1323,7 @@ UIH_EXPORT void VKAPI_CALL vkGetDeviceQueue2(VkDevice device, const VkDeviceQueu
 
 UIH_EXPORT VkResult VKAPI_CALL vkCreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR* info, const VkAllocationCallbacks* allocator, VkSwapchainKHR* swapchain) {
     Load();
+    wayland::GraphicsCall graphics;
     return IcdHooks<0>::CreateSwapchainKHR(device, info, allocator, swapchain);
 }
 
@@ -1330,16 +1334,19 @@ UIH_EXPORT void VKAPI_CALL vkDestroySwapchainKHR(VkDevice device, VkSwapchainKHR
 
 UIH_EXPORT VkResult VKAPI_CALL vkAcquireNextImageKHR(VkDevice device, VkSwapchainKHR swapchain, uint64_t timeout, VkSemaphore semaphore, VkFence fence, uint32_t* index) {
     Load();
+    wayland::GraphicsCall graphics;
     return IcdHooks<0>::AcquireNextImageKHR(device, swapchain, timeout, semaphore, fence, index);
 }
 
 UIH_EXPORT VkResult VKAPI_CALL vkAcquireNextImage2KHR(VkDevice device, const VkAcquireNextImageInfoKHR* info, uint32_t* index) {
     Load();
+    wayland::GraphicsCall graphics;
     return IcdHooks<0>::AcquireNextImage2KHR(device, info, index);
 }
 
 UIH_EXPORT VkResult VKAPI_CALL vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* info) {
     Load();
+    wayland::GraphicsCall graphics;
     return IcdHooks<0>::QueuePresentKHR(queue, info);
 }
 
@@ -1358,6 +1365,19 @@ UIH_EXPORT VkResult VKAPI_CALL vkCreateXlibSurfaceKHR(VkInstance instance, const
     VkResult result = g_createXlibSurface(instance, info, allocator, surface);
     if (result == VK_SUCCESS && info && surface)
         RecordSurface(*surface, static_cast<NativeWindow>(info->window));
+    return result;
+}
+
+// The window of a Wayland surface is not an X11 window: the overlay reads the input of the application.
+UIH_EXPORT VkResult VKAPI_CALL vkCreateWaylandSurfaceKHR(VkInstance instance, const VkWaylandSurfaceCreateInfoKHR* info, const VkAllocationCallbacks* allocator,
+                                                         VkSurfaceKHR* surface) {
+    Load();
+    ScopedCall call;
+    VkResult result = g_createWaylandSurface(instance, info, allocator, surface);
+    if (result == VK_SUCCESS && info && surface) {
+        RecordSurface(*surface, 0);
+        wayland::RecordSurface(info->surface);
+    }
     return result;
 }
 
@@ -1385,6 +1405,7 @@ const interpose::Function kExports[] = {
     UIH_VK_EXPORT(vkQueuePresentKHR),
     UIH_VK_EXPORT(vkCreateXcbSurfaceKHR),
     UIH_VK_EXPORT(vkCreateXlibSurfaceKHR),
+    UIH_VK_EXPORT(vkCreateWaylandSurfaceKHR),
     UIH_VK_EXPORT(vkDestroySurfaceKHR),
 };
 #undef UIH_VK_EXPORT

@@ -22,6 +22,9 @@ Fn GetProc(HMODULE module, const char* name) {
 // Hooks ------------------------------------------------------------------
 
 bool CreateHook(const char* name, void* target, void* detour, void** original);
+// True when address..address+size overlaps the code of a hook of the overlay:
+// the jump at the start of the function, its trampoline or its detour.
+bool OverlapsOwnHook(uintptr_t address, size_t size);
 // Resolves a virtual method from an object's vtable.
 inline void* VirtualMethod(void* object, size_t index) {
     return (*reinterpret_cast<void***>(object))[index];
@@ -31,7 +34,8 @@ inline void* VirtualMethod(void* object, size_t index) {
 
 struct Renderer {
     const char* name;
-    const wchar_t* module;
+    // Install() runs once one of these modules is loaded.
+    const wchar_t* modules[4];
     bool (*Install)();
     void (*Uninstall)();
     void (*Teardown)();
