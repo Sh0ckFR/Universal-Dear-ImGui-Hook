@@ -543,6 +543,8 @@ void GuardCallbacks(ImDrawData* drawData) {
 } // namespace
 
 ImDrawData* Frame() {
+    // The overlay and the assistant's commands run in real time while the game is paused.
+    timing::RealTime realTime;
     UpdateTextures();
     {
         // The input events queued by the window procedure are consumed here.
@@ -697,6 +699,8 @@ void Stop() {
     // The application gets its input and its cursor back.
     SetMenuOpen(false);
     remote::Stop();
+    // The game runs in real time again, from where its clocks stood.
+    timing::Reset();
 
     platform::Stop();
     // No frame runs any more: the debug registers and the scan of the window go.

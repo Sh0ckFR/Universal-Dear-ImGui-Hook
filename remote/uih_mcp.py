@@ -214,6 +214,21 @@ TOOLS += [
         },
     },
     {
+        "name": "game_speed",
+        "description": "Sets the speed of the game's clocks: 0 pauses the game while you think, 0.25 slows down a fast fight, 1 is real "
+        "time. While the game is paused, press_key, click, type_text, mouse_move, drag and wait_for_change run it for their duration, "
+        "then pause it again; advance_ms runs it for that long, then pauses it. The overlay and the screenshots keep working. Games "
+        "that time themselves with the processor's counter alone, rare, do not slow down. Without arguments, says the speed." + ADVANCED_NOTE,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "speed": {"type": "number", "description": "0 pauses, 1 is real time.", "minimum": 0, "maximum": 8},
+                "advance_ms": {"type": "integer", "description": "Runs the game for these milliseconds, then pauses it.", "minimum": 1,
+                               "maximum": 10000},
+            },
+        },
+    },
+    {
         "name": "memory_pointer",
         "description": "Follows a pointer chain and shows each pointer read and the address it ends at. Brackets read the pointer "
         "stored at an address: [[game.exe+1a2b]+10]+8. Every memory tool takes these addresses too." + MEMORY_NOTE + ADVANCED_NOTE,
@@ -378,8 +393,10 @@ def call_tool(name, args):
         backend, size, focused, menu = text.split()[1:5]
         memory = "memory=1" in text.split()
         advanced = "advanced=1" in text.split()
+        speed = next((float(word[6:]) for word in text.split() if word.startswith("speed=")), 1.0)
+        paced = "" if speed == 1 else ", game paused" if speed == 0 else f", game speed: {speed:g}"
         return [{"type": "text", "text": f"Graphics API: {backend}, window {size}, keyboard focus: {focused[8:] == '1'}, overlay menu open: "
-                 f"{menu[5:] == '1'}, memory tools: {'on' if memory else 'off'}, advanced tools: {'on' if advanced else 'off'}"}]
+                 f"{menu[5:] == '1'}, memory tools: {'on' if memory else 'off'}, advanced tools: {'on' if advanced else 'off'}{paced}"}]
     if name == "screenshot":
         size = int(args.get("max_size", 1280))
         text, rgb = request(f"screenshot {size}", payload=lambda answer: int(answer.split()[1]) * int(answer.split()[2]) * 3)
@@ -432,6 +449,14 @@ def call_tool(name, args):
         if args.get("screenshot"):
             content += call_tool("screenshot", {})
         return content
+    if name == "game_speed":
+        if "advance_ms" in args:
+            request(f"time advance {int(args['advance_ms'])}")
+            return [{"type": "text", "text": f"The game ran for {int(args['advance_ms'])} ms and is paused."}]
+        answer, _ = request(f"time {float(args['speed'])}" if "speed" in args else "time")
+        speed = float(answer.split()[1])
+        state = "paused" if speed == 0 else "in real time" if speed == 1 else f"at {speed:g} times real time"
+        return [{"type": "text", "text": f"The game runs {state}."}]
     if name.startswith("memory_"):
         return [{"type": "text", "text": memory_tool(name, args)}]
     if name not in BUILTIN_TOOLS and TOOL_NAME.match(name or ""):
