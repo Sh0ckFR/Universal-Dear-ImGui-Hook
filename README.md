@@ -6,7 +6,7 @@
 
 A [Dear ImGui](https://github.com/ocornut/imgui) overlay that draws your interface inside another application, whatever graphics API it uses. The API is detected at runtime: build once, inject anywhere.
 
-The overlay can also let an AI assistant such as Claude Code [see and play the game](#remote-control-by-an-ai-assistant) through MCP, and you can [chat with Claude from inside the game](#talk-to-claude-from-the-game).
+The overlay can also let an AI assistant such as Claude Code [see and play the game](#remote-control-by-an-ai-assistant) through MCP, and you can [chat with Claude from inside the game](#talk-to-claude-from-the-game). With the memory tools, the assistant also reads and changes the game's memory and code, and sees the objects of [Unity and Unreal Engine games](#engine-tools).
 
 | API | Windows (x86, x64) | Linux (x86-64, ARM64) |
 | --- | --- | --- |
@@ -14,6 +14,8 @@ The overlay can also let an AI assistant such as Claude Code [see and play the g
 | Direct3D 10, 11, 12 | :white_check_mark: | Windows DLL under Wine or Proton |
 | Vulkan | :white_check_mark: | :white_check_mark: |
 | OpenGL 3.0+ | :white_check_mark: (WGL) | :white_check_mark: (GLX, EGL) |
+
+On Linux, the overlay works in X11, XWayland and native Wayland games.
 
 ![The example menu next to the Dear ImGui demo window, drawn by the hook in a Direct3D 11 application](imgui.png)
 
@@ -41,7 +43,8 @@ Sections marked with ▶ expand on click. What changed in each version is listed
 
 - **Chat with Claude in the game**: a [chat window over the game](#talk-to-claude-from-the-game) where you tell Claude what to do. It looks at the game, plays it, reads or changes its memory, and answers in the chat.
 - **One library for every API**: the backend is picked from the first API that presents a frame. Inject before or after the game initializes its graphics.
-- **AI remote control**: through [MCP](#remote-control-by-an-ai-assistant), an assistant such as Claude Code sees the game, shows messages to the player, presses keys and clicks. Your menu can give it [tools of your own](#tools-of-your-own), such as *teleport* or *spawn an item*, which it calls like the built-in ones. With the [advanced features](#advanced-features-and-the-ai-advanced-features-window), it also types text, drags the mouse, waits for the screen to change, pauses or slows down the game while it thinks, follows pointer chains, freezes values and finds the code that writes them, and the *AI Advanced Features* window shows everything it does.
+- **AI remote control**: through [MCP](#remote-control-by-an-ai-assistant), an assistant such as Claude Code sees the game, shows messages to the player, presses keys and clicks. Your menu can give it [tools of your own](#tools-of-your-own), such as *teleport* or *spawn an item*, which it calls like the built-in ones. With the [advanced features](#advanced-features-and-the-ai-advanced-features-window), it also types text, drags the mouse, waits for the screen to change, pauses or slows down the game while it thinks, follows pointer chains, freezes values, finds the code that writes them, disassembles and patches that code and builds signatures that survive an update, and the *AI Advanced Features* window shows everything it does.
+- **Unity and Unreal Engine objects**: with the [engine tools](#engine-tools), the assistant lists the classes of a Unity (Mono or IL2CPP) or Unreal Engine 4 or 5 game, finds their live objects, and reads and writes their fields by name instead of by address.
 - **Menu input**: `INSERT`, or L3 + R3 on a controller, opens the menu; `F11` removes the overlay and unloads the DLL. Both keys are [settings](#settings). While the menu is open, the game receives no keyboard, mouse or controller input (on Linux, no key or button presses and no motion, on X11 and native Wayland alike), and an XInput controller navigates the menu.
 - **The overlay can't crash the game** (MSVC builds on Windows, and Linux): an access violation or a C++ exception in the overlay, whether in a renderer backend or in your menu code, removes the overlay instead of taking the game down. The menu key brings it back.
 - **Images and frame capture**: `uih::CreateTexture()` turns RGBA pixels into an image for `ImGui::Image()`, and `uih::CaptureFrame()` copies the game's frame, without the overlay, on every backend.
@@ -131,7 +134,7 @@ void ApplySettings(uih::Config& config) {
 | `backend` | `uih::Backend::None` detects the API from the first one that presents a frame, which is right for nearly every game. `D3D9`, `D3D10`, `D3D11`, `D3D12`, `Vulkan` or `OpenGL` forces one, for a game that uses several. |
 | `scale` | `0` follows the DPI of the game window; `1.5` draws the interface at 150%. |
 | `remoteControl`, `remotePipe` | `true` serves the [remote control](#remote-control-by-an-ai-assistant) on the named pipe `\\.\pipe\<remotePipe>` on Windows, or the Unix socket `$XDG_RUNTIME_DIR/<remotePipe>` on Linux. |
-| `remoteMemory` | `true`, with `remoteControl`, also gives the assistant the [memory tools](#memory-tools): modules, read, write, value and pattern scans, and the [engine tools](#engine-tools), which see the objects of Unity games. |
+| `remoteMemory` | `true`, with `remoteControl`, also gives the assistant the [memory tools](#memory-tools): modules, read, write, value and pattern scans, and the [engine tools](#engine-tools), which see the objects of Unity and Unreal Engine games. |
 | `aiAdvancedFeatures` | `true`, with `remoteControl`, gives the assistant the [advanced tools](#advanced-features-and-the-ai-advanced-features-window) and adds the *AI Advanced Features* button to the menu; the advanced memory tools also need `remoteMemory`. |
 
 </details>
