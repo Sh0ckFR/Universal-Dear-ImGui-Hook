@@ -300,6 +300,84 @@ TOOLS += [
     },
 ]
 
+CLASS = {"type": "string", "description": "Namespace.Name, such as Game.Player, or Name alone when no other class has it; Outer/Inner "
+         "for a nested class; Assembly-CSharp:Game.Player to pick the assembly."}
+OBJECT = {"type": "string", "description": "Address of an object, from engine_instances or a field that refers to one."}
+
+TOOLS += [
+    {
+        "name": "engine_info",
+        "description": "Tells which engine runs the game, for the engine_ tools: Unity with Mono or IL2CPP, and its version. The engine "
+        "tools see the game's objects by their classes and fields, where memory_ tools see bytes." + MEMORY_NOTE,
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "engine_classes",
+        "description": "Without arguments, lists the assemblies of the game's scripts with their number of classes; the game's own "
+        "code is usually in Assembly-CSharp. With a filter or an assembly, lists the classes whose full name contains the filter, "
+        "case-insensitive, at most 1000." + MEMORY_NOTE,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "filter": {"type": "string", "description": "Part of the class name, such as player or inventory."},
+                "assembly": {"type": "string", "description": "Only the classes of this assembly, such as Assembly-CSharp."},
+            },
+        },
+    },
+    {
+        "name": "engine_class",
+        "description": "Describes a class: its parents, its fields with their type and offset in the object (or static, const), "
+        "inherited fields included, and its methods with their parameters." + MEMORY_NOTE,
+        "inputSchema": {"type": "object", "properties": {"class": CLASS}, "required": ["class"]},
+    },
+    {
+        "name": "engine_instances",
+        "description": "Finds the live objects of a class, such as every Game.Player, by scanning the game's memory for their header "
+        "and checking each against the layout of the class: the addresses for engine_field and engine_call. Objects of subclasses are "
+        "listed under their own class; destroyed Unity objects are left out." + MEMORY_NOTE,
+        "inputSchema": {
+            "type": "object",
+            "properties": {"class": CLASS, "count": {"type": "integer", "description": "100 by default.", "minimum": 1, "maximum": 1000}},
+            "required": ["class"],
+        },
+    },
+    {
+        "name": "engine_field",
+        "description": "Reads a field of an object, or a static field without an object, with its type: numbers, booleans, strings, "
+        "enums as numbers, structs such as Vector3 with their fields, references as the address and class of the object. With a "
+        "value, writes it first. Reach the fields of a struct with a dot: position.x." + MEMORY_NOTE,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "class": CLASS,
+                "field": {"type": "string", "description": "Such as health, or position.x."},
+                "object": OBJECT,
+                "value": {"type": ["string", "number", "boolean", "null"], "description": "A number, true or false, a string, null, or "
+                          "the address of an object for a reference."},
+            },
+            "required": ["class", "field"],
+        },
+    },
+    {
+        "name": "engine_call",
+        "description": "Calls a method of the game's scripts, on its main thread, such as Player.Heal(50) or GameManager.LoadLevel(2), "
+        "and returns its result, or the exception it threw. Risky: the method runs as the game would run it, so a wrong call can break "
+        "the game's state. Arguments are numbers, booleans, strings, null or object addresses; structs cannot be passed." +
+        MEMORY_NOTE + ADVANCED_NOTE,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "class": CLASS,
+                "method": {"type": "string", "description": "Its name, such as Heal; a property getter is get_Name."},
+                "object": {**OBJECT, "description": "For a method that is not static: the object it is called on."},
+                "arguments": {"type": "array", "description": "In the order of the parameters; the method is picked by its name and "
+                              "number of parameters.", "items": {}},
+            },
+            "required": ["class", "method"],
+        },
+    },
+]
+
 # The font of the overlay covers Latin-1: typographic signs outside it become their ASCII forms.
 TYPOGRAPHY = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"', "\u2013": "-", "\u2014": "-", "\u2026": "...", "\u00a0": " ", "\u202f": " "})
 
@@ -459,6 +537,8 @@ def call_tool(name, args):
         return [{"type": "text", "text": f"The game runs {state}."}]
     if name.startswith("memory_"):
         return [{"type": "text", "text": memory_tool(name, args)}]
+    if name.startswith("engine_"):
+        return [{"type": "text", "text": engine_tool(name, args)}]
     if name not in BUILTIN_TOOLS and TOOL_NAME.match(name or ""):
         # A tool of the game, uih::RegisterTool(): the arguments go as JSON on one line.
         _, data = request(f"tool {name} {json.dumps(args, ensure_ascii=False)}", payload=text_payload)
@@ -605,6 +685,75 @@ def memory_tool(name, args):
     module = str(args.get("module", "")).strip()
     _, data = request(f"pattern {pattern} {module}".strip(), payload=text_payload)
     return data.decode("utf-8", "replace") or "Not found."
+
+
+def engine_word(value, what):
+    """One word of an engine command: class, field, method and object names have no spaces."""
+    word = str(value or "").strip()
+    if not word or any(c.isspace() for c in word):
+        raise GameError(f"Give the {what}, without spaces.")
+    return word
+
+
+def engine_value(value):
+    """A value for engine set: a string the game should store goes quoted; numbers, booleans, null and addresses as they are."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return repr(value)
+    raw = str(value).strip()
+    if raw.lower() in ("true", "false", "null") or re.fullmatch(r"[-+]?(0x[0-9a-fA-F]+|[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)", raw):
+        return raw
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+def engine_tool(name, args):
+    if name == "engine_info":
+        answer, _ = request("engine info")
+        words = answer.split()
+        if words[1] == "none":
+            return "The game runs no engine whose objects the library knows: the engine tools see Unity games, with Mono or IL2CPP."
+        version = f" {words[3]}" if words[3] != "-" else ""
+        return (f"{words[1].capitalize()}{version} with {'IL2CPP' if words[2] == 'il2cpp' else 'Mono'} ({words[4]}). "
+                "The game's scripts are usually in the assembly Assembly-CSharp: list its classes with engine_classes.")
+    if name == "engine_classes":
+        filter_text = str(args.get("filter", "") or "").strip()
+        assembly = str(args.get("assembly", "") or "").strip()
+        if not filter_text and not assembly:
+            _, data = request("engine assemblies", payload=text_payload)
+            return "Assemblies and their number of classes:\n" + data.decode("utf-8", "replace")
+        command = f"engine classes {engine_word(filter_text or '*', 'filter')}"
+        if assembly:
+            command += f" {engine_word(assembly, 'assembly')}"
+        _, data = request(command, payload=text_payload)
+        return data.decode("utf-8", "replace") or "No class matches."
+    class_name = engine_word(args.get("class"), "class")
+    if name == "engine_class":
+        _, data = request(f"engine class {class_name}", payload=text_payload)
+        return data.decode("utf-8", "replace")
+    if name == "engine_instances":
+        count = max(1, min(int(args.get("count", 100)), 1000))
+        _, data = request(f"engine instances {class_name} {count}", payload=text_payload)
+        return data.decode("utf-8", "replace") or f"No live object of {class_name}."
+    obj = str(args.get("object", "") or "").strip()
+    target = engine_word(obj, "object address") if obj else "-"
+    if name == "engine_field":
+        field = engine_word(args.get("field"), "field")
+        if "value" in args:
+            _, data = request(f"engine set {class_name} {field} {target} {engine_value(args['value'])}", payload=text_payload)
+            return "Written; it reads back: " + data.decode("utf-8", "replace")
+        _, data = request(f"engine get {class_name} {field}" + (f" {target}" if obj else ""), payload=text_payload)
+        return data.decode("utf-8", "replace")
+    if name != "engine_call":
+        raise GameError(f"Unknown tool {name}.")
+    method = engine_word(args.get("method"), "method")
+    arguments = args.get("arguments") or []
+    if not isinstance(arguments, list):
+        raise GameError("Give the arguments as an array.")
+    _, data = request(f"engine call {class_name} {method} {target} {json.dumps(arguments, ensure_ascii=False)}", payload=text_payload)
+    return "Returned " + data.decode("utf-8", "replace")
 
 
 def reply(message_id, result=None, error=None):

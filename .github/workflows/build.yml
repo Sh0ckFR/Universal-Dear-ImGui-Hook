@@ -177,6 +177,11 @@ jobs:
         run: build\vs\${{ matrix.platform }}\Release\uih_host.exe --api d3d11 --warp
       - name: Proxy test
         run: build\vs\${{ matrix.platform }}\Release\uih_host.exe --proxy build\vs\${{ matrix.platform }}\Release\Universal-ImGui-Hook.dll
+      - name: Engine commands on the fake Unity runtimes
+        run: |
+          build\vs\${{ matrix.platform }}\Release\uih_host.exe --api d3d11 --warp --remote-advanced --engine build\vs\${{ matrix.platform }}\Release\fake_mono\mono-2.0-bdwgc.dll
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          build\vs\${{ matrix.platform }}\Release\uih_host.exe --api d3d11 --warp --remote-advanced --engine build\vs\${{ matrix.platform }}\Release\fake_il2cpp\GameAssembly.dll
 
   mingw:
     name: MinGW-w64 ${{ matrix.arch }} (${{ matrix.os }})
@@ -253,7 +258,8 @@ jobs:
       - name: Install dependencies
         uses: ./.github/actions/apt-install
         with:
-          packages: ninja-build pkg-config libxcb1-dev libx11-dev libxtst-dev libgl-dev libegl-dev xvfb libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libvulkan1 mesa-vulkan-drivers vulkan-validationlayers
+          # Mono and its C# compiler: the engine commands on a real runtime (preload_glx_remote_real_mono).
+          packages: ninja-build pkg-config libxcb1-dev libx11-dev libxtst-dev libgl-dev libegl-dev xvfb libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libvulkan1 mesa-vulkan-drivers vulkan-validationlayers mono-runtime libmonosgen-2.0-1 mono-mcs
       - name: Configure
         run: cmake --preset linux -DUIH_BUILD_TESTS=ON
       - name: Build
@@ -276,6 +282,7 @@ jobs:
         run: |
           xvfb-run -a -s "-screen 0 1280x720x24" ctest --test-dir build/linux --output-on-failure | tee ctest.log
           if grep Skipped ctest.log; then exit 1; fi
+          grep -q "preload_glx_remote_real_mono .* Passed" ctest.log
       - name: Test Vulkan with the validation layer
         shell: bash
         env:

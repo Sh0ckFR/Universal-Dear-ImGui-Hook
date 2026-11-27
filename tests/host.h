@@ -56,6 +56,13 @@ struct Options {
     std::string input;
     // Fake xinput1_4.dll driving the controller scenario.
     std::string gamepad;
+    // Fake Unity runtime of tests/fake_unity.cpp, for the engine commands of the remote control.
+    std::string engine;
+    // A real Mono runtime and the assembly of tests/mono/Game.cs, with the
+    // directory holding its lib and etc directories when it does not know them.
+    std::string mono;
+    std::string monoAssembly;
+    std::string monoRoot;
     bool egl = false;
     bool lookup = false;
     // Changes the size of the window and of the back buffers while the menu is open.

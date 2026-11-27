@@ -105,6 +105,7 @@ def play(game, assistant, backend, screenshot):
     expected = sorted(["click", "drag", "game_info", "memory_find", "memory_freeze", "memory_modules", "memory_next", "memory_pattern",
                        "memory_pointer", "memory_pointer_scan", "memory_read", "memory_results", "memory_watch", "memory_what_writes",
                        "memory_write", "mouse_move", "press_key", "screenshot", "show_text", "type_text", "wait_for_change", "game_speed",
+                       "engine_info", "engine_classes", "engine_class", "engine_instances", "engine_field", "engine_call",
                        # Registered by tests/remote_preload.cpp with uih::RegisterTool().
                        "test_add", "test_fail"])
     if tools != expected:
@@ -119,6 +120,10 @@ def play(game, assistant, backend, screenshot):
         raise Failure("the game is not described as it runs, with the pointer over its window")
     if "advanced tools: on" not in text:
         raise Failure("the advanced tools of tests/remote_preload.cpp are described as off")
+    # DDNet and Godot run no engine whose objects the library knows.
+    _, text = assistant.call("engine_info")
+    if not text.startswith("The game runs no engine whose objects the library knows"):
+        raise Failure(f"engine_info answered {text!r}")
     # Games animate their menus: either answer is right, as long as the wait ends.
     _, text = assistant.call("wait_for_change", {"timeout_ms": 1000})
     if not text.startswith(("The screen changed after ", "No change within ")):

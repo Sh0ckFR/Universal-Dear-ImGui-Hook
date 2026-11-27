@@ -300,6 +300,47 @@ std::string CallTool(const std::string& rest, std::vector<uint8_t>& payload) {
 
 namespace remote {
 
+bool ParseJsonArray(const std::string& text, std::vector<std::string>& values, std::vector<bool>* strings) {
+    values.clear();
+    if (strings)
+        strings->clear();
+    size_t at = 0;
+    SkipSpace(text, at);
+    if (at >= text.size() || text[at] != '[')
+        return false;
+    ++at;
+    SkipSpace(text, at);
+    if (at < text.size() && text[at] == ']') {
+        ++at;
+    } else {
+        for (;;) {
+            SkipSpace(text, at);
+            size_t start = at;
+            std::string value;
+            bool isString = at < text.size() && text[at] == '"';
+            if (isString ? !ParseString(text, at, &value) : !SkipValue(text, at))
+                return false;
+            values.push_back(isString ? value : text.substr(start, at - start));
+            if (strings)
+                strings->push_back(isString);
+            SkipSpace(text, at);
+            if (at >= text.size())
+                return false;
+            if (text[at] == ']') {
+                ++at;
+                break;
+            }
+            if (text[at] != ',')
+                return false;
+            ++at;
+        }
+    }
+    SkipSpace(text, at);
+    return at == text.size();
+}
+
+std::string JsonQuote(const std::string& text) { return JsonString(text); }
+
 bool HandleTools(const std::string& command, const std::string& rest, std::vector<uint8_t>& payload, std::string& answer) {
     if (command == "tools")
         answer = ListTools(payload);

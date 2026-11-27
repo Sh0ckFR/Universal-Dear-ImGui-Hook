@@ -10,6 +10,7 @@ The internals of Universal-Dear-ImGui-Hook, for contributors and the curious. To
 | `include/uih_c.h`, `src/c_api.cpp` | The same API for C and the languages that call C |
 | `src/uih.cpp`, `src/internal.h` | Platform-independent core: lifecycle, frame, textures, scale |
 | `src/remote.cpp`, `src/memory.cpp` | Remote control commands, and its memory commands |
+| `src/engine.cpp` | Engine commands: the objects of Unity games through the C API of Mono or IL2CPP |
 | `src/advanced.cpp` | Advanced features: chat, watch list, frozen values, instruction watch, the AI Advanced Features window |
 | `src/tools.cpp` | Tools of the game for the assistant, `uih::RegisterTool()`, and the small JSON reader of `uih::ToolArgument()` |
 | `src/timing.cpp` | Speed of the game's clocks, the `time` command; the clocks are hooked in `src/windows/clocks.cpp` and `src/linux/clocks.cpp` |
@@ -19,7 +20,7 @@ The internals of Universal-Dear-ImGui-Hook, for contributors and the curious. To
 | `src/linux/` | Symbol interposition, GLX, EGL, X11 input and the game's events (`events.cpp`), remote control (`remote.cpp`), instruction watch (`breakpoints.cpp`), `exports.map` |
 | `remote/` | `uih_mcp.py`, the MCP server of the remote control and its DLL injector; `uih_chat.py`, the bridge between the in-game chat and Claude Code; [`PROTOCOL.md`](../remote/PROTOCOL.md) |
 | `example/` | The library that gets built: `config.cpp` (settings), `menu.cpp` (the widget tour), `image.cpp` and `image.rc` (`imgui.png` embedded), `dllmain.cpp`, `proxy.cpp`, `preload.cpp` |
-| `tests/` | `uih_host`, `uih_game`, `game.sh` and `game_mcp.py` for real games, the Godot project they run, the `FetchContent` consumer, `check_docs.py` for the Markdown files: see [`tests/README.md`](../tests/README.md) |
+| `tests/` | `uih_host`, `uih_game`, `game.sh` and `game_mcp.py` for real games, the Godot project they run, the `FetchContent` consumer, `check_docs.py` for the Markdown files, the fake Unity runtime `fake_unity.cpp` and the C# game `mono/Game.cs` for the engine commands: see [`tests/README.md`](../tests/README.md) |
 | `vs/`, `Universal-ImGui-Hook.sln` | Visual Studio projects |
 | `third_party/` | Dear ImGui, MinHook, Vulkan headers, stb_image (example only) |
 
@@ -90,6 +91,10 @@ With `remoteControl` set, a library thread serves the named pipe with overlapped
 Messages are drawn after the `render` callback, in the overlay's frame. Keys and clicks go through `SendInput` (Windows) or XTEST on a dedicated connection to the X server (Linux) when the game has the focus, and as window messages or X11 events otherwise. On Windows, a click also moves the cursor with `SendInput`, since the `SetCursorPos` hook holds it still while the menu is open.
 
 **Tools of the game.** The server thread hands a `tool` command to the next frame of the overlay, which runs it after the `render` callback, and waits up to 10 seconds for its answer: a tool can then use the game's objects on the thread that renders, as the menu does. One request is served at a time, so one tool call waits at most.
+
+**Engine objects.** `src/engine.cpp` looks for the library of a Unity runtime among the game's modules (`GameAssembly`, `mono-2.0-bdwgc`, `libmonobdwgc-2.0`, ...) and resolves the functions of its C API by name, with `GetProcAddress` or `dlsym`: the library links no runtime, and a game without one costs a module lookup. Mono and IL2CPP share the layout of their objects (two pointers of header, then the fields at the offsets the runtime gives) and the numbering of their types, so one code path serves both, with a table of function pointers. Each command attaches the server thread to the runtime and detaches it after, unless the thread was already attached, which the garbage collector needs to see it. The classes are indexed once, by the metadata table of each image on Mono and by `il2cpp_image_get_class` on IL2CPP. Unity's version comes from a scan of `UnityPlayer` for its version string.
+
+Instances are found without running the game's code, since `FindObjectsOfType()` only works on Unity's main thread: a scan of the writable memory outside the modules for the header of the class's objects (the `MonoVTable` of the class in the root domain on Mono, the class on IL2CPP), at the alignment of the garbage collector, keeping the candidates whose reference fields are null or objects, whose booleans are 0 or 1, and whose `m_CachedPtr` is set for a `UnityEngine.Object`. Writes of a reference go through the runtime's write barrier when it exports one. `engine call` runs on the game's main thread, where Unity's API must be called: the server thread leaves the call for the window procedure (Windows), woken by a registered message posted to the game's window, or for the filter of the game's X events (Linux), and waits up to 10 seconds. The call is copied with its arguments, so that it can still run after the command gave up. It runs inside the fault guard, and the exception it throws comes back as its class and message.
 
 With `aiAdvancedFeatures`, `wait` compares frames copied by `uih::CaptureFrame()`, shrunk to 160 pixels. Frozen values are written in the overlay's frame, only when they changed, and their pointer chains are resolved again each time.
 

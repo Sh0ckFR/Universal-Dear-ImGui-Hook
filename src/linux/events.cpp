@@ -73,6 +73,9 @@ bool Hidden(const xcb_generic_event_t* event) {
 }
 
 xcb_generic_event_t* Filter(EventFn next, xcb_connection_t* connection) {
+    // An engine call of the assistant, on the thread that reads the game's events.
+    if (!input::OwnConnection(connection))
+        remote::RunGameThreadCalls();
     for (;;) {
         xcb_generic_event_t* event = next(connection);
         if (!event || !IsMenuOpen() || input::OwnConnection(connection) || !Hidden(event))

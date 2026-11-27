@@ -3,6 +3,7 @@
 // the keys sent to the X server.
 #include "internal.h"
 
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <link.h>
 #include <sys/mman.h>
@@ -927,5 +928,36 @@ void* AllocateScanMemory(size_t size) {
     void* memory = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
     return memory == MAP_FAILED ? nullptr : memory;
 }
+
+void* FindModule(const char* name) {
+    struct Search {
+        const char* name;
+        std::string path;
+    } search{name, ""};
+    dl_iterate_phdr(
+        [](dl_phdr_info* info, size_t, void* context) {
+            auto* search = static_cast<Search*>(context);
+            const char* path = info->dlpi_name;
+            if (!path || !*path)
+                return 0;
+            const char* slash = strrchr(path, '/');
+            if (strcmp(slash ? slash + 1 : path, search->name) != 0)
+                return 0;
+            search->path = path;
+            return 1;
+        },
+        &search);
+    if (search.path.empty())
+        return nullptr;
+    // Already loaded: the handle only counts one more reference, kept for the
+    // life of the process as the engine's libraries are.
+    return dlopen(search.path.c_str(), RTLD_LAZY | RTLD_NOLOAD);
+}
+
+void* ModuleSymbol(void* module, const char* name) { return dlsym(module, name); }
+
+// The X event hooks of src/linux/events.cpp run the call on the thread that
+// reads the game's events, its main thread.
+bool WakeGameThread() { return true; }
 
 } // namespace uih::detail::remote

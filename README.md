@@ -131,7 +131,7 @@ void ApplySettings(uih::Config& config) {
 | `backend` | `uih::Backend::None` detects the API from the first one that presents a frame, which is right for nearly every game. `D3D9`, `D3D10`, `D3D11`, `D3D12`, `Vulkan` or `OpenGL` forces one, for a game that uses several. |
 | `scale` | `0` follows the DPI of the game window; `1.5` draws the interface at 150%. |
 | `remoteControl`, `remotePipe` | `true` serves the [remote control](#remote-control-by-an-ai-assistant) on the named pipe `\\.\pipe\<remotePipe>` on Windows, or the Unix socket `$XDG_RUNTIME_DIR/<remotePipe>` on Linux. |
-| `remoteMemory` | `true`, with `remoteControl`, also gives the assistant the [memory tools](#memory-tools): modules, read, write, value and pattern scans. |
+| `remoteMemory` | `true`, with `remoteControl`, also gives the assistant the [memory tools](#memory-tools): modules, read, write, value and pattern scans, and the [engine tools](#engine-tools), which see the objects of Unity games. |
 | `aiAdvancedFeatures` | `true`, with `remoteControl`, gives the assistant the [advanced tools](#advanced-features-and-the-ai-advanced-features-window) and adds the *AI Advanced Features* button to the menu; the advanced memory tools also need `remoteMemory`. |
 
 </details>
@@ -347,6 +347,21 @@ With `remoteMemory`, the assistant also gets memory tools, like those of a memor
 
 Addresses are hexadecimal or `module+offset`, such as `game.exe+1a2b3c`. With `aiAdvancedFeatures`, they can also be pointer chains: `[game.exe+1a2b3c]+10` is the address 0x10 bytes after the one stored at `game.exe+1a2b3c`.
 
+### Engine tools
+
+With `remoteMemory`, the assistant also sees the objects of Unity games, by their classes and fields instead of bytes, through the runtime of their scripts: Mono or IL2CPP. The library finds the runtime's library in the game and calls its C API, which it does not link.
+
+| Tool | Effect |
+| --- | --- |
+| `engine_info` | The engine, its scripting runtime and its version, such as Unity 2022.3.10f1 with IL2CPP |
+| `engine_classes` | The assemblies of the game's scripts, or their classes whose name contains a filter, such as `player` in `Assembly-CSharp` |
+| `engine_class` | A class: its parents, its fields with their type and offset (or static, const), inherited ones included, and its methods with their parameters |
+| `engine_instances` | The live objects of a class, such as every `Game.Player`, found by a scan of the memory checked against the layout of the class |
+| `engine_field` | Reads a field of an object or a static field, and writes it when given a value: numbers, booleans, strings, enums, structs such as `Vector3` (`position.x`), references to other objects |
+| `engine_call` | Calls a method on the game's main thread and returns its result, or the exception it threw. Needs `aiAdvancedFeatures` too |
+
+Ask, for example: *Find the player object, tell me its health, and set its speed to 10.* The assistant lists the classes of `Assembly-CSharp`, describes the player's class, finds its instance and reads or writes the fields. Unreal Engine games are not supported yet.
+
 ### Advanced features and the AI Advanced Features window
 
 With `config.aiAdvancedFeatures = true`, the assistant also gets these tools:
@@ -407,6 +422,8 @@ uih::RegisterTool("teleport", "Moves the player to x, y, z in world units, and r
 - Typed text reaches games that read text input, as chat boxes do; games that read the keys themselves see only Enter and Tab, so use `press_key` for them. On Linux, a character missing from the keyboard layout is mapped to a free keycode while it is typed, which the X server's other applications see too.
 - `memory_what_writes` sets debug register 3 of every thread of the game on Windows: a debugger attached to the game, or a game that uses that register, sees the change. On Linux, it asks the kernel for a hardware breakpoint on each thread (perf events), which unprivileged processes get while `kernel.perf_event_paranoid` is 2 or lower. Ubuntu sets 4, so run `sudo sysctl kernel.perf_event_paranoid=2` once per boot. Threads started later are watched within half a second.
 - Screenshots of HDR back buffers, with more than 10 bits per channel, fail.
+- `engine_instances` lists the objects of the exact class: ask for each subclass by its name. Destroyed Unity objects are left out. An object is recognized by its header and checked against its fields, so for a class with no reference or boolean field, and not a Unity object, a freed object whose memory was not reused yet can still be listed.
+- `engine_call` waits for the game's main thread: on Windows, the thread of its window, which runs the call in its next message; on Linux, the thread reading its X events. A game whose main thread is stuck, such as during a loading screen, answers after 10 seconds with an error. Structs cannot be passed as arguments.
 
 </details>
 

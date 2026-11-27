@@ -4,6 +4,7 @@
 #include "remote_advanced.h"
 #include "remote_time.h"
 #include "remote_tools.h"
+#include "remote_engine.h"
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -616,6 +617,13 @@ int64_t GameMs() {
     return static_cast<int64_t>(now.tv_sec) * 1000 + now.tv_nsec / 1000000;
 }
 
+// The fake Unity runtime, and the thread that reads the X events of the host.
+FakeEngine g_engine;
+bool g_engineLoaded = false;
+uint64_t g_engineThread = 0;
+RealMono g_mono;
+bool g_monoLoaded = false;
+
 int RunRemote(Display* display, Window window, Host& host, const std::string& name) {
     int presses = 0;
     int releases = 0;
@@ -673,6 +681,7 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
     std::string memoryFailure;
     std::string advancedFailure;
     std::string toolsFailure;
+    std::string engineFailure;
     std::vector<uint8_t> rgb;
     WhileRendering(
         [&] {
@@ -693,6 +702,12 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
             if (advancedFailure.empty())
                 advancedFailure = CheckRemoteTime(client, GameMs);
             toolsFailure = CheckRemoteTools(client);
+            if (g_engineLoaded)
+                engineFailure = CheckRemoteEngine(client, g_engine, true, g_engineThread);
+            else if (g_monoLoaded)
+                engineFailure = CheckRealMono(client, g_mono, true);
+            else if (client.Request("engine info") != "ok none")
+                engineFailure = "engine info answers without a Unity runtime";
         },
         frame);
     for (int i = 0; i < 10; ++i)
@@ -713,6 +728,8 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
         return Fail(memoryFailure.c_str());
     if (!toolsFailure.empty())
         return Fail(toolsFailure.c_str());
+    if (!engineFailure.empty())
+        return Fail(engineFailure.c_str());
     if (!advancedFailure.empty())
         return Fail(advancedFailure.c_str());
     if (after < before + 1000)
@@ -1043,15 +1060,32 @@ int main(int argc, char** argv) {
         else if (arg == "--bound-framebuffer") options.boundFramebuffer = true;
         else if (arg == "--swap-with-damage") options.swapWithDamage = true;
         else if (arg == "--remote") options.remote = true;
+        else if (arg == "--engine" && i + 1 < argc) options.engine = argv[++i];
+        else if (arg == "--mono" && i + 2 < argc) options.mono = argv[++i], options.monoAssembly = argv[++i];
+        else if (arg == "--mono-root" && i + 1 < argc) options.monoRoot = argv[++i];
         else if (arg == "--input" && i + 1 < argc) options.input = argv[++i];
         else if (arg == "--fault") options.fault = "env";
     }
     if (options.api != "opengl" && options.api != "vulkan") {
-        printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--transfer-only] [--vulkan-library path] [--menu-key keysym] [--unload-key keysym] [--resize] [--reload] [--second-window] [--recreate-context] [--bound-framebuffer] [--swap-with-damage] [--remote]\n");
+        printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--transfer-only] [--vulkan-library path] [--menu-key keysym] [--unload-key keysym] [--resize] [--reload] [--second-window] [--recreate-context] [--bound-framebuffer] [--swap-with-damage] [--remote [--engine fake-runtime] [--mono runtime Game.dll [--mono-root dir]]]\n");
         return 2;
     }
     setvbuf(stdout, nullptr, _IOLBF, 0);
 
+    if (!options.engine.empty()) {
+        if (!LoadFakeEngine(options.engine, g_engine))
+            return Fail("the fake Unity runtime does not load");
+        // As Unity's main thread, attached to the runtime, which runs the calls.
+        g_engine.attachMain();
+        g_engineThread = EngineThreadId();
+        g_engineLoaded = true;
+    }
+    if (!options.mono.empty()) {
+        std::string error;
+        if (!StartRealMono(options.mono, options.monoAssembly, options.monoRoot, g_mono, error))
+            return Fail(error.c_str());
+        g_monoLoaded = true;
+    }
     Display* display = XOpenDisplay(nullptr);
     if (!display)
         return Skip("no X server");

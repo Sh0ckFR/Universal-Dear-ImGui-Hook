@@ -273,6 +273,19 @@ struct PointerHit {
 // `cancelled` returned true.
 bool ScanPointers(uintptr_t target, size_t maxOffset, size_t limit, bool (*cancelled)(), std::vector<PointerHit>& hits);
 
+// Objects of the game's engine, src/engine.cpp: false when `command` is not engine.
+bool HandleEngine(const std::string& command, const std::string& rest, std::vector<uint8_t>& payload, std::string& answer);
+// Runs the engine call waiting for the game's main thread, if any: called by
+// the window procedure on Windows and by the X event hooks on Linux.
+void RunGameThreadCalls();
+// Implemented once per platform, for the engine commands:
+// a module loaded in the process by its file name, such as mono-2.0-bdwgc.dll; null when it is not.
+void* FindModule(const char* name);
+// An exported function of a module FindModule() found.
+void* ModuleSymbol(void* module, const char* name);
+// Makes the game's main thread call RunGameThreadCalls() soon; false when it cannot.
+bool WakeGameThread();
+
 // Advanced features, Config::aiAdvancedFeatures, src/advanced.cpp:
 // switches of the "AI Advanced Features" window, on until the player turns them off.
 bool InputAllowed();
@@ -288,6 +301,10 @@ void Tick();
 bool HandleTools(const std::string& command, const std::string& rest, std::vector<uint8_t>& payload, std::string& answer);
 // Every frame of the overlay: runs the tool the assistant called, if any.
 void RunTools();
+// The elements of the JSON array `text`, strings decoded and other values as
+// written; false when it is not one array.
+bool ParseJsonArray(const std::string& text, std::vector<std::string>& values, std::vector<bool>* strings = nullptr);
+std::string JsonQuote(const std::string& text);
 // Once the overlay is gone: ends the instruction watch and the scan of the window.
 void StopAdvanced();
 // Implemented once per platform: the instructions that write `size` bytes at

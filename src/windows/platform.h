@@ -108,4 +108,9 @@ bool BlockInput();
 SHORT RealAsyncKeyState(int key);
 } // namespace input
 
+namespace remote {
+// The message that makes the window procedure run RunGameThreadCalls().
+UINT GameThreadMessage();
+} // namespace remote
+
 } // namespace uih::detail

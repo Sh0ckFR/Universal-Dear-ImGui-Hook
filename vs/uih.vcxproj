@@ -42,6 +42,7 @@
     <ClCompile Include="..\src\c_api.cpp" />
     <ClCompile Include="..\src\tools.cpp" />
     <ClCompile Include="..\src\timing.cpp" />
+    <ClCompile Include="..\src\engine.cpp" />
     <ClCompile Include="..\src\windows\platform.cpp" />
     <ClCompile Include="..\src\windows\input.cpp" />
     <ClCompile Include="..\src\windows\clocks.cpp" />
