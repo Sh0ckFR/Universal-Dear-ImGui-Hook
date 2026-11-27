@@ -91,6 +91,18 @@ Each file also comes in four variants with some settings on, named with a suffix
 | `-advanced` | `remoteControl`, `aiAdvancedFeatures` | The remote control and the [advanced tools](#advanced-features-and-the-ai-advanced-features-window): typing, mouse, game speed, and the [chat with Claude](#talk-to-claude-from-the-game), without access to the memory |
 | `-ai` | all three | Every tool of the assistant, with the chat and the advanced memory tools |
 
+Which one to take:
+
+| You want to | Take |
+| --- | --- |
+| Add [your own menu](#writing-your-menu) or overlay to a game, without any assistant | the file without suffix |
+| Let Claude see and play the game: screenshots, messages, key presses, [tools of your own](#tools-of-your-own), for automated playtesting | `-remote` |
+| Let Claude also inspect the game: scan, read and change values, search byte patterns, and, on Unity and Unreal, read the [objects by name](#engine-tools), [search their functions and properties](#engine-tools) and write the [C++ SDK](#a-c-sdk-of-an-unreal-engine-game) | `-memory` |
+| [Chat with Claude](#talk-to-claude-from-the-game) in the game, and let it type, use the mouse and slow down the game, without access to its memory | `-advanced` |
+| Use the **Engine** tab in the game and call the game's functions; follow pointer chains, freeze values, find the code that writes a value, disassemble and patch it, and make signatures | `-ai` |
+
+On a single-player game, when in doubt, take `-ai`: it has everything. Take a smaller one to give Claude less access.
+
 > [!WARNING]
 > Use the variants for single-player games only: any program you run can then control the game, and with `-memory` or `-ai` its memory too.
 
@@ -258,7 +270,7 @@ flowchart LR
 
 ### Step 1: get the library with the chat on
 
-Download the `-ai` library of a [release](https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook/releases) that matches the game, such as `Universal-ImGui-Hook-msvc-x64-ai.dll` (see [Quick start](#quick-start)): it has the settings below on.
+Download the `-ai` library of a [release](https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook/releases) that matches the game, such as `Universal-ImGui-Hook-msvc-x64-ai.dll` (see [Quick start](#quick-start)): it has the settings below on. The `-advanced` library has the chat too, without access to the memory.
 
 Or build it. In `example/config.cpp`, set these settings to `true`, or configure CMake with `-DUIH_EXAMPLE_VARIANT=ai`, which turns them all on (`remote`, `memory` and `advanced` build the other [variants](#1-get-the-library)):
 
