@@ -8,10 +8,14 @@
 //   engine get <class> <field> [object]      -> ok <bytes>, then: <type> <value>
 //   engine set <class> <field> <object|-> <value> -> ok <bytes>, then: <type> <value>, as read back
 //   engine instances <class> [count]         -> ok <bytes>, then lines: <address>
+//   engine dump [game|all|packages]          -> ok <bytes>, then the path of the C++ SDK, what it holds
 // and with Config::aiAdvancedFeatures:
 //   engine call <class> <method> <object|-> [JSON array] -> ok <bytes>, then: <type> <value>
 // Classes are Namespace.Name, Outer/Inner for a nested class, optionally
 // after <assembly>:. Fields of structs are reached with a dot: position.x.
+// A name with spaces, such as a blueprint's on Unreal, goes between double
+// quotes. On Unreal (src/unreal.cpp), `engine get <class> * <object>` reads
+// every property of the object, a line each; `engine dump` is src/sdk.cpp.
 //
 // The commands run on the server thread, attached to the runtime for their
 // duration. Instances are found by a scan of the writable memory for the
@@ -990,7 +994,7 @@ std::string ListClasses(const Runtime& runtime, const std::string& rest, std::ve
     for (const Runtime::ClassEntry& entry : runtime.classes) {
         if ((!assembly.empty() && Lower(entry.assembly) != assembly) || (!filter.empty() && Lower(entry.name).find(filter) == std::string::npos))
             continue;
-        if (listed++ < kMaxListed)
+        if (listed++ < EngineListLimit())
             text += entry.assembly + " " + entry.name + "\n";
         else
             ++more;
@@ -1052,6 +1056,28 @@ uintptr_t ParseObject(const std::string& text) {
     return static_cast<uintptr_t>(strtoull(text.c_str(), nullptr, 16));
 }
 
+// Every field of the object and the static ones, its class's first: lines
+// <offset|static> <type> <name> <value>, separated by tabs.
+std::string AllFields(const Runtime& runtime, Handle klass, uintptr_t object, std::vector<uint8_t>& payload) {
+    std::string text;
+    for (Handle level : Lineage(runtime, klass)) {
+        for (const Field& field : OwnFields(runtime, level)) {
+            Location location;
+            std::string error;
+            if (field.flags & kFieldLiteral || !Locate(runtime, klass, runtime.fieldName(field.field), object, location, error))
+                continue;
+            if (!location.isStatic && !object)
+                continue;
+            std::string value = location.isStatic ? FormatStatic(runtime, location) : FormatAt(runtime, location.type, location.address);
+            std::replace(value.begin(), value.end(), '\t', ' ');
+            std::replace(value.begin(), value.end(), '\n', ' ');
+            text += (location.isStatic ? std::string("static") : Hex(field.offset)) + "\t" + runtime.TypeName(location.type) + "\t" +
+                    runtime.fieldName(field.field) + "\t" + value + "\n";
+        }
+    }
+    return Payload(text, payload);
+}
+
 std::string Get(const Runtime& runtime, const std::string& rest, std::vector<uint8_t>& payload) {
     size_t at = 0;
     std::string className = NextWord(rest, at);
@@ -1059,6 +1085,11 @@ std::string Get(const Runtime& runtime, const std::string& rest, std::vector<uin
     uintptr_t object = ParseObject(NextWord(rest, at));
     std::string error;
     Handle klass = FindClass(runtime, className, error);
+    if (klass && path == "*") {
+        if (object && !ObjectClass(runtime, object))
+            return "error " + Hex(object) + " is not an object";
+        return AllFields(runtime, klass, object, payload);
+    }
     Location location;
     if (!klass || !Locate(runtime, klass, path, object, location, error))
         return error;
@@ -1354,6 +1385,13 @@ std::string Call(const Runtime& runtime, const std::string& rest, std::vector<ui
 
 } // namespace
 
+std::string RunOnGameThread(std::function<std::string()> work) { return OnGameThread(std::move(work)); }
+
+size_t& EngineListLimit() {
+    thread_local size_t limit = kMaxListed;
+    return limit;
+}
+
 void RunGameThreadCalls() {
     if (!g_callPending.load(std::memory_order_acquire) || t_inCall)
         return;
@@ -1393,9 +1431,9 @@ bool HandleEngine(const std::string& command, const std::string& rest, std::vect
         answer = "error the player paused the memory tools in the AI Advanced Features window of the overlay";
     if (!answer.empty())
         return true;
-    static const char* const kCommands[] = {"info", "assemblies", "classes", "class", "get", "set", "instances", "call"};
+    static const char* const kCommands[] = {"info", "assemblies", "classes", "class", "get", "set", "instances", "call", "dump"};
     if (std::find_if(std::begin(kCommands), std::end(kCommands), [&](const char* name) { return sub == name; }) == std::end(kCommands)) {
-        answer = "error unknown engine command: info, assemblies, classes, class, get, set, instances or call";
+        answer = "error unknown engine command: info, assemblies, classes, class, get, set, instances, call or dump";
         return true;
     }
     std::lock_guard<std::mutex> lock(g_engineMutex);
@@ -1410,6 +1448,10 @@ bool HandleEngine(const std::string& command, const std::string& rest, std::vect
     }
     if (sub == "info") {
         answer = Info(*runtime);
+        return true;
+    }
+    if (sub == "dump") {
+        answer = "error engine dump writes the C++ SDK of Unreal Engine games: Unity games have their own tools for it, such as Il2CppDumper";
         return true;
     }
     Attached attached(*runtime);

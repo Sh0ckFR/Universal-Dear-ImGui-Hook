@@ -68,6 +68,10 @@ struct Options {
     std::string monoRoot;
     // The objects of an Unreal Engine game in the host: 4 or 5, tests/fake_unreal.h.
     int unreal = 0;
+    // Where the remote test copies the C++ SDK it dumped of every package.
+    std::string dumpSdk;
+    // A library built against that SDK, tests/sdk: its test runs against the fake game.
+    std::string sdkTest;
     bool egl = false;
     bool lookup = false;
     // Changes the size of the window and of the back buffers while the menu is open.

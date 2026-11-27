@@ -582,6 +582,158 @@ std::string InstructionBefore(uintptr_t next) {
 #endif
 }
 
+namespace {
+
+#if UIH_DISASSEMBLER
+#if defined(__x86_64__) || defined(_M_X64)
+constexpr ZydisMachineMode kMode = ZYDIS_MACHINE_MODE_LONG_64;
+#else
+constexpr ZydisMachineMode kMode = ZYDIS_MACHINE_MODE_LEGACY_32;
+#endif
+
+// [register + displacement], without an index: a member of an object.
+bool IsMember(const ZydisDecodedOperand& operand) {
+    return operand.type == ZYDIS_OPERAND_TYPE_MEMORY && operand.mem.base != ZYDIS_REGISTER_NONE && operand.mem.base != ZYDIS_REGISTER_RIP &&
+           operand.mem.base != ZYDIS_REGISTER_EIP && operand.mem.index == ZYDIS_REGISTER_NONE;
+}
+
+bool IsHighByte(ZydisRegister reg) { return reg == ZYDIS_REGISTER_AH || reg == ZYDIS_REGISTER_BH || reg == ZYDIS_REGISTER_CH || reg == ZYDIS_REGISTER_DH; }
+
+// The function a jump at `address` goes to, or `address` when it is no jump.
+uintptr_t FollowJumps(uintptr_t address) {
+    for (int hop = 0; hop < 4; ++hop) {
+        uint8_t bytes[kMaxInstruction];
+        size_t size = ReadUpTo(address, bytes, sizeof(bytes));
+        Instruction in;
+        if (!size || !GetDecoder().Decode(bytes, size, in) || in.decoded.mnemonic != ZYDIS_MNEMONIC_JMP)
+            break;
+        ZyanU64 target = 0;
+        const ZydisDecodedOperand& operand = in.operands[0];
+        if (!ZYAN_SUCCESS(ZydisCalcAbsoluteAddress(&in.decoded, &operand, address, &target)))
+            break;
+        // jmp [rip + x], to an imported function.
+        if (operand.type == ZYDIS_OPERAND_TYPE_MEMORY) {
+            uintptr_t pointer = 0;
+            if (!ReadMemory(static_cast<uintptr_t>(target), &pointer, sizeof(pointer)))
+                break;
+            target = pointer;
+        }
+        address = static_cast<uintptr_t>(target);
+    }
+    return address;
+}
+#endif
+
+#if defined(__aarch64__) || defined(_M_ARM64)
+// ldr wT, [xN, #imm], ldrb, ldur, then tbz/tbnz wT, #bit or tst wT, #mask.
+bool TestsBitsArm64(uintptr_t function, uint32_t displacement, uint32_t mask, size_t length) {
+    std::vector<uint32_t> code(length / 4);
+    if (code.empty() || !ReadMemory(function, code.data(), code.size() * 4))
+        return false;
+    // The byte of the value each register holds, -1 when none.
+    int loaded[32];
+    for (int& shift : loaded)
+        shift = -1;
+    for (size_t i = 0; i < code.size(); ++i) {
+        uint32_t in = code[i];
+        uint32_t rt = in & 0x1f;
+        int64_t offset = -1;
+        if ((in & 0xffc00000) == 0xb9400000)
+            offset = ((in >> 10) & 0xfff) * 4;  // ldr w, [x, #imm]
+        else if ((in & 0xffc00000) == 0x39400000)
+            offset = (in >> 10) & 0xfff;  // ldrb w, [x, #imm]
+        else if ((in & 0xffe00c00) == 0xb8400000)
+            offset = static_cast<int64_t>(static_cast<int32_t>(in << 11) >> 23);  // ldur w, [x, #simm9]
+        if (offset >= 0) {
+            int64_t delta = offset - static_cast<int64_t>(displacement);
+            loaded[rt] = delta >= 0 && delta < 4 ? static_cast<int>(delta) : -1;
+            continue;
+        }
+        if ((in & 0x7e000000) == 0x36000000 && loaded[rt] >= 0) {
+            uint32_t bit = ((in >> 31) << 5) | ((in >> 19) & 0x1f);
+            if (bit < 32 && (uint64_t{1} << (bit + 8 * loaded[rt])) == mask)
+                return true;
+        }
+        // tst w, #imm (ands wzr): a single bit is imms 0, rotated right by immr.
+        if ((in & 0xffc0001f) == 0x7200001f && loaded[(in >> 5) & 0x1f] >= 0 && ((in >> 10) & 0x3f) == 0) {
+            uint32_t rotate = (in >> 16) & 0x3f;
+            uint32_t bit = (32 - rotate) % 32;
+            if ((uint64_t{1} << (bit + 8 * loaded[(in >> 5) & 0x1f])) == mask)
+                return true;
+        }
+        if (in == 0xd65f03c0 && (i + 1 >= code.size() || code[i + 1] == 0xd503201f || code[i + 1] == 0))
+            break;  // ret, then padding
+        // Another write of the register forgets it.
+        loaded[rt] = -1;
+    }
+    return false;
+}
+#endif
+
+} // namespace
+
+bool CodeTestsBits(uintptr_t function, uint32_t displacement, uint32_t mask, size_t length) {
+#if UIH_DISASSEMBLER
+    const Decoder& decoder = GetDecoder();
+    uintptr_t start = FollowJumps(function);
+    std::vector<uint8_t> bytes(length + kMaxInstruction);
+    size_t size = ReadUpTo(start, bytes.data(), bytes.size());
+    // The registers loaded from the value, and the byte of the value they start at.
+    std::vector<std::pair<ZydisRegister, int>> loaded;
+    auto forget = [&](ZydisRegister reg) {
+        loaded.erase(std::remove_if(loaded.begin(), loaded.end(), [&](const std::pair<ZydisRegister, int>& entry) { return entry.first == reg; }),
+                     loaded.end());
+    };
+    for (size_t at = 0; at < std::min(size, length);) {
+        Instruction in;
+        if (!decoder.Decode(bytes.data() + at, size - at, in))
+            break;
+        const ZydisDecodedInstruction& d = in.decoded;
+        const ZydisDecodedOperand* operands = in.operands;
+        size_t next = at + d.length;
+        if (d.mnemonic == ZYDIS_MNEMONIC_INT3 || (d.mnemonic == ZYDIS_MNEMONIC_RET && (next >= size || bytes[next] == 0xcc || bytes[next] == 0x90)))
+            break;
+        bool testing = d.mnemonic == ZYDIS_MNEMONIC_TEST || d.mnemonic == ZYDIS_MNEMONIC_BT || d.mnemonic == ZYDIS_MNEMONIC_AND;
+        if (testing && d.operand_count_visible >= 2 && operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
+            uint64_t immediate = operands[1].imm.value.u;
+            if (operands[0].size < 64)
+                immediate &= (uint64_t{1} << operands[0].size) - 1;
+            if (d.mnemonic == ZYDIS_MNEMONIC_BT)
+                immediate = immediate < 32 ? uint64_t{1} << immediate : 0;
+            int shift = -1;
+            if (IsMember(operands[0])) {
+                int64_t delta = operands[0].mem.disp.value - static_cast<int64_t>(displacement);
+                shift = delta >= 0 && delta < 4 ? static_cast<int>(delta) : -1;
+            } else if (operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER) {
+                ZydisRegister reg = ZydisRegisterGetLargestEnclosing(kMode, operands[0].reg.value);
+                for (const auto& entry : loaded)
+                    if (entry.first == reg)
+                        shift = entry.second + (IsHighByte(operands[0].reg.value) ? 1 : 0);
+            }
+            if (shift >= 0 && immediate && (immediate << (8 * shift)) == mask)
+                return true;
+        }
+        // mov, movzx or movsx of the value into a register.
+        bool load = (d.mnemonic == ZYDIS_MNEMONIC_MOV || d.mnemonic == ZYDIS_MNEMONIC_MOVZX || d.mnemonic == ZYDIS_MNEMONIC_MOVSX) &&
+                    d.operand_count_visible >= 2 && operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER && IsMember(operands[1]);
+        if (operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER && (operands[0].actions & ZYDIS_OPERAND_ACTION_MASK_WRITE)) {
+            ZydisRegister reg = ZydisRegisterGetLargestEnclosing(kMode, operands[0].reg.value);
+            forget(reg);
+            int64_t delta = load ? operands[1].mem.disp.value - static_cast<int64_t>(displacement) : -1;
+            if (delta >= 0 && delta < 4)
+                loaded.push_back({reg, static_cast<int>(delta)});
+        }
+        at = next;
+    }
+    return false;
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    return TestsBitsArm64(function, displacement, mask, length);
+#else
+    (void)function, (void)displacement, (void)mask, (void)length;
+    return false;
+#endif
+}
+
 bool HandleCode(const std::string& command, const std::string& rest, std::vector<uint8_t>& payload, std::string& answer) {
     if (command != "disasm" && command != "patch" && command != "unpatch" && command != "patches" && command != "signature")
         return false;

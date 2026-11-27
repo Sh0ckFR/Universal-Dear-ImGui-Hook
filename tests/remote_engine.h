@@ -348,10 +348,33 @@ std::string CheckRealMono(Client& client, const RealMono& mono, bool advanced) {
     return "";
 }
 
+// The text of a file, empty when it cannot be read.
+inline std::string ReadTextFile(const std::string& path) {
+    std::string text;
+    FILE* file = fopen(path.c_str(), "rb");
+    if (!file)
+        return text;
+    char buffer[65536];
+    size_t count;
+    while ((count = fread(buffer, 1, sizeof(buffer), file)) > 0)
+        text.append(buffer, count);
+    fclose(file);
+    return text;
+}
+
 // The engine commands on the objects of tests/fake_unreal.cpp, whose layout
-// src/unreal.cpp must find by itself.
+// src/unreal.cpp must find by itself. With `sdkCopy`, the SDK of every
+// package is copied there, for the program that tests it (tests/sdk).
+// UObject::ProcessEvent is found by decoding the code of the game, x86 and x64
+// only: elsewhere, such as on ARM64 Linux, calls answer an error.
+#if defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86)
+constexpr bool kFindsProcessEvent = true;
+#else
+constexpr bool kFindsProcessEvent = false;
+#endif
+
 template <typename Client>
-std::string CheckRemoteUnreal(Client& client, const FakeUnreal& fake, bool advanced) {
+std::string CheckRemoteUnreal(Client& client, const FakeUnreal& fake, bool advanced, const std::string& sdkCopy = "") {
     auto payload = [&](const std::string& command) {
         std::string answer = client.Request(command);
         std::string text = answer.rfind("ok ", 0) == 0 ? RemotePayload(client, answer) : answer;
@@ -364,9 +387,11 @@ std::string CheckRemoteUnreal(Client& client, const FakeUnreal& fake, bool advan
     printf("engine info: %s\n", info.c_str());
     if (info.rfind(five ? "ok unreal ue5 5.8 uih_host" : "ok unreal ue4 4.22 uih_host", 0) != 0)
         return "engine info does not describe the Unreal Engine game";
-    if (!has(payload("engine assemblies"), "/Script/Engine 2\n/Script/Game 2\n") || payload("engine classes player") != "/Script/Game GamePlayer\n" ||
-        payload("engine classes * Game") != "/Script/Game ETeam\n/Script/Game GamePlayer\n" ||
-        payload("engine classes * /Script/Engine") != "/Script/Engine Actor\n/Script/Engine Pawn\n")
+    std::string packages = payload("engine assemblies");
+    if (!has(packages, "/Game/Blueprints/BP_Hero 1\n") || !has(packages, "/Script/Engine 3\n/Script/Game 2\n") ||
+        payload("engine classes player") != "/Script/Game GamePlayer\n" || payload("engine classes * Game") != "/Script/Game ETeam\n/Script/Game GamePlayer\n" ||
+        payload("engine classes * /Script/Engine") != "/Script/Engine Actor\n/Script/Engine KismetMathLibrary\n/Script/Engine Pawn\n" ||
+        payload("engine classes hero") != "/Game/Blueprints/BP_Hero BP_Hero_C\n")
         return "engine assemblies or classes does not list the packages and their classes";
     std::string real = five ? "double" : "float";
     if (payload("engine class GamePlayer") != "class GamePlayer : Pawn : Actor : Object (/Script/Game)\n"
@@ -379,20 +404,31 @@ std::string CheckRemoteUnreal(Client& client, const FakeUnreal& fake, bool advan
                                               "  0x120 GamePlayer* Target\n"
                                               "  0x128 Vector Location\n"
                                               "  0x148 TArray<int32> Inventory\n"
+                                              "  0x158 int32 \"Health Max\"\n"
                                               "  0x80 float BaseEyeHeight  (Pawn)\n"
                                               "  0x58 bool bHidden (bit 0x2)  (Actor)\n"
                                               "  0x60 TArray<FName> Tags  (Actor)\n"
                                               "functions:\n"
                                               "  bool Heal(int32 Amount)\n"
+                                              "  int32 GetStats(int32 Bonus, out int32 Total, out float Ratio)\n"
+                                              "  void Boost(ref int32 Value)\n"
+                                              "  Vector GetLocation()\n"
+                                              "  void SetLocation(Vector NewLocation)\n"
+                                              "  void Rename(FString NewName)\n"
                                               "functions of Actor: engine class Actor\n" ||
         payload("engine class Vector") != "struct Vector (/Script/CoreUObject)\nproperties:\n  0x0 " + real + " X\n  0x" + (five ? "8 " : "4 ") + real +
                                              " Y\n  0x" + (five ? "10 " : "8 ") + real + " Z\n" ||
-        payload("engine class Game:ETeam") != "enum ETeam (/Script/Game)\n" ||
+        payload("engine class Game:ETeam") != "enum ETeam (/Script/Game)\nvalues:\n  0 Red\n  1 Blue\n  2 Green\n  3 ETeam_MAX\n" ||
+        !has(payload("engine class KismetMathLibrary"), "functions:\n  static int32 Add_IntInt(int32 A, int32 B)\n") ||
         client.Request("engine class Nothing") != "error no class, struct or enum is named Nothing: see engine classes")
         return "engine class does not describe the classes, structs and enums";
+    std::string hero = payload("engine class BP_Hero_C");
+    if (hero.rfind("class BP_Hero_C : GamePlayer : Pawn : Actor : Object (/Game/Blueprints/BP_Hero)\nproperties:\n  0x15c float Mana\n", 0) != 0 ||
+        !has(hero, "functions:\n  float \"Get Health Ratio\"()\nfunctions of GamePlayer: engine class GamePlayer\n"))
+        return "engine class does not describe a blueprint class, or does not quote the names with spaces";
 
     std::string players = EngineHex(fake.alice) + " GamePlayer GamePlayer_0\n" + EngineHex(fake.bob) + " GamePlayer GamePlayer_1\n" + EngineHex(fake.carol) +
-                          " GamePlayer GamePlayer_2\n";
+                          " GamePlayer GamePlayer_2\n" + EngineHex(fake.dave) + " BP_Hero_C BP_Hero_C_0\n";
     if (payload("engine instances GamePlayer") != players || payload("engine instances Pawn") != EngineHex(fake.pawn) + " Pawn Pawn_0\n" + players ||
         payload("engine instances GamePlayer 1") != EngineHex(fake.alice) + " GamePlayer GamePlayer_0\n" ||
         client.Request("engine instances Vector") != "error Vector is a struct: its values live inside objects, not on their own")
@@ -406,8 +442,13 @@ std::string CheckRemoteUnreal(Client& client, const FakeUnreal& fake, bool advan
         payload("engine get GamePlayer Location" + alice) != "Vector {X=1, Y=2, Z=3}" || payload("engine get GamePlayer Location.Y" + alice) != real + " 2" ||
         payload("engine get GamePlayer Inventory" + alice) != "TArray<int32> [3, 1, 4]" ||
         payload("engine get Pawn BaseEyeHeight" + alice) != "float 64" || payload("engine get GamePlayer bHidden" + alice) != "bool true" ||
-        payload("engine get Actor Tags" + alice) != "TArray<FName> [\"Hero\", \"Player\"]")
+        payload("engine get Actor Tags" + alice) != "TArray<FName> [\"Hero\", \"Player\"]" ||
+        payload("engine get GamePlayer \"Health Max\"" + alice) != "int32 200")
         return "engine get does not read the properties of the objects";
+    std::string all = payload("engine get GamePlayer *" + alice);
+    if (all.rfind("0x100\tint32\tHealth\t100\n0x104\tfloat\tSpeed\t4.5\n", 0) != 0 || !has(all, "\n0x158\tint32\tHealth Max\t200\n") ||
+        !has(all, "\n0x58\tbool\tbHidden\ttrue\n"))
+        return "engine get * does not read every property of the object";
     if (client.Request("engine get GamePlayer Health") != "error give the object: properties of Unreal classes belong to objects, which engine instances lists" ||
         client.Request("engine get GamePlayer Health " + EngineHex(fake.pawn)) !=
             "error " + EngineHex(fake.pawn) + " is not an object of GamePlayer: see engine instances GamePlayer" ||
@@ -420,18 +461,85 @@ std::string CheckRemoteUnreal(Client& client, const FakeUnreal& fake, bool advan
         (memcpy(&health, reinterpret_cast<const void*>(fake.alice + 0x100), 4), health != 55) ||
         payload("engine set GamePlayer Speed" + alice + " 6.25") != "float 6.25" || payload("engine set GamePlayer bHidden" + alice + " false") != "bool false" ||
         (memcpy(&hidden, reinterpret_cast<const void*>(fake.alice + 0x58), 1), hidden != 0x01) ||
-        payload("engine set GamePlayer Location.Z" + alice + " -4") != real + " -4" || payload("engine set GamePlayer Team" + alice + " 1") != "ETeam 1" ||
+        payload("engine set GamePlayer Location.Z" + alice + " -4") != real + " -4" || payload("engine set GamePlayer Team" + alice + " Blue") != "ETeam 1" ||
+        payload("engine set GamePlayer Location" + alice + " {\"X\": 7, \"Y\": 8, \"Z\": 9}") != "Vector {X=7, Y=8, Z=9}" ||
+        payload("engine set GamePlayer \"Health Max\"" + alice + " 250") != "int32 250" ||
         payload("engine set GamePlayer Target" + alice + " null") != "GamePlayer* null" ||
         payload("engine set GamePlayer Target" + alice + " " + EngineHex(fake.carol)) != "GamePlayer* " + EngineHex(fake.carol) + " (GamePlayer GamePlayer_2)")
         return "engine set does not write the properties";
     if (client.Request("engine set GamePlayer Target" + alice + " " + EngineHex(fake.pawn)) !=
             "error give null or the address of an object of GamePlayer, from engine instances" ||
         client.Request("engine set GamePlayer PlayerName" + alice + " \"Eve\"") !=
-            "error the library cannot write a FString yet: numbers, enums, bools and object references")
+            "error the library cannot write a FString property yet: numbers, enums, bools, names, structs and object references, and strings as arguments of a call")
         return "engine set does not refuse what it cannot write";
-    std::string call = client.Request("engine call GamePlayer Heal" + alice + " [5]");
-    printf("engine call: %s\n", call.c_str());
-    if (call.rfind(advanced ? "error engine call does not support Unreal Engine games yet" : "error the advanced features are off", 0) != 0)
-        return "engine call does not refuse Unreal Engine games";
+
+    if (!advanced) {
+        std::string call = client.Request("engine call GamePlayer Heal" + alice + " [5]");
+        printf("engine call: %s\n", call.c_str());
+        if (call.rfind("error the advanced features are off", 0) != 0)
+            return "engine call answers while aiAdvancedFeatures is off";
+    } else if (!kFindsProcessEvent) {
+        std::string call = client.Request("engine call GamePlayer Heal" + alice + " [5]");
+        printf("engine call: %s\n", call.c_str());
+        if (call.rfind("error the library did not find UObject::ProcessEvent", 0) != 0)
+            return "engine call does not say it cannot call functions on this processor";
+    } else {
+        std::string dave = " " + EngineHex(fake.dave);
+        int callsBefore = FakeUnrealCalls();
+        if (payload("engine call GamePlayer Heal" + alice + " [5]") != "bool true\n" || payload("engine get GamePlayer Health" + alice) != "int32 60" ||
+            payload("engine call GamePlayer GetStats" + alice + " [10]") != "int32 60\nout Total = int32 70\nout Ratio = float 0.6\n" ||
+            payload("engine call GamePlayer Boost" + alice + " [21]") != "void\nout Value = int32 42\n" ||
+            payload("engine call GamePlayer GetLocation" + alice) != "Vector {X=7, Y=8, Z=9}\n" ||
+            payload("engine call GamePlayer SetLocation" + alice + " [{\"X\": 1, \"Y\": 2.5, \"Z\": 3}]") != "void\n" ||
+            payload("engine get GamePlayer Location" + alice) != "Vector {X=1, Y=2.5, Z=3}" ||
+            payload("engine call GamePlayer Rename" + alice + " [\"Eve\"]") != "void\n" || payload("engine get GamePlayer PlayerName" + alice) != "FString \"Eve\"" ||
+            payload("engine call BP_Hero_C \"Get Health Ratio\"" + dave) != "float 0.45\n" ||
+            payload("engine call KismetMathLibrary Add_IntInt - [2, 3]") != "int32 5\n")
+            return "engine call does not call the functions of the objects through ProcessEvent";
+        // The check of ProcessEvent, Add_IntInt(20, 22), before the first call.
+        printf("ProcessEvent calls: %d, on thread %llu, the window's %llu\n", FakeUnrealCalls() - callsBefore,
+               static_cast<unsigned long long>(FakeUnrealCallThread()), static_cast<unsigned long long>(fake.mainThread));
+        if (FakeUnrealCalls() - callsBefore != 9)
+            return "engine call did not check ProcessEvent once before the first call";
+        if (FakeUnrealCallThread() != fake.mainThread)
+            return "engine call did not run on the thread of the game's window";
+        if (client.Request("engine call GamePlayer Heal" + alice + " []") != "error Heal takes 1 arguments, 0 given: bool Heal(int32 Amount)" ||
+            client.Request("engine call GamePlayer Heal - [1]") != "error Heal is called on an object: give the address of an object of GamePlayer, from engine instances" ||
+            client.Request("engine call GamePlayer Fly" + alice) != "error GamePlayer has no function Fly: see engine class GamePlayer" ||
+            client.Request("engine call Vector X -") != "error Vector is a struct: only the functions of classes are called")
+            return "engine call does not refuse what it cannot call";
+    }
+
+    // The SDK: of the game by default, /Game/ and /Script/uih_host here, with
+    // the parents of the blueprint class and what it uses; of every package with all.
+    std::string game = payload("engine dump");
+    std::string gamePath = game.substr(0, game.find('\n'));
+    std::string version = five ? "-SDK-5.8-" : "-SDK-4.22-";
+    std::string gameSdk = ReadTextFile(gamePath);
+    if (!has(gamePath, "uih_host" + version) || !has(game, "\n5 classes, 1 structs, 1 enums, 8 functions, ") || gameSdk.empty() ||
+        !has(gameSdk, "class ABP_Hero_C : public AGamePlayer {") || !has(gameSdk, "    float Get_Health_Ratio();\n") ||
+        !has(gameSdk, "fn(\"Get Health Ratio\", ") || has(gameSdk, "UKismetMathLibrary {"))
+        return "engine dump does not write the SDK of the game";
+    std::string every = payload("engine dump all");
+    std::string path = every.substr(0, every.find('\n'));
+    std::string sdk = ReadTextFile(path);
+    printf("SDK: %s, %zu bytes\n", path.c_str(), sdk.size());
+    if (sdk.empty() || !has(sdk, "enum class ETeam : uint8_t {\n    Red = 0,\n    Blue = 1,\n    Green = 2,\n    ETeam_MAX = 3,\n};") ||
+        !has(sdk, "    static int32_t Add_IntInt(int32_t A, int32_t B);\n") ||
+        !has(sdk, "    int32_t GetStats(int32_t Bonus, int32_t& Total, float& Ratio);\n") ||
+        !has(sdk, "    void Boost(int32_t& Value);\n") || !has(sdk, "    int32_t& Health_Max() {") ||
+        !has(sdk, std::string("struct alignas(") + (five ? "8" : "4") + ") FVector {") ||
+        !has(sdk, "constexpr int kProcessEvent = " + std::to_string(kFindsProcessEvent ? fake.processEvent : -1) + ";"))
+        return "engine dump all does not write the SDK of every package";
+    if (client.Request("engine dump /Script/Nothing").rfind("error no class, struct or enum is in /Script/Nothing", 0) != 0)
+        return "engine dump does not refuse a scope without types";
+    if (!sdkCopy.empty()) {
+        FILE* copy = fopen(sdkCopy.c_str(), "wb");
+        bool written = copy && fwrite(sdk.data(), 1, sdk.size(), copy) == sdk.size();
+        if (copy)
+            fclose(copy);
+        if (!written)
+            return "the SDK could not be copied to " + sdkCopy;
+    }
     return "";
 }

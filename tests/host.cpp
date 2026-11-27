@@ -1236,6 +1236,37 @@ uint64_t g_engineThread = 0;
 RealMono g_mono;
 bool g_monoLoaded = false;
 FakeUnreal g_unreal;
+std::string g_sdkCopy;
+
+// The test of tests/sdk, a library built against the SDK of the fake game:
+// it runs on a thread of its own while the window renders, and calls the
+// functions of the game through uesdk::GameThread, on the window's thread.
+template <typename Frame>
+int SdkScenario(const std::string& path, Frame&& frame) {
+    std::string report;
+    int failed = -1;
+    WhileRendering(
+        [&] {
+            HMODULE library = LoadLibraryA(path.c_str());
+            auto test = library ? reinterpret_cast<int (*)(char*, int)>(GetProcAddress(library, "uih_sdk_test")) : nullptr;
+            if (!test) {
+                report = "the library or its uih_sdk_test() did not load";
+                return;
+            }
+            std::vector<char> text(1 << 16);
+            failed = test(text.data(), static_cast<int>(text.size()));
+            report = text.data();
+        },
+        frame);
+    printf("%s\n", report.c_str());
+    if (failed != 0)
+        return Fail("the program built against the SDK does not run against the game");
+    printf("the last call of ProcessEvent ran on thread %llu, the window's %llu\n", static_cast<unsigned long long>(FakeUnrealCallThread()),
+           static_cast<unsigned long long>(g_unreal.mainThread));
+    if (FakeUnrealCallThread() != g_unreal.mainThread)
+        return Fail("uesdk::GameThread did not call the functions on the thread of the window");
+    return 0;
+}
 
 // The commands of remote/uih_mcp.py while the menu is open: the screenshot
 // shows the game without the overlay, the message is drawn, and the keys reach
@@ -1280,7 +1311,7 @@ int RemoteScenario(HWND window, bool memory, bool advanced, Frame&& frame) {
             else if (g_monoLoaded)
                 engineFailure = CheckRealMono(client, g_mono, advanced);
             else if (g_unreal.generation)
-                engineFailure = CheckRemoteUnreal(client, g_unreal, advanced);
+                engineFailure = CheckRemoteUnreal(client, g_unreal, advanced, g_sdkCopy);
             else if (client.Request("engine info") != (memory ? "ok none" : "error memory access is off: set config.remoteMemory in example/config.cpp and rebuild the library"))
                 engineFailure = "engine info answers without a Unity runtime, or while remoteMemory is off";
             if (memory)
@@ -2708,12 +2739,14 @@ int main(int argc, char** argv) {
         else if (arg == "--mono" && i + 2 < argc) options.mono = argv[++i], options.monoAssembly = argv[++i];
         else if (arg == "--mono-root" && i + 1 < argc) options.monoRoot = argv[++i];
         else if (arg == "--unreal" && i + 1 < argc) options.unreal = atoi(argv[++i]);
+        else if (arg == "--dump-sdk" && i + 1 < argc) options.dumpSdk = argv[++i];
+        else if (arg == "--sdk-test" && i + 1 < argc) options.sdkTest = argv[++i];
     }
     if (!options.proxy.empty())
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--own-hooks before|after] [--fault access|exception|draw] [--second-window [--shared-device]] [--composition] [--capture-frame] [--remote [--remote-memory] [--remote-advanced] [--engine fake-runtime] [--mono runtime Game.dll [--mono-root dir]] [--unreal 4|5]] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--c-api] [--bench frames] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float|hdr10] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--own-hooks before|after] [--fault access|exception|draw] [--second-window [--shared-device]] [--composition] [--capture-frame] [--remote [--remote-memory] [--remote-advanced] [--engine fake-runtime] [--mono runtime Game.dll [--mono-root dir]] [--unreal 4|5 [--dump-sdk path]]] [--unreal 4|5 --sdk-test library] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--c-api] [--bench frames] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float|hdr10] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -2744,6 +2777,7 @@ int main(int argc, char** argv) {
     }
     if (options.unreal && !StartFakeUnreal(options.unreal, g_unreal))
         return Fail("--unreal takes 4 or 5");
+    g_sdkCopy = options.dumpSdk;
     if (options.remote)
         g_remoteHostProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(CountRemoteKeys)));
     PumpMessages();
@@ -2771,7 +2805,8 @@ int main(int argc, char** argv) {
         g_syncInterval = 0;
         g_pace = false;
     }
-    if (options.injectAt == 0 && options.dll.empty() && options.benchFrames <= 0)
+    // A library loaded by the host is the one copy of the hook in the process.
+    if (options.injectAt == 0 && options.dll.empty() && options.preview.empty() && options.benchFrames <= 0)
         StartHook(options);
 
     if (options.fullscreen && !getenv("UIH_TEST_FULLSCREEN"))
@@ -2956,6 +2991,14 @@ int main(int argc, char** argv) {
             }
             if (options.remote) {
                 result = RemoteScenario(window, options.remoteMemory, options.remoteAdvanced, [&] {
+                    PumpMessages();
+                    host->Frame();
+                });
+                if (result)
+                    break;
+            }
+            if (!options.sdkTest.empty()) {
+                result = SdkScenario(options.sdkTest, [&] {
                     PumpMessages();
                     host->Frame();
                 });

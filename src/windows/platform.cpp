@@ -26,6 +26,8 @@ void* g_dllNotificationCookie = nullptr;
 std::atomic<bool> g_unloadRequested{false};
 // False when Stop() left a thread inside a hook: the module must stay loaded.
 std::atomic<bool> g_hooksIdle{true};
+// Held while this copy of the hook has hooks in the process: see Start().
+HANDLE g_instance = nullptr;
 
 RendererSlot g_renderers[] = {
     {&kVulkanRenderer},
@@ -299,6 +301,20 @@ namespace platform {
 void WriteLog(const char* line) { OutputDebugStringA(line); }
 
 bool Start() {
+    // One copy of the hook per process. A second one, such as another DLL
+    // built from this library, would hook the same functions over the first
+    // one's hooks, and jump into its freed code once the first one unloads.
+    if (!g_instance) {
+        wchar_t name[64];
+        swprintf(name, 64, L"Local\\Universal-ImGui-Hook-%lu", GetCurrentProcessId());
+        HANDLE instance = CreateMutexW(nullptr, FALSE, name);
+        if (instance && GetLastError() == ERROR_ALREADY_EXISTS) {
+            CloseHandle(instance);
+            Log("Another copy of the hook runs in this process: unload it first, this one does not start");
+            return false;
+        }
+        g_instance = instance;
+    }
     if (!g_hooksIdle) {
         if (!WaitForIdleHooks(0)) {
             Log("A thread is still inside a hook, the hook cannot start yet");
@@ -346,6 +362,11 @@ void Stop() {
     CloseHandle(g_stopEvent);
     CloseHandle(g_wakeEvent);
     g_stopEvent = g_wakeEvent = nullptr;
+    // Hooks left in place, or kept to resume, keep the process to this copy.
+    if (g_hooksIdle && !StoppingToResume() && g_instance) {
+        CloseHandle(g_instance);
+        g_instance = nullptr;
+    }
 }
 
 void NewFrame() {

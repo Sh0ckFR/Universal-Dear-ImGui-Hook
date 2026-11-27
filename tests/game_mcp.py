@@ -107,6 +107,7 @@ def play(game, assistant, backend, screenshot):
                        "memory_signature", "memory_unpatch", "memory_watch", "memory_what_writes", "memory_write", "mouse_move",
                        "press_key", "screenshot", "show_text", "type_text", "wait_for_change", "game_speed",
                        "engine_info", "engine_classes", "engine_class", "engine_instances", "engine_field", "engine_call",
+                       "engine_dump",
                        # Registered by tests/remote_preload.cpp with uih::RegisterTool().
                        "test_add", "test_fail"])
     if tools != expected:

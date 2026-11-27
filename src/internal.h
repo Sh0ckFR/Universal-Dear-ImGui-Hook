@@ -324,12 +324,25 @@ std::string ProtectedCode(uintptr_t address, size_t size);
 std::string WriteCode(uintptr_t address, const void* data, size_t size, uintptr_t from);
 // "name" or "name+0x12" of the exported or dynamic symbol `address` is in, empty when none is known.
 std::string SymbolAt(uintptr_t address);
+// True when the code of the function at `function` tests the bits `mask` of
+// the 32-bit value `displacement` bytes into one of its arguments, as
+// `if (value->flags & mask)` compiles: a test of the memory, or of a register
+// loaded from it, within the first `length` bytes, after the jumps at its
+// start. Decodes x86, x64 and ARM64 code; false on other processors.
+bool CodeTestsBits(uintptr_t function, uint32_t displacement, uint32_t mask, size_t length);
 
 // Objects of the game's engine, src/engine.cpp: false when `command` is not engine.
 bool HandleEngine(const std::string& command, const std::string& rest, std::vector<uint8_t>& payload, std::string& answer);
 // Runs the engine call waiting for the game's main thread, if any: called by
 // the window procedure on Windows and by the X event hooks on Linux.
 void RunGameThreadCalls();
+// Runs `work` on the game's main thread and returns its answer, or an error
+// after 10 seconds. `work` gets everything it uses by value: it may still run
+// after the caller gave up on it.
+std::string RunOnGameThread(std::function<std::string()> work);
+// The most classes `engine classes` lists on this thread, 1000 by default;
+// the Engine tab of the AI Advanced Features window lists them all.
+size_t& EngineListLimit();
 // Calls `visit` with the readable memory of [base, base + size), region by
 // region, in pieces of at most 1 MB that overlap by `overlap` bytes, which
 // may be fewer; stops when `visit` returns false. Modules have unreadable
@@ -367,6 +380,11 @@ bool ParseJsonArray(const std::string& text, std::vector<std::string>& values, s
 std::string JsonQuote(const std::string& text);
 // Once the overlay is gone: ends the instruction watch and the scan of the window.
 void StopAdvanced();
+// The Engine tab of the AI Advanced Features window, src/explorer.cpp: the
+// classes, objects and functions of a Unity or Unreal Engine game, and the
+// SDK. Its requests run on a thread of their own, stopped by StopExplorer().
+void DrawExplorer();
+void StopExplorer();
 // Implemented once per platform: the instructions that write `size` bytes at
 // `address`, or that access them. Replaces the previous watch; empty when it
 // started, the reason otherwise.

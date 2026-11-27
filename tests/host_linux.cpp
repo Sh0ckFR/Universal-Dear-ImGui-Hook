@@ -554,6 +554,7 @@ uint64_t g_engineThread = 0;
 RealMono g_mono;
 bool g_monoLoaded = false;
 FakeUnreal g_unreal;
+std::string g_sdkCopy;
 // A function of the preloaded library. dlsym(RTLD_DEFAULT) would find the
 // stub in the procedure linkage table of an executable built without PIE.
 void* PreloadedFunction(const char* name) {
@@ -573,6 +574,40 @@ void* PreloadedFunction(const char* name) {
         return function;
     }
     return nullptr;
+}
+
+// The test of tests/sdk, a library built against the SDK of the fake game,
+// on a thread of its own while the window renders. On Linux the SDK has no
+// GameThread: the library calls the functions from its thread.
+int RunSdkTest(Display* display, Window window, Host& host, const std::string& path) {
+    XSelectInput(display, window, StructureNotifyMask);
+    auto frame = [&] {
+        while (XPending(display)) {
+            XEvent event;
+            XNextEvent(display, &event);
+        }
+        host.Frame();
+        usleep(5000);
+    };
+    std::string report;
+    int failed = -1;
+    WhileRendering(
+        [&] {
+            void* library = dlopen(path.c_str(), RTLD_NOW);
+            auto test = library ? reinterpret_cast<int (*)(char*, int)>(dlsym(library, "uih_sdk_test")) : nullptr;
+            if (!test) {
+                report = std::string("the library or its uih_sdk_test() did not load: ") + (library ? "" : dlerror());
+                return;
+            }
+            std::vector<char> text(1 << 16);
+            failed = test(text.data(), static_cast<int>(text.size()));
+            report = text.data();
+        },
+        frame);
+    printf("%s\n", report.c_str());
+    if (failed != 0)
+        return Fail("the program built against the SDK does not run against the game");
+    return 0;
 }
 
 int RunRemote(Display* display, Window window, Host& host, const std::string& name) {
@@ -660,7 +695,7 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
             else if (g_monoLoaded)
                 engineFailure = CheckRealMono(client, g_mono, true);
             else if (g_unreal.generation)
-                engineFailure = CheckRemoteUnreal(client, g_unreal, true);
+                engineFailure = CheckRemoteUnreal(client, g_unreal, true, g_sdkCopy);
             else if (client.Request("engine info") != "ok none")
                 engineFailure = "engine info answers without a Unity runtime";
             // Last: chat say replaces the message with one of a few seconds.
@@ -1023,11 +1058,13 @@ int main(int argc, char** argv) {
         else if (arg == "--mono" && i + 2 < argc) options.mono = argv[++i], options.monoAssembly = argv[++i];
         else if (arg == "--mono-root" && i + 1 < argc) options.monoRoot = argv[++i];
         else if (arg == "--unreal" && i + 1 < argc) options.unreal = atoi(argv[++i]);
+        else if (arg == "--dump-sdk" && i + 1 < argc) options.dumpSdk = argv[++i];
+        else if (arg == "--sdk-test" && i + 1 < argc) options.sdkTest = argv[++i];
         else if (arg == "--input" && i + 1 < argc) options.input = argv[++i];
         else if (arg == "--fault") options.fault = "env";
     }
     if (options.api != "opengl" && options.api != "vulkan") {
-        printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--transfer-only] [--vulkan-library path] [--menu-key keysym] [--unload-key keysym] [--resize] [--reload] [--second-window] [--recreate-context] [--bound-framebuffer] [--swap-with-damage] [--remote [--engine fake-runtime] [--mono runtime Game.dll [--mono-root dir]] [--unreal 4|5]]\n");
+        printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--transfer-only] [--vulkan-library path] [--menu-key keysym] [--unload-key keysym] [--resize] [--reload] [--second-window] [--recreate-context] [--bound-framebuffer] [--swap-with-damage] [--remote [--engine fake-runtime] [--mono runtime Game.dll [--mono-root dir]] [--unreal 4|5 [--dump-sdk path]]] [--unreal 4|5 --sdk-test library]\n");
         return 2;
     }
     setvbuf(stdout, nullptr, _IOLBF, 0);
@@ -1048,6 +1085,7 @@ int main(int argc, char** argv) {
     }
     if (options.unreal && !StartFakeUnreal(options.unreal, g_unreal))
         return Fail("--unreal takes 4 or 5");
+    g_sdkCopy = options.dumpSdk;
     Display* display = XOpenDisplay(nullptr);
     if (!display)
         return Skip("no X server");
@@ -1080,6 +1118,8 @@ int main(int argc, char** argv) {
             return Fail("the second window could not render");
         return RunSecondWindow(display, window, *host, second, *secondHost, name);
     }
+    if (!options.sdkTest.empty())
+        return RunSdkTest(display, window, *host, options.sdkTest);
     if (options.remote)
         return RunRemote(display, window, *host, name);
     if (options.input == "x11")
