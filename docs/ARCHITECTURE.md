@@ -10,6 +10,7 @@ The internals of Universal-Dear-ImGui-Hook, for contributors and the curious. To
 | `include/uih_c.h`, `src/c_api.cpp` | The same API for C and the languages that call C |
 | `src/uih.cpp`, `src/internal.h` | Platform-independent core: lifecycle, frame, textures, scale |
 | `src/remote.cpp`, `src/memory.cpp` | Remote control commands, and its memory commands |
+| `src/code.cpp`, `src/zydis_build.c` | The code commands: disassembler, patches and signatures, with Zydis compiled into the library on x86 and x64; the pages and threads are handled in `src/windows/code.cpp` and `src/linux/code.cpp` |
 | `src/engine.cpp`, `src/unreal.cpp` | Engine commands: the objects of Unity games through the C API of Mono or IL2CPP, and of Unreal Engine games from their object array |
 | `src/advanced.cpp` | Advanced features: chat, watch list, frozen values, instruction watch, the AI Advanced Features window |
 | `src/tools.cpp` | Tools of the game for the assistant, `uih::RegisterTool()`, and the small JSON reader of `uih::ToolArgument()` |

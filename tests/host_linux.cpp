@@ -554,6 +554,26 @@ uint64_t g_engineThread = 0;
 RealMono g_mono;
 bool g_monoLoaded = false;
 FakeUnreal g_unreal;
+// A function of the preloaded library. dlsym(RTLD_DEFAULT) would find the
+// stub in the procedure linkage table of an executable built without PIE.
+void* PreloadedFunction(const char* name) {
+    std::string preload = getenv("LD_PRELOAD") ? getenv("LD_PRELOAD") : "";
+    for (size_t start = 0; start < preload.size();) {
+        size_t end = preload.find_first_of(": ", start);
+        if (end == std::string::npos)
+            end = preload.size();
+        std::string path = preload.substr(start, end - start);
+        start = end + 1;
+        if (path.find("uih_remote_preload") == std::string::npos)
+            continue;
+        void* library = dlopen(path.c_str(), RTLD_LAZY | RTLD_NOLOAD);
+        void* function = library ? dlsym(library, name) : nullptr;
+        if (library)
+            dlclose(library);
+        return function;
+    }
+    return nullptr;
+}
 
 int RunRemote(Display* display, Window window, Host& host, const std::string& name) {
     int presses = 0;

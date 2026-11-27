@@ -102,9 +102,10 @@ def play(game, assistant, backend, screenshot):
         raise Failure(f"unexpected server {info['serverInfo']}")
     assistant.send({"jsonrpc": "2.0", "method": "notifications/initialized"})
     tools = sorted(tool["name"] for tool in assistant.request("tools/list", {})["tools"])
-    expected = sorted(["click", "drag", "game_info", "memory_find", "memory_freeze", "memory_modules", "memory_next", "memory_pattern",
-                       "memory_pointer", "memory_pointer_scan", "memory_read", "memory_results", "memory_watch", "memory_what_writes",
-                       "memory_write", "mouse_move", "press_key", "screenshot", "show_text", "type_text", "wait_for_change", "game_speed",
+    expected = sorted(["click", "drag", "game_info", "memory_disassemble", "memory_find", "memory_freeze", "memory_modules", "memory_next",
+                       "memory_patch", "memory_pattern", "memory_pointer", "memory_pointer_scan", "memory_read", "memory_results",
+                       "memory_signature", "memory_unpatch", "memory_watch", "memory_what_writes", "memory_write", "mouse_move",
+                       "press_key", "screenshot", "show_text", "type_text", "wait_for_change", "game_speed",
                        "engine_info", "engine_classes", "engine_class", "engine_instances", "engine_field", "engine_call",
                        # Registered by tests/remote_preload.cpp with uih::RegisterTool().
                        "test_add", "test_fail"])

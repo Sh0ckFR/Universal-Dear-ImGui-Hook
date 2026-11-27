@@ -89,6 +89,7 @@ if(WIN32)
     # The objects of an Unreal Engine 5.8 and 4.22 game, laid out in the host.
     uih_add_host_test(remote_unreal5 --api d3d11 --remote-memory --unreal 5)
     uih_add_host_test(remote_unreal4 --api d3d11 --remote-advanced --unreal 4)
+    uih_add_host_test(remote_c_api --api d3d11 --remote --c-api)
     # Recovery from a crash of the overlay needs structured exception handling.
     if(MSVC)
         foreach(api d3d9 d3d10 d3d11 d3d12 vulkan opengl)
@@ -246,6 +247,9 @@ else()
             add_custom_target(uih_mono_game ALL DEPENDS ${UIH_GAME_DLL})
             uih_add_remote_test(preload_glx_remote_real_mono --api opengl --mono ${UIH_MONO_RUNTIME} ${UIH_GAME_DLL})
         endif()
+        # The same tools, registered through the C interface.
+        uih_add_host_test(preload_glx_remote_c_api --api opengl --remote)
+        set_tests_properties(preload_glx_remote_c_api PROPERTIES ENVIRONMENT "LD_PRELOAD=${UIH_REMOTE_PRELOAD};UIH_TEST_C_TOOLS=1;${UIH_SANITIZER_OPTIONS}")
 
         # The hook with a probe of the mouse wheel, for the input scenario.
         add_library(uih_input_preload SHARED input_preload.cpp)
