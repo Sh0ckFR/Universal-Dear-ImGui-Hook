@@ -1,6 +1,13 @@
+# The sanitizers slow the remote scenarios several times over.
+if(UIH_SANITIZE)
+    set(UIH_TEST_TIMEOUT 300)
+else()
+    set(UIH_TEST_TIMEOUT 120)
+endif()
+
 function(uih_add_host_test name)
     add_test(NAME ${name} COMMAND uih_host ${ARGN})
-    set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120 RUN_SERIAL TRUE)
+    set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT ${UIH_TEST_TIMEOUT} RUN_SERIAL TRUE)
 endfunction()
 
 # A fake Unity scripting runtime for the engine commands of the remote control,

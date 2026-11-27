@@ -1046,6 +1046,8 @@ int RunFault(Display* display, Window window, Host& host, const std::string& nam
 } // namespace
 
 int main(int argc, char** argv) {
+    // Line by line, so that a test that times out shows how far it went.
+    setvbuf(stdout, nullptr, _IOLBF, 0);
     Options options;
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
