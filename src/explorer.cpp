@@ -620,7 +620,7 @@ void DrawCall(View& view) {
     ImGui::TextDisabled("on %s", object == "-" ? (function.isStatic ? "the class (static)" : "no object: select one in Instances") : object.c_str());
     bool pending = Busy(kCall);
     ImGui::BeginDisabled(pending);
-    if (ImGui::Button(pending ? "Calling..." : "Call")) {
+    if (ImGui::Button(pending ? "Calling...###call_run" : "Call###call_run")) {
         std::string json = "[";
         for (size_t i = 0; i < inputs.size(); ++i)
             json += (i ? "," : "") + JsonValue(*inputs[i], view.inputs[i]);
@@ -705,7 +705,7 @@ void DrawClass(View& view) {
     if (ImGui::CollapsingHeader("Instances and values", ImGuiTreeNodeFlags_DefaultOpen)) {
         bool pending = Busy(kInstances);
         ImGui::BeginDisabled(pending);
-        if (ImGui::Button(pending ? "Searching..." : view.instances.empty() ? "Find the objects" : "Find them again"))
+        if (ImGui::Button(pending ? "Searching...###find_objects" : view.instances.empty() ? "Find the objects###find_objects" : "Find them again###find_objects"))
             Submit(kInstances, "instances " + view.reference + " 1000");
         ImGui::EndDisabled();
         if (!view.instancesStatus.empty()) {
@@ -744,7 +744,7 @@ void DrawDump(View& view) {
     ImGui::SameLine();
     bool pending = Busy(kDump);
     ImGui::BeginDisabled(pending);
-    if (ImGui::Button(pending ? "Writing the SDK..." : "Dump C++ SDK")) {
+    if (ImGui::Button(pending ? "Writing the SDK...###dump_sdk" : "Dump C++ SDK###dump_sdk")) {
         view.dumpResult.clear();
         view.dumpPath.clear();
         Submit(kDump, std::string("dump ") + view.scope);
