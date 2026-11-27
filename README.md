@@ -1,62 +1,77 @@
+<div align="center">
+
 # Universal-Dear-ImGui-Hook
+
+**Draw your [Dear ImGui](https://github.com/ocornut/imgui) menu inside any game, whatever its graphics API, and let Claude see and play it.**
 
 [![build](https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook/actions/workflows/build.yml)
 [![release](https://img.shields.io/github/v/release/Sh0ckFR/Universal-Dear-ImGui-Hook)](https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook/releases/latest)
 [![license](https://img.shields.io/github/license/Sh0ckFR/Universal-Dear-ImGui-Hook)](LICENSE)
+![platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20Steam%20Deck-blue)
+![MCP](https://img.shields.io/badge/AI-MCP%20server-8A2BE2)
 
-A [Dear ImGui](https://github.com/ocornut/imgui) overlay that draws your interface inside another application, whatever graphics API it uses. The API is detected at runtime: build once, inject anywhere.
-
-The overlay can also let an AI assistant such as Claude Code [see and play the game](#remote-control-by-an-ai-assistant) through MCP, and you can [chat with Claude from inside the game](#talk-to-claude-from-the-game). With the memory tools, the assistant also reads and changes the game's memory and code, and sees the objects of [Unity and Unreal Engine games](#engine-tools).
-
-| API | Windows (x86, x64) | Linux (x86-64, ARM64) |
-| --- | --- | --- |
-| Direct3D 9, 9Ex | :white_check_mark: | Windows DLL under Wine or Proton |
-| Direct3D 10, 11, 12 | :white_check_mark: | Windows DLL under Wine or Proton |
-| Vulkan | :white_check_mark: | :white_check_mark: |
-| OpenGL 3.0+ | :white_check_mark: (WGL) | :white_check_mark: (GLX, EGL) |
-
-On Linux, the overlay works in X11, XWayland and native Wayland games.
+[Quick start](#quick-start) · [Chat with Claude](#talk-to-claude-from-the-game) · [AI remote control](#remote-control-by-an-ai-assistant) · [API](#api) · [Building](#building) · [Compatibility](docs/COMPATIBILITY.md)
 
 ![The example menu next to the Dear ImGui demo window, drawn by the hook in a Direct3D 11 application](imgui.png)
+
+</div>
+
+The graphics API is detected at run time: build once, inject anywhere. The same library also lets an AI assistant such as Claude Code [see and play the game](#remote-control-by-an-ai-assistant) through MCP, read and change its memory and code, and browse the objects of [Unity and Unreal Engine games](#engine-tools). You can even [chat with Claude from inside the game](#talk-to-claude-from-the-game).
+
+| API | Windows (x86, x64) | Linux (x86-64, ARM64) |
+| --- | :---: | :---: |
+| Direct3D 9, 9Ex | ✅ | ✅ Windows DLL under Wine or Proton |
+| Direct3D 10, 11, 12 | ✅ | ✅ Windows DLL under Wine or Proton |
+| Vulkan | ✅ | ✅ |
+| OpenGL 3.0+ | ✅ WGL | ✅ GLX, EGL |
+
+On Linux, the overlay works in X11, XWayland and native Wayland games.
 
 > [!IMPORTANT]
 > **Use it on single-player games and your own software.** Anti-cheat systems detect injected DLLs and can ban your account. While the remote control is on, any program running on your machine can control the game, and with the memory tools, read and write its memory.
 
 ## Contents
 
-- [Features](#features)
-- [Quick start](#quick-start)
-- [Usage](#usage): [Windows](#windows), [Linux](#linux), [settings](#settings), [your menu](#writing-your-menu), [as a library](#using-the-hook-as-a-library)
-- [Talk to Claude from the game](#talk-to-claude-from-the-game)
-- [Remote control by an AI assistant](#remote-control-by-an-ai-assistant)
-- [API](#api)
-- [How it works](#how-it-works)
-- [Building](#building)
-- [Tests](#tests), and the [games, APIs and cost of the overlay](docs/COMPATIBILITY.md)
-- [Contributing](#contributing)
-- [Limitations](#limitations)
-- [Credits](#credits), [Support](#support), [License](#license)
+| Get started | Go further | Project |
+| --- | --- | --- |
+| [Features](#features) | [Remote control by an AI assistant](#remote-control-by-an-ai-assistant) | [Tests](#tests) |
+| [Quick start](#quick-start) | [API](#api) | [Contributing](#contributing) |
+| [Usage](#usage): [Windows](#windows), [Linux](#linux), [settings](#settings) | [How it works](#how-it-works) | [Limitations](#limitations) |
+| [Writing your menu](#writing-your-menu), [as a library](#using-the-hook-as-a-library) | [Building](#building) | [Credits](#credits) |
+| [Talk to Claude from the game](#talk-to-claude-from-the-game) | [Compatibility and cost of the overlay](docs/COMPATIBILITY.md) | [Support](#support), [License](#license) |
 
 Sections marked with ▶ expand on click. What changed in each version is listed in the [releases](https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook/releases).
 
 ## Features
 
-- **Chat with Claude in the game**: a [chat window over the game](#talk-to-claude-from-the-game) where you tell Claude what to do. It looks at the game, plays it, reads or changes its memory, and answers in the chat.
-- **One library for every API**: the backend is picked from the first API that presents a frame. Inject before or after the game initializes its graphics.
-- **AI remote control**: through [MCP](#remote-control-by-an-ai-assistant), an assistant such as Claude Code sees the game, shows messages to the player, presses keys and clicks. Your menu can give it [tools of your own](#tools-of-your-own), such as *teleport* or *spawn an item*, which it calls like the built-in ones. With the [advanced features](#advanced-features-and-the-ai-advanced-features-window), it also types text, drags the mouse, waits for the screen to change, pauses or slows down the game while it thinks, follows pointer chains, freezes values, finds the code that writes them, disassembles and patches that code and builds signatures that survive an update, and the *AI Advanced Features* window shows everything it does.
-- **Unity and Unreal Engine objects**: with the [engine tools](#engine-tools), the assistant lists the classes of a Unity (Mono or IL2CPP) or Unreal Engine 4 or 5 game, finds their live objects, and reads and writes their fields by name instead of by address.
-- **Menu input**: `INSERT`, or L3 + R3 on a controller, opens the menu; `F11` removes the overlay and unloads the DLL. Both keys are [settings](#settings). While the menu is open, the game receives no keyboard, mouse or controller input (on Linux, no key or button presses and no motion, on X11 and native Wayland alike), and an XInput controller navigates the menu.
-- **The overlay can't crash the game** (MSVC builds on Windows, and Linux): an access violation or a C++ exception in the overlay, whether in a renderer backend or in your menu code, removes the overlay instead of taking the game down. The menu key brings it back.
-- **Images and frame capture**: `uih::CreateTexture()` turns RGBA pixels into an image for `ImGui::Image()`, and `uih::CaptureFrame()` copies the game's frame, without the overlay, on every backend.
-- **Multiple windows**: when the game presents to more than one window or swap chain, the overlay stays on one of them and follows the focus.
-- **Readable on any display**: the interface follows the game window's DPI, or a fixed scale, with correct colors on sRGB, floating-point and HDR10 back buffers, where the overlay is as bright as the SDR content Windows shows.
-- **No injector needed**: the DLL can be loaded as `dinput8.dll`, and the Linux library with `LD_PRELOAD`.
-- **No dependencies**: Dear ImGui, MinHook, Zydis and the Vulkan headers are vendored, and the C and C++ runtimes are linked statically.
-- **Tested in real games**: on every commit, the CI loads the library into [DDNet](https://ddnet.org/) and a [Godot](https://godotengine.org/) project on Windows and Linux, with Direct3D 11, Direct3D 12, Vulkan and OpenGL, and plays them through the MCP server on Linux. It also runs the Windows build of Godot under Wine with the DLL as `dinput8.dll`, with OpenGL, Direct3D 11 and Vulkan.
+**The overlay**
+
+- 🎨 **One library for every API.** The backend is picked from the first API that presents a frame. Inject before or after the game initializes its graphics.
+- ⌨️ **Menu input.** `INSERT`, or L3 + R3 on a controller, opens the menu, and `F11` removes the overlay and unloads the DLL; both keys are [settings](#settings). While the menu is open, the game receives no keyboard, mouse or controller input, and an XInput controller navigates the menu. On Linux, the game gets no key or button presses and no motion, on X11 and native Wayland alike.
+- 🛡️ **The overlay can't crash the game** (MSVC builds on Windows, and Linux). An access violation or a C++ exception in the overlay, in a renderer backend or in your menu code, removes the overlay instead of taking the game down. The menu key brings it back.
+- 🖼️ **Images and frame capture.** `uih::CreateTexture()` turns RGBA pixels into an image for `ImGui::Image()`, and `uih::CaptureFrame()` copies the game's frame, without the overlay, on every backend.
+- 🪟 **Multiple windows.** When the game presents to more than one window or swap chain, the overlay stays on one of them and follows the focus.
+- 🖥️ **Readable on any display.** The interface follows the game window's DPI, or a fixed scale. Colors are right on sRGB, floating-point and HDR10 back buffers, where the overlay is as bright as the SDR content Windows shows.
+
+**The AI assistant**
+
+- 💬 **Chat with Claude in the game.** A [chat window over the game](#talk-to-claude-from-the-game) where you tell Claude what to do. It looks at the game, plays it, reads or changes its memory, and answers in the chat.
+- 🤖 **AI remote control.** Through [MCP](#remote-control-by-an-ai-assistant), an assistant such as Claude Code sees the game, shows messages to the player, presses keys and clicks. Your menu can give it [tools of your own](#tools-of-your-own), such as *teleport* or *spawn an item*, which it calls like the built-in ones.
+- 🔬 **Memory and code tools.** With the [memory](#memory-tools) and [advanced](#advanced-features-and-the-ai-advanced-features-window) tools, it scans values, follows pointer chains, freezes values and finds the code that writes them. It also disassembles and patches that code, and builds signatures that survive an update.
+- ⏸️ **Plays at its own pace.** It types text, drags the mouse, waits for the screen to change, and pauses or slows down the game while it thinks. The *AI Advanced Features* window shows everything it does.
+- 🧩 **Unity and Unreal Engine objects.** With the [engine tools](#engine-tools), the assistant lists the classes of a Unity (Mono or IL2CPP) or Unreal Engine 4 or 5 game, finds their live objects, and reads and writes their fields by name instead of by address.
+
+**Shipping it**
+
+- 📦 **No injector needed.** The DLL can be loaded as `dinput8.dll`, and the Linux library with `LD_PRELOAD`.
+- 🧱 **No dependencies.** Dear ImGui, MinHook, Zydis and the Vulkan headers are vendored, and the C and C++ runtimes are linked statically: you ship one file.
+- ✅ **Tested in real games.** On every commit, the CI loads the library into [DDNet](https://ddnet.org/) and a [Godot](https://godotengine.org/) project on Windows and Linux, with Direct3D 11, Direct3D 12, Vulkan and OpenGL, and plays them through the MCP server on Linux. It also runs the Windows build of Godot under Wine with the DLL as `dinput8.dll`, with OpenGL, Direct3D 11 and Vulkan. [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) has the full list.
 
 ## Quick start
 
-**1. Get the library.** Prebuilt libraries are attached to each [release](https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook/releases), and every commit's builds are kept as [workflow artifacts](https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook/actions). Pick the one that matches the **game**, not your machine:
+### 1. Get the library
+
+Prebuilt libraries are attached to each [release](https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook/releases), and every commit's builds are kept as [workflow artifacts](https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook/actions). Pick the one that matches the **game**, not your machine:
 
 | Game | File |
 | --- | --- |
@@ -64,11 +79,27 @@ Sections marked with ▶ expand on click. What changed in each version is listed
 | Windows, 32-bit | `Universal-ImGui-Hook-msvc-Win32.dll` |
 | Linux, x86-64 or ARM64 | `Universal-ImGui-Hook-linux-x86_64.so` or `-linux-aarch64.so` (glibc 2.28 or later) |
 
-These are the `Universal-ImGui-Hook.dll` and `.so` that the build below produces, renamed after their platform; the rest of this page uses the short name. Each also comes as an `-ai` file, such as `Universal-ImGui-Hook-msvc-x64-ai.dll`, with the [chat with Claude](#talk-to-claude-from-the-game) and every tool of the assistant on: use it for single-player games only, since any program you run can then control the game and its memory.
+These are the `Universal-ImGui-Hook.dll` and `.so` that the build below produces, renamed after their platform; the rest of this page uses the short name.
 
-Each release lists the SHA256 of its libraries in `SHA256SUMS`, and GitHub attests that this repository's CI built them: `gh attestation verify Universal-ImGui-Hook-msvc-x64.dll --repo Sh0ckFR/Universal-Dear-ImGui-Hook` checks a file you downloaded.
+> [!TIP]
+> Each file also comes as an `-ai` version, such as `Universal-ImGui-Hook-msvc-x64-ai.dll`, with the [chat with Claude](#talk-to-claude-from-the-game) and every tool of the assistant on. Use it for single-player games only, since any program you run can then control the game and its memory.
 
-**2. Or build it.** On Windows, open `Universal-ImGui-Hook.sln` in Visual Studio 2022 or newer and build `Release|x64` (`Release|Win32` for a 32-bit game): the DLL is `build/vs/x64/Release/Universal-ImGui-Hook.dll` (`build/vs/x86/Release/` for Win32). On Linux:
+<details>
+<summary>Check a file you downloaded</summary>
+
+Each release lists the SHA256 of its libraries in `SHA256SUMS`, and GitHub attests that this repository's CI built them:
+
+```sh
+gh attestation verify Universal-ImGui-Hook-msvc-x64.dll --repo Sh0ckFR/Universal-Dear-ImGui-Hook
+```
+
+</details>
+
+### 2. Or build it
+
+**Windows**: open `Universal-ImGui-Hook.sln` in Visual Studio 2022 or newer and build `Release|x64`, or `Release|Win32` for a 32-bit game. The DLL is `build/vs/x64/Release/Universal-ImGui-Hook.dll`, or in `build/vs/x86/Release/` for Win32.
+
+**Linux**:
 
 ```sh
 sudo apt install cmake ninja-build g++ pkg-config libxcb1-dev
@@ -76,7 +107,11 @@ cmake --preset linux && cmake --build --preset linux
 LD_PRELOAD=$PWD/build/linux/Universal-ImGui-Hook.so ./game
 ```
 
-**3. Make it yours.** You only edit the example; the hook itself, in `src/`, needs no changes:
+[Building](#building) covers MinGW-w64, cross-compiling and the CMake options.
+
+### 3. Make it yours
+
+You only edit the example; the hook itself, in `src/`, needs no changes:
 
 | To change | Edit |
 | --- | --- |
@@ -84,17 +119,21 @@ LD_PRELOAD=$PWD/build/linux/Universal-ImGui-Hook.so ./game
 | Hotkeys, controller buttons, graphics API, interface scale | `example/config.cpp` |
 | AI remote control and its pipe or socket name | `example/config.cpp`: see [Remote control by an AI assistant](#remote-control-by-an-ai-assistant) |
 | Tools of your own for the assistant | `RegisterExampleTools()` in `example/menu.cpp`: see [Tools of your own](#tools-of-your-own) |
-| Fonts and style | a `config.setup` callback, run when the ImGui context is created, set next to `config.render` in `example/dllmain.cpp` (Windows) or `example/preload.cpp` (Linux) |
+| Fonts and style | A `config.setup` callback, run when the ImGui context is created, set next to `config.render` in `example/dllmain.cpp` (Windows) or `example/preload.cpp` (Linux) |
 
 ## Usage
 
 ### Windows
 
-Inject `Universal-ImGui-Hook.dll` with any injector, with `LoadLibrary`, or with the script of this repository (see [step 2](#step-2-load-the-library-into-the-game) of the chat). `F11` unloads an injected DLL; inject it again to bring the overlay back.
+| How to load it | What to do | What `F11` does |
+| --- | --- | --- |
+| **With an injector** | Inject `Universal-ImGui-Hook.dll` with any injector, with `LoadLibrary`, or with the script of this repository (see [step 2](#step-2-load-the-library-into-the-game) of the chat) | Unloads the DLL; inject it again to bring the overlay back |
+| **As `dinput8.dll`**, no injector | Rename the DLL to `dinput8.dll` and put it next to the game's executable. Under Wine or Proton, add `WINEDLLOVERRIDES="dinput8=n,b" %command%` to the launch options | Removes the overlay, and `INSERT` brings it back: the game holds a reference to the DLL, which stays loaded |
 
-To load it without an injector, rename it to `dinput8.dll` and put it next to the game's executable. It exports `DirectInput8Create` and forwards it to the system library, so any game that imports DirectInput 8, or loads `dinput8.dll` as Godot does, loads it. Under Wine or Proton, add `WINEDLLOVERRIDES="dinput8=n,b" %command%` to the launch options. Loaded this way, the DLL stays in the game, which holds a reference to it: `F11` removes the overlay and `INSERT` brings it back.
+As `dinput8.dll`, the DLL exports `DirectInput8Create` and forwards it to the system library, so any game that imports DirectInput 8, or loads `dinput8.dll` as Godot does, loads it.
 
-Logs (`config.debugLog`) go to `OutputDebugString`; read them with [DebugView](https://learn.microsoft.com/sysinternals/downloads/debugview). The example DLL writes them when the game runs with the environment variable `UIH_DEBUG=1`.
+> [!TIP]
+> Logs (`config.debugLog`) go to `OutputDebugString`; read them with [DebugView](https://learn.microsoft.com/sysinternals/downloads/debugview). The example DLL writes them when the game runs with the environment variable `UIH_DEBUG=1`.
 
 ### Linux
 
@@ -102,9 +141,18 @@ Logs (`config.debugLog`) go to `OutputDebugString`; read them with [DebugView](h
 LD_PRELOAD=/path/to/Universal-ImGui-Hook.so ./game
 ```
 
-For a Steam game, set the launch options to `LD_PRELOAD=/path/to/Universal-ImGui-Hook.so %command%`. `UIH_DEBUG=1` prints the log on stderr. A preloaded library cannot leave the process: `F11` removes the overlay and its hooks, and `INSERT` brings them back.
+- **Steam game**: set the launch options to `LD_PRELOAD=/path/to/Universal-ImGui-Hook.so %command%`.
+- **Logs**: `UIH_DEBUG=1` prints them on stderr.
+- **`F11`**: a preloaded library cannot leave the process, so `F11` removes the overlay and its hooks, and `INSERT` brings them back.
 
-**Steam Deck.** SteamOS is Linux: for a native game, set its launch options to `LD_PRELOAD=/path/to/Universal-ImGui-Hook.so %command%`. For a Windows game running under Proton, use the Windows DLL as `dinput8.dll` next to the game's executable, with `WINEDLLOVERRIDES="dinput8=n,b" %command%` in the launch options (see [Windows](#windows)). The controller buttons that open the menu (`menuButtons`) are read through XInput, which only the Windows DLL uses: in a native game, bind the menu key, `INSERT` by default, to a button of the Deck with Steam Input.
+**Steam Deck.** SteamOS is Linux:
+
+| Game | What to do |
+| --- | --- |
+| Native Linux game | Set its launch options to `LD_PRELOAD=/path/to/Universal-ImGui-Hook.so %command%` |
+| Windows game under Proton | Use the Windows DLL as `dinput8.dll` next to the game's executable, with `WINEDLLOVERRIDES="dinput8=n,b" %command%` in the launch options (see [Windows](#windows)) |
+
+The controller buttons that open the menu (`menuButtons`) are read through XInput, which only the Windows DLL uses. In a native game, bind the menu key, `INSERT` by default, to a button of the Deck with Steam Input.
 
 ### Settings
 
@@ -139,7 +187,7 @@ void ApplySettings(uih::Config& config) {
 
 </details>
 
-### Writing your menu
+## Writing your menu
 
 The interface lives in `example/menu.cpp`. `DrawMenu()` is called every frame between `ImGui::NewFrame()` and `ImGui::Render()`, so any Dear ImGui code works there. The entry points, `example/dllmain.cpp` on Windows and `example/preload.cpp` on Linux, apply the settings and start the hook:
 
@@ -159,7 +207,7 @@ static ImTextureData* logo = uih::CreateTexture(pixels, 64, 64);
 ImGui::Image(logo->GetTexRef(), ImVec2(64, 64));
 ```
 
-The example menu is a tour of the common widgets (buttons, combo and list boxes, inputs, sliders, colors, tabs, trees, tables, plots, popups, draw lists), with `imgui.png` shown under the slider. Its *Menu* bar opens Dear ImGui's own demo window, which covers every function. `example/image.cpp` embeds the picture in the library and decodes it with [stb_image](https://github.com/nothings/stb).
+The example menu is a tour of the common widgets: buttons, combo and list boxes, inputs, sliders, colors, tabs, trees, tables, plots, popups and draw lists, with `imgui.png` shown under the slider. Its *Menu* bar opens Dear ImGui's own demo window, which covers every function. `example/image.cpp` embeds the picture in the library and decodes it with [stb_image](https://github.com/nothings/stb).
 
 ### Using the hook as a library
 
@@ -200,7 +248,9 @@ flowchart LR
 
 ### Step 1: get the library with the chat on
 
-Download the `-ai` library of a [release](https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook/releases) that matches the game, such as `Universal-ImGui-Hook-msvc-x64-ai.dll` (see [Quick start](#quick-start)): it has the settings below on. Or build it: in `example/config.cpp`, set these settings to `true`,
+Download the `-ai` library of a [release](https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook/releases) that matches the game, such as `Universal-ImGui-Hook-msvc-x64-ai.dll` (see [Quick start](#quick-start)): it has the settings below on.
+
+Or build it. In `example/config.cpp`, set these settings to `true`, or configure CMake with `-DUIH_EXAMPLE_AI=ON`, which turns them all on:
 
 ```cpp
 config.remoteControl = true;        // the game can be controlled through a local pipe or socket
@@ -208,7 +258,7 @@ config.remoteMemory = true;         // optional: Claude can read and change the 
 config.aiAdvancedFeatures = true;   // the AI Advanced Features window and its chat
 ```
 
-or configure CMake with `-DUIH_EXAMPLE_AI=ON`, which turns them all on. Then build. On Windows, open `Universal-ImGui-Hook.sln` in Visual Studio and build `Release|x64` (`Release|Win32` for a 32-bit game), which produces `build/vs/x64/Release/Universal-ImGui-Hook.dll` (`build/vs/x86/Release/` for Win32). On Linux, `cmake --preset linux && cmake --build --preset linux` produces `build/linux/Universal-ImGui-Hook.so`.
+Then build, as in [Quick start](#2-or-build-it): `build/vs/x64/Release/Universal-ImGui-Hook.dll` on Windows (`build/vs/x86/Release/` for Win32), `build/linux/Universal-ImGui-Hook.so` on Linux.
 
 ### Step 2: load the library into the game
 
@@ -228,7 +278,7 @@ LD_PRELOAD=$PWD/build/linux/Universal-ImGui-Hook.so /path/to/game
 
 The socket opens with the overlay's first frame, in the process that draws it, not in the launch scripts that preload the library too.
 
-The overlay shows up with the menu open: that is how you know the library is loaded. To check that the game also answers on its pipe or socket, however the library got in:
+**Check.** The overlay shows up with the menu open: that is how you know the library is loaded. To check that the game also answers on its pipe or socket, however the library got in:
 
 ```sh
 python remote/uih_mcp.py check
@@ -250,7 +300,8 @@ python remote/uih_chat.py
 
 It prints `Connected` once it has found the game. Start it before or after the game, in any order: it waits for the game, and for it to come back after a restart.
 
-You never start `remote/uih_mcp.py` yourself for the chat: the bridge hands it to Claude Code, which starts it once and keeps it for the conversation. Run without arguments, it is an MCP server waiting for a client on its standard input, and does nothing on its own.
+> [!NOTE]
+> You never start `remote/uih_mcp.py` yourself for the chat: the bridge hands it to Claude Code, which starts it once and keeps it for the conversation. Run without arguments, it is an MCP server waiting for a client on its standard input, and does nothing on its own.
 
 ### Step 4: chat
 
@@ -262,7 +313,9 @@ In the game, press `INSERT` to open the menu, click **AI Advanced Features**, an
 - *Type "gg" in the game's chat.*
 - *Why can't I buy this item?*
 
-Claude writes in the chat as it works, and the line *Claude is working* shows which tool it is using. **Stop** ends its answer, and **New conversation** makes it forget what was said. To play, Claude closes the menu, since the game gets no keys or clicks while it is open; its answers then show at the top of the screen, and `INSERT` brings the chat back.
+Claude writes in the chat as it works, and the line *Claude is working* shows which tool it is using. **Stop** ends its answer, and **New conversation** makes it forget what was said.
+
+To play, Claude closes the menu, since the game gets no keys or clicks while it is open. Its answers then show at the top of the screen, and `INSERT` brings the chat back.
 
 ### Bridge options
 
@@ -272,7 +325,14 @@ Claude writes in the chat as it works, and the line *Claude is working* shows wh
 | `--model <model>` | Claude Code's default | `sonnet` answers faster, `opus` thinks more |
 | `--claude <path>` | `claude` on the `PATH` | The Claude Code executable |
 
-The bridge runs Claude Code headless (`claude -p`) with the tools of `remote/uih_mcp.py` and no other tool: no shell, no file access. It starts it as soon as it finds the game and keeps it for the whole conversation, writing it each of your messages, so answers start without waiting for Claude Code to load; **New conversation** starts a new one. It runs from its own folder in the temporary directory, so none of your `CLAUDE.md` files apply, and the conversation is kept there: if Claude Code stops, the next message resumes it.
+<details>
+<summary>How the bridge runs Claude Code</summary>
+
+- It runs Claude Code headless (`claude -p`) with the tools of `remote/uih_mcp.py` and no other tool: no shell, no file access.
+- It starts it as soon as it finds the game and keeps it for the whole conversation, writing it each of your messages, so answers start without waiting for Claude Code to load. **New conversation** starts a new one.
+- It runs from its own folder in the temporary directory, so none of your `CLAUDE.md` files apply. The conversation is kept there: if Claude Code stops, the next message resumes it.
+
+</details>
 
 ### Troubleshooting
 
@@ -288,7 +348,9 @@ The bridge runs Claude Code headless (`claude -p`) with the tools of `remote/uih
 
 ## Remote control by an AI assistant
 
-The library can let an AI assistant such as [Claude Code](https://claude.com/claude-code) see the game, show messages to the player, press keys and click, and optionally read and write the game's memory. The assistant speaks the [Model Context Protocol](https://modelcontextprotocol.io) (MCP) with `remote/uih_mcp.py` over standard input and output, and the script talks to the library over a local named pipe (Windows) or Unix socket (Linux). It works with every graphics API, and on Linux with X11, XWayland and native Wayland games.
+The library can let an AI assistant such as [Claude Code](https://claude.com/claude-code) see the game, show messages to the player, press keys and click, and optionally read and write the game's memory. It works with every graphics API, and on Linux with X11, XWayland and native Wayland games.
+
+The assistant speaks the [Model Context Protocol](https://modelcontextprotocol.io) (MCP) with `remote/uih_mcp.py` over standard input and output, and the script talks to the library over a local named pipe (Windows) or Unix socket (Linux):
 
 ```mermaid
 flowchart LR
@@ -296,7 +358,9 @@ flowchart LR
     B -- "local named pipe or Unix socket" --> C["The library in the game"]
 ```
 
-**1. Turn it on and load the library into the game**, as in steps [1](#step-1-get-the-library-with-the-chat-on) and [2](#step-2-load-the-library-into-the-game) of the chat. Only `config.remoteControl` is required: `remoteMemory` adds the memory tools, and `aiAdvancedFeatures` adds the advanced tools and their window. `config.remotePipe` names the pipe, `\\.\pipe\universal-imgui-hook` by default, or the socket, `$XDG_RUNTIME_DIR/universal-imgui-hook`. `python remote/uih_mcp.py check` tells you whether the game answers.
+### Set it up
+
+**1. Turn it on and load the library into the game**, as in steps [1](#step-1-get-the-library-with-the-chat-on) and [2](#step-2-load-the-library-into-the-game) of the chat. Only `config.remoteControl` is required; the other settings add tools, as the table below shows. `config.remotePipe` names the pipe, `\\.\pipe\universal-imgui-hook` by default, or the socket, `$XDG_RUNTIME_DIR/universal-imgui-hook`. `python remote/uih_mcp.py check` tells you whether the game answers.
 
 **2. Register the MCP server with the assistant**, once. You do not start `uih_mcp.py` yourself: the assistant does when a session starts, and talks to it over its standard input and output. With Claude Code:
 
@@ -316,19 +380,28 @@ On Linux, use `python3 /path/to/Universal-Dear-ImGui-Hook/remote/uih_mcp.py`. Wi
 
 **3. Ask.** Start a new session of the assistant, or run `/mcp` in Claude Code, and talk about the game:
 
-- *Look at the game and tell me what you see.*
-- *Write "Well done!" in the game for 5 seconds.*
-- *Walk right to the edge of the platform, then jump.*
-- *Open the overlay menu and describe it.*
-- *Click on "New game" in the main menu.*
-- *Find my money in memory and set it to 99999.* (with `remoteMemory`)
-- *Type "gg" in the chat, then wait for the next round to start.* (with `aiAdvancedFeatures`)
-- *Find my health, keep it at 100, and find a pointer to it that survives a restart.* (with both)
-- *Find the instruction that takes my health away, show me the code around it, and patch it out.* (with both)
+| Ask | Needs |
+| --- | --- |
+| *Look at the game and tell me what you see.* | `remoteControl` |
+| *Write "Well done!" in the game for 5 seconds.* | `remoteControl` |
+| *Walk right to the edge of the platform, then jump.* | `remoteControl` |
+| *Open the overlay menu and describe it.* | `remoteControl` |
+| *Click on "New game" in the main menu.* | `remoteControl` |
+| *Find my money in memory and set it to 99999.* | `remoteMemory` |
+| *Type "gg" in the chat, then wait for the next round to start.* | `aiAdvancedFeatures` |
+| *Find my health, keep it at 100, and find a pointer to it that survives a restart.* | `remoteMemory` and `aiAdvancedFeatures` |
+| *Find the instruction that takes my health away, show me the code around it, and patch it out.* | `remoteMemory` and `aiAdvancedFeatures` |
+
+### Which tools each setting gives
+
+| With | The assistant gets |
+| --- | --- |
+| `remoteControl` | The [tools](#tools): screenshot, message, keys, clicks, game info, and [tools of your own](#tools-of-your-own) |
+| `remoteMemory` too | The [memory tools](#memory-tools) and the [engine tools](#engine-tools) |
+| `aiAdvancedFeatures` too | The [advanced tools](#advanced-features-and-the-ai-advanced-features-window): typing, mouse, waiting, game speed, and the *AI Advanced Features* window with the chat |
+| All three | The advanced memory tools: pointers, watch list, what writes, disassembler, patches, signatures |
 
 ### Tools
-
-The assistant gets these tools:
 
 | Tool | Effect |
 | --- | --- |
@@ -353,7 +426,9 @@ Addresses are hexadecimal or `module+offset`, such as `game.exe+1a2b3c`. With `a
 
 ### Engine tools
 
-With `remoteMemory`, the assistant also sees the objects of Unity and Unreal Engine games, by their classes and fields instead of bytes. On Unity, the library finds the runtime of the game's scripts, Mono or IL2CPP, and calls its C API, which it does not link. On Unreal Engine 4 and 5, it finds the engine's name table and object array in the game's memory, and reads the classes and properties from them.
+With `remoteMemory`, the assistant also sees the objects of Unity and Unreal Engine games, by their classes and fields instead of bytes:
+- **Unity**: the library finds the runtime of the game's scripts, Mono or IL2CPP, and calls its C API, which it does not link.
+- **Unreal Engine 4 and 5**: it finds the engine's name table and object array in the game's memory, and reads the classes and properties from them.
 
 | Tool | Effect |
 | --- | --- |
@@ -391,17 +466,21 @@ and, with `remoteMemory` too:
 
 The example menu then shows an **AI Advanced Features** button, which opens a window provided by the library, `uih::DrawAIAdvancedFeatures()`:
 
-- **Chat**: talk to Claude from the game while `remote/uih_chat.py` runs: see [Talk to Claude from the game](#talk-to-claude-from-the-game);
-- **Activity**: the assistant's commands and their answers, newest first;
-- two switches that pause the assistant's input (keys, clicks, typing, mouse) or its memory tools, without rebuilding, and the speed of the game, to resume a game the assistant paused;
-- **Watch list**: the values watched by the assistant or the player, updated live, with a checkbox to freeze each one, a value to write, and a form to add one;
-- **Pointers**: a pointer chain followed as you type it, and a pointer scan whose results go to the watch list in one click;
-- **What writes**: the instruction watch on an address, with each instruction, decoded, its hit count and the bytes before it;
-- **Patches**: the code the assistant patched, with a button that restores each patch, or all of them.
+| Part of the window | What it does |
+| --- | --- |
+| **Chat** | Talk to Claude from the game while `remote/uih_chat.py` runs: see [Talk to Claude from the game](#talk-to-claude-from-the-game) |
+| **Activity** | The assistant's commands and their answers, newest first |
+| Switches | Pause the assistant's input (keys, clicks, typing, mouse) or its memory tools, without rebuilding; and the speed of the game, to resume a game the assistant paused |
+| **Watch list** | The values watched by the assistant or the player, updated live, with a checkbox to freeze each one, a value to write, and a form to add one |
+| **Pointers** | A pointer chain followed as you type it, and a pointer scan whose results go to the watch list in one click |
+| **What writes** | The instruction watch on an address, with each instruction, decoded, its hit count and the bytes before it |
+| **Patches** | The code the assistant patched, with a button that restores each patch, or all of them |
 
 ### Tools of your own
 
-Your code can give the assistant tools of its own, next to the built-in ones: it knows the game, where the assistant only sees pixels and bytes. `uih::RegisterTool()` takes a name, a description, the [JSON Schema](https://json-schema.org/) of the arguments and a function, which receives the arguments as JSON and returns the text the assistant reads. The function runs in the frame of the overlay, on the thread of the render callback, so it can use the game's objects as your menu does:
+Your code can give the assistant tools of its own, next to the built-in ones: it knows the game, where the assistant only sees pixels and bytes.
+
+`uih::RegisterTool()` takes a name, a description, the [JSON Schema](https://json-schema.org/) of the arguments and a function. The function receives the arguments as JSON and returns the text the assistant reads. It runs in the frame of the overlay, on the thread of the render callback, so it can use the game's objects as your menu does:
 
 ```cpp
 uih::RegisterTool("teleport", "Moves the player to x, y, z in world units, and returns where the player ended up.",
@@ -414,24 +493,48 @@ uih::RegisterTool("teleport", "Moves the player to x, y, z in world units, and r
                   });
 ```
 
-`uih::ToolArgument()` reads one argument without a JSON library; an exception thrown by the function reaches the assistant as an error. The example registers `example_menu`, which reads and sets the slider and the checkbox of its menu. The tools need `remoteControl` only, and the assistant sees those registered when its session starts: in Claude Code, run `/mcp` to reconnect after registering more. `python remote/uih_mcp.py check` lists them.
+- `uih::ToolArgument()` reads one argument without a JSON library.
+- An exception thrown by the function reaches the assistant as an error.
+- The example registers `example_menu`, which reads and sets the slider and the checkbox of its menu.
+- The tools need `remoteControl` only. The assistant sees those registered when its session starts: in Claude Code, run `/mcp` to reconnect after registering more. `python remote/uih_mcp.py check` lists them.
+
+### Good to know
 
 <details>
-<summary>Good to know: security, focus, limits</summary>
+<summary>Security</summary>
 
 - **Any program you run can use the pipe or the socket**, so the remote control is off by default. Other machines cannot, nor, on Linux, other users. Turn it on for single-player games only: anti-cheat systems detect injected DLLs.
+- With `remoteMemory`, any program you run can also read and write the game's memory through the pipe or the socket; on Linux, that bypasses Yama's ptrace restrictions for programs of your user.
+- One game per pipe or socket name: a second game started with the same name logs that the remote control is unavailable.
+- `unloadKey` stops the remote control along with the overlay.
+
+</details>
+
+<details>
+<summary>Keys, clicks and focus</summary>
+
 - **While you type to the assistant, the game does not have the focus.** Keys and clicks then reach it as window messages, or X11 events on Linux, which games that read the keyboard or mouse state directly (DirectInput, raw input) do not see, and neither does the overlay menu on Linux. With the focus, a click moves the player's cursor, except at a point another window covers, where it goes as a window message. Click the game window after sending your request, or let the assistant play on a second screen.
 - While the overlay menu is open, the game receives no keys: the assistant can close it with `insert`.
 - The assistant plays turn by turn, a screenshot and a few keys at a time: fine for menus, puzzles and slow games, not for reflexes.
 - On Linux, keys and clicks go through the X server's XTEST extension; without it, they are sent as events to the window. Native Wayland games get them as Wayland events, handed to the listeners of their pointer and keyboard the next time they read their events: the compositor's pointer does not move, and a game that reads no events, such as one stopped by `game_speed 0`, gets them once it runs again (the command answers an error after one second).
-- One game per pipe or socket name: a second game started with the same name logs that the remote control is unavailable.
-- `unloadKey` stops the remote control along with the overlay.
-- With `remoteMemory`, any program you run can also read and write the game's memory through the pipe or the socket; on Linux, that bypasses Yama's ptrace restrictions for programs of your user. A value scan also finds copies of the value: change it in the game and narrow the scan until one address is left.
 - Typed text reaches games that read text input, as chat boxes do; games that read the keys themselves see only Enter and Tab, so use `press_key` for them. On Linux, a character missing from the keyboard layout is mapped to a free keycode while it is typed, which the X server's other applications see too.
+- Screenshots of HDR back buffers, with more than 10 bits per channel, fail.
+
+</details>
+
+<details>
+<summary>Memory and code</summary>
+
+- A value scan also finds copies of the value: change it in the game and narrow the scan until one address is left.
 - `memory_what_writes` sets debug register 3 of every thread of the game on Windows: a debugger attached to the game, or a game that uses that register, sees the change. On Linux, it asks the kernel for a hardware breakpoint on each thread (perf events), which unprivileged processes get while `kernel.perf_event_paranoid` is 2 or lower. Ubuntu sets 4, so run `sudo sysctl kernel.perf_event_paranoid=2` once per boot. Threads started later are watched within half a second.
 - `memory_patch` changes code that the game's threads may be running. On Windows, they are suspended while the bytes change, and the patch waits for none of them to be inside those bytes; on Linux, they keep running, and a patch of up to 8 bytes within an aligned 8-byte word is written at once. A thread that returns into the middle of patched bytes, from a call they hold, still runs a cut instruction. Code generated at run time, by a JIT, may be generated again over a patch.
 - `memory_disassemble` and `memory_signature` decode x86 and x64 code only: on ARM64 Linux, they answer that the processor is not supported, and `memory_patch` does not check where the instructions end.
-- Screenshots of HDR back buffers, with more than 10 bits per channel, fail.
+
+</details>
+
+<details>
+<summary>Unity and Unreal Engine</summary>
+
 - `engine_instances` lists the objects of the exact class: ask for each subclass by its name. Destroyed Unity objects are left out. An object is recognized by its header and checked against its fields, so for a class with no reference or boolean field, and not a Unity object, a freed object whose memory was not reused yet can still be listed.
 - On Unreal Engine, the library finds the name table and the object array by their contents and checks every offset it uses against objects all games have, but it was tested on layouts built from Epic's engine headers (5.8 and 4.22), not on shipped games: a game whose engine was modified, or whose object array is encrypted, gets an error. It reads properties of every type and writes numbers, enums, bools and object references, not strings; it does not call functions, and does not list the values of enums.
 - `engine_call` waits for the game's main thread: on Windows, the thread of its window, which runs the call in its next message; on Linux, the thread reading its X events. A game whose main thread is stuck, such as during a loading screen, answers after 10 seconds with an error. Structs cannot be passed as arguments.
@@ -514,7 +617,15 @@ uih_register_tool("teleport", "Moves the player to x.",
 
 ## How it works
 
-In short: `Start()` hooks the present function of each graphics API (`Present`, `vkQueuePresentKHR`, `*SwapBuffers`), found through dummy objects with MinHook on Windows and by symbol interposition on Linux. In each present, the overlay runs your `render` callback and draws the ImGui data on the game's back buffer. While the menu is open, the game's input functions report nothing, and faults in the overlay are caught so they remove the overlay instead of crashing the game.
+```mermaid
+flowchart LR
+    A["The game presents a frame"] --> B["The hooked present function<br/>(Present, vkQueuePresentKHR, *SwapBuffers)"]
+    B --> C["Your render callback<br/>draws the ImGui menu"]
+    C --> D["The overlay draws on<br/>the game's back buffer"]
+    D --> E["The real present"]
+```
+
+`Start()` hooks the present function of each graphics API (`Present`, `vkQueuePresentKHR`, `*SwapBuffers`), found through dummy objects with MinHook on Windows and by symbol interposition on Linux. In each present, the overlay runs your `render` callback and draws the ImGui data on the game's back buffer. While the menu is open, the game's input functions report nothing, and faults in the overlay are caught so they remove the overlay instead of crashing the game.
 
 The details, from hook points and input blocking to teardown, faults, frame capture and the remote control server, are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -599,19 +710,24 @@ cmake --preset msvc-x64 -DUIH_BUILD_TESTS=ON && cmake --build --preset msvc-x64
 ctest --test-dir build/msvc-x64 -C Release
 ```
 
-Some tests press real keys and move the mouse. They are skipped when the host window does not have the focus, so leave the machine alone while they run.
+> [!NOTE]
+> Some tests press real keys and move the mouse. They are skipped when the host window does not have the focus, so leave the machine alone while they run.
 
-[tests/README.md](tests/README.md) describes every scenario, how to run the tests without a GPU or under the validation and debug layers, the Linux tests, the real-game tests and what the CI checks.
-
-[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) lists the games, graphics APIs and toolchains the CI tests on every commit. It also gives the cost of the overlay, measured with `uih_host --bench`: at most 0.07 ms per frame on an RTX 4070 SUPER, whatever the API, with the menu open or closed.
+- [tests/README.md](tests/README.md) describes every scenario, how to run the tests without a GPU or under the validation and debug layers, the Linux tests, the real-game tests and what the CI checks.
+- [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) lists the games, graphics APIs and toolchains the CI tests on every commit. It also gives the cost of the overlay, measured with `uih_host --bench`: at most 0.07 ms per frame on an RTX 4070 SUPER, whatever the API, with the menu open or closed.
 
 ## Contributing
 
-Bug reports, fixes and features are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) gives the principles and rules of the project, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) maps where the code is and how it works. Report security problems privately, as [SECURITY.md](SECURITY.md) explains.
+Bug reports, fixes and features are welcome:
+- [CONTRIBUTING.md](CONTRIBUTING.md) gives the principles and rules of the project.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) maps where the code is and how it works.
+- Report security problems privately, as [SECURITY.md](SECURITY.md) explains.
 
 ## Limitations
 
-**Windows**
+<details>
+<summary><b>Windows</b></summary>
+
 - `CaptureFrame()` only copies 8-bit and 10-bit back buffers: HDR output's floating-point back buffers are not captured, and the frame of an HDR10 swap chain comes with its PQ values as they are, which look washed out.
 - On an HDR10 swap chain, the overlay draws its colors with the PQ curve when the game set the color space after the hook started, or when the game's window is on a display in HDR mode. A game injected late on an SDR display, whose HDR10 output Windows converts, shows the overlay with wrong colors until it sets the color space again, as when HDR is turned off and on in its settings.
 - A Vulkan swap chain created before the hook has no overlay until the game recreates it. Its presents report `VK_SUBOPTIMAL_KHR`, to which games respond by recreating it.
@@ -619,11 +735,19 @@ Bug reports, fixes and features are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) 
 - `game_speed` slows down the clocks the game reads through Windows. A game that times itself with the processor's counter alone (`rdtsc`), which is rare, keeps running in real time.
 - MinGW-w64 builds of the DLL survive C++ exceptions in the overlay, but not access violations, since MinGW-w64 has no structured exception handling. The released DLLs are built with MSVC.
 
-**Linux**
+</details>
+
+<details>
+<summary><b>Linux</b></summary>
+
 - Input is read from the X server, or, for native Wayland games (SDL with `SDL_VIDEODRIVER=wayland`, GLFW, Godot with `--display-driver wayland`, Vulkan or EGL on a `wl_surface`), from the listeners of their `wl_pointer` and `wl_keyboard`. The wheel scrolls the menu in games that read the mouse buttons from the X server, and in Wayland games. Input methods are not handled, and a pointer the game has grabbed stays grabbed while the menu is open.
 - On Wayland, a pointer the game locked (`zwp_locked_pointer_v1`) stays locked while the menu is open: its relative motion moves the menu's cursor instead, which the compositor does not draw. Keys are read with the game's keymap through libxkbcommon, opened at run time, or with the US layout when it is not installed. Listeners set with `wl_proxy_add_dispatcher`, and those of a protocol version newer than the library knows, are not read, nor input that a game reads on an event queue of its own from inside its presents. The menu is drawn at a scale of 1 on Wayland.
 - 32-bit games, OpenGL ES, and games that link their GL or Vulkan loader statically are not supported.
 - `game_speed` needs the library preloaded, since it stands for `clock_gettime()`. A paused game that sleeps until a time it computed from its own clock may spin a core until it runs again.
+
+</details>
+
+The limits of the assistant's tools are in [Good to know](#good-to-know).
 
 ## Credits
 
@@ -646,7 +770,9 @@ Thanks as well to everyone who reported a bug, tested a game or starred the repo
 
 ## Support
 
-This project is free and MIT-licensed. It is, as far as we know, the only ImGui hook that covers every major graphics API on both Windows and Linux, tests itself in real games on every commit, and lets an AI assistant play the game from inside it. Rebuilding it would take roughly 125 days of senior C++ work, about €81,000 at French freelance rates: some 18,000 lines, a third of them tests. If it saved you time, consider [sponsoring](https://github.com/sponsors/Sh0ckFR) or starring the repository.
+This project is free and MIT-licensed. It is, as far as we know, the only ImGui hook that covers every major graphics API on both Windows and Linux, tests itself in real games on every commit, and lets an AI assistant play the game from inside it. Rebuilding it would take roughly 125 days of senior C++ work, about €81,000 at French freelance rates: some 18,000 lines, a third of them tests.
+
+If it saved you time, consider [sponsoring](https://github.com/sponsors/Sh0ckFR) or starring the repository. ⭐
 
 ## License
 
