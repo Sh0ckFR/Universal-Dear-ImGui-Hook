@@ -15,8 +15,8 @@
 //   drag <x0> <y0> <x1> <y1> [left|right|middle] [milliseconds]  -> ok <how the drag was sent>
 //   wait <milliseconds> [percent]  -> ok changed|unchanged <milliseconds> <percent of the pixels that changed>
 //   time [<speed>|advance <milliseconds>]  -> ok <speed>   (speed of the game's clocks, src/timing.cpp)
-// and the memory commands of src/memory.cpp and src/advanced.cpp, the code
-// commands of src/code.cpp, and the tools of the game, src/tools.cpp.
+// and the memory commands of src/memory.cpp and src/advanced.cpp, the objects
+// of the game's engine, src/engine.cpp, and the tools of the game, src/tools.cpp.
 // Failures answer: error <reason>
 #include "internal.h"
 
@@ -362,8 +362,8 @@ std::string Answer(const std::string& command, const std::string& rest, std::vec
     if (command == "time")
         return timing::Command(rest);
     std::string answer;
-    if (HandleTools(command, rest, payload, answer) || HandleMemory(command, rest, payload, answer) || HandleAdvanced(command, rest, payload, answer) ||
-        HandleCode(command, rest, payload, answer))
+    if (HandleTools(command, rest, payload, answer) || HandleMemory(command, rest, payload, answer) || HandleEngine(command, rest, payload, answer) ||
+        HandleAdvanced(command, rest, payload, answer))
         return answer;
     return "error unknown command";
 }

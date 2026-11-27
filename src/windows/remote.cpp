@@ -501,6 +501,14 @@ std::vector<MemoryRegion> MemoryRegions() {
     return regions;
 }
 
+// A module maps its whole image.
+std::vector<AddressRange> ModuleMemory() {
+    std::vector<AddressRange> ranges;
+    for (const LoadedModule& module : SortedModules())
+        ranges.push_back({module.base, module.size});
+    return ranges;
+}
+
 std::vector<LoadedModule> LoadedModules() {
     std::vector<LoadedModule> modules;
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, 0);
@@ -533,5 +541,28 @@ bool WriteMemory(uintptr_t address, const void* data, size_t size) {
 }
 
 void* AllocateScanMemory(size_t size) { return VirtualAlloc(nullptr, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE); }
+
+void* FindModule(const char* name) {
+    wchar_t wide[MAX_PATH] = {};
+    if (!MultiByteToWideChar(CP_UTF8, 0, name, -1, wide, MAX_PATH))
+        return nullptr;
+    return GetModuleHandleW(wide);
+}
+
+void* ModuleSymbol(void* module, const char* name) {
+    return reinterpret_cast<void*>(GetProcAddress(static_cast<HMODULE>(module), name));
+}
+
+UINT GameThreadMessage() {
+    static const UINT message = RegisterWindowMessageW(L"uih-game-thread-call");
+    return message;
+}
+
+// The window procedure of the overlay runs the call on the thread of the game
+// window, the main thread of most engines.
+bool WakeGameThread() {
+    HWND window = BoundWindow();
+    return window && GameThreadMessage() && PostMessageW(window, GameThreadMessage(), 0, 0);
+}
 
 } // namespace uih::detail::remote

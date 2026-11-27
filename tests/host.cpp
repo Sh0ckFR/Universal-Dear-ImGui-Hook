@@ -7,7 +7,7 @@
 #include "remote_memory.h"
 #include "remote_advanced.h"
 #include "remote_time.h"
-#include "remote_code.h"
+#include "remote_engine.h"
 #define UIH_TEST_TOOLS_HOOK
 #include "remote_tools.h"
 
@@ -1228,6 +1228,13 @@ int64_t GameMs() {
     return counter.QuadPart * 1000 / frequency.QuadPart;
 }
 
+// The fake Unity runtime, and the thread that pumps the messages of the host window.
+FakeEngine g_engine;
+bool g_engineLoaded = false;
+uint64_t g_engineThread = 0;
+RealMono g_mono;
+bool g_monoLoaded = false;
+
 // The commands of remote/uih_mcp.py while the menu is open: the screenshot
 // shows the game without the overlay, the message is drawn, and the keys reach
 // the window once the menu is closed.
@@ -1240,6 +1247,7 @@ int RemoteScenario(HWND window, bool memory, bool advanced, Frame&& frame) {
     std::string memoryFailure;
     std::string advancedFailure;
     std::string toolsFailure;
+    std::string engineFailure;
     std::string click;
     std::string outside;
     std::vector<uint8_t> rgb;
@@ -1263,9 +1271,14 @@ int RemoteScenario(HWND window, bool memory, bool advanced, Frame&& frame) {
                 if (!client.Read(rgb.data(), rgb.size()))
                     rgb.clear();
             }
-            text = client.Request("text 60 hello\\nworld");
             unknownKey = client.Request("key nokey 50");
             toolsFailure = CheckRemoteTools(client, [] { return ImGui::GetFrameCount(); });
+            if (g_engineLoaded)
+                engineFailure = CheckRemoteEngine(client, g_engine, advanced, g_engineThread);
+            else if (g_monoLoaded)
+                engineFailure = CheckRealMono(client, g_mono, advanced);
+            else if (client.Request("engine info") != (memory ? "ok none" : "error memory access is off: set config.remoteMemory in example/config.cpp and rebuild the library"))
+                engineFailure = "engine info answers without a Unity runtime, or while remoteMemory is off";
             if (memory)
                 memoryFailure = CheckRemoteMemory(client);
             else if (client.Request("read 1000 4").rfind("error memory access is off", 0) != 0)
@@ -1287,6 +1300,8 @@ int RemoteScenario(HWND window, bool memory, bool advanced, Frame&& frame) {
                 advancedFailure = "the advanced commands answer while aiAdvancedFeatures is off";
             click = client.Request("click " + std::to_string(g_buttonX) + " " + std::to_string(g_buttonY) + " left 100");
             outside = client.Request("click 800 10");
+            // Last: chat say replaces the message with one of a few seconds.
+            text = client.Request("text 60 hello\\nworld");
         },
         frame);
     for (ULONGLONG start = GetTickCount64(); GetTickCount64() - start < 1000 && g_buttonClicks == clicksBefore;)
@@ -1318,6 +1333,8 @@ int RemoteScenario(HWND window, bool memory, bool advanced, Frame&& frame) {
         return Fail(advancedFailure.c_str());
     if (!toolsFailure.empty())
         return Fail(toolsFailure.c_str());
+    if (!engineFailure.empty())
+        return Fail(engineFailure.c_str());
     for (int i = 0; i < 3; ++i)
         frame();
     ImGuiWindow* message = ImGui::FindWindowByName("##uih_remote_message");
@@ -2683,12 +2700,15 @@ int main(int argc, char** argv) {
         else if (arg == "--settle" && i + 1 < argc) options.settleMs = atoi(argv[++i]);
         else if (arg == "--input" && i + 1 < argc) options.input = argv[++i];
         else if (arg == "--gamepad" && i + 1 < argc) options.gamepad = argv[++i];
+        else if (arg == "--engine" && i + 1 < argc) options.engine = argv[++i];
+        else if (arg == "--mono" && i + 2 < argc) options.mono = argv[++i], options.monoAssembly = argv[++i];
+        else if (arg == "--mono-root" && i + 1 < argc) options.monoRoot = argv[++i];
     }
     if (!options.proxy.empty())
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--own-hooks before|after] [--fault access|exception|draw] [--second-window [--shared-device]] [--composition] [--capture-frame] [--remote [--remote-memory] [--remote-advanced]] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--c-api] [--bench frames] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--own-hooks before|after] [--fault access|exception|draw] [--second-window [--shared-device]] [--composition] [--capture-frame] [--remote [--remote-memory] [--remote-advanced] [--engine fake-runtime] [--mono runtime Game.dll [--mono-root dir]]] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--c-api] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float|hdr10] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -2703,6 +2723,20 @@ int main(int argc, char** argv) {
     DWORD exStyle = options.capture || !options.dll.empty() || !options.fault.empty() ? WS_EX_TOPMOST : 0;
     HWND window = CreateWindowExW(exStyle, L"uih_host", L"uih host", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 100, 100,
                                   rect.right - rect.left, rect.bottom - rect.top, nullptr, nullptr, windowClass.hInstance, nullptr);
+    if (!options.engine.empty()) {
+        if (!LoadFakeEngine(options.engine, g_engine))
+            return Fail("the fake Unity runtime does not load");
+        // As Unity's main thread, attached to the runtime, which runs the calls.
+        g_engine.attachMain();
+        g_engineThread = EngineThreadId();
+        g_engineLoaded = true;
+    }
+    if (!options.mono.empty()) {
+        std::string error;
+        if (!StartRealMono(options.mono, options.monoAssembly, options.monoRoot, g_mono, error))
+            return Fail(error.c_str());
+        g_monoLoaded = true;
+    }
     if (options.remote)
         g_remoteHostProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(CountRemoteKeys)));
     PumpMessages();

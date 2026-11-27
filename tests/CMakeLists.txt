@@ -1,7 +1,31 @@
+# The sanitizers slow the remote scenarios several times over.
+if(UIH_SANITIZE)
+    set(UIH_TEST_TIMEOUT 300)
+else()
+    set(UIH_TEST_TIMEOUT 120)
+endif()
+
 function(uih_add_host_test name)
     add_test(NAME ${name} COMMAND uih_host ${ARGN})
-    set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120 RUN_SERIAL TRUE)
+    set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT ${UIH_TEST_TIMEOUT} RUN_SERIAL TRUE)
 endfunction()
+
+# A fake Unity scripting runtime for the engine commands of the remote control,
+# under the names of Mono's and IL2CPP's libraries, each in its own directory.
+add_library(uih_fake_mono SHARED fake_unity.cpp)
+add_library(uih_fake_il2cpp SHARED fake_unity.cpp)
+target_compile_definitions(uih_fake_il2cpp PRIVATE UIH_FAKE_IL2CPP)
+if(WIN32)
+    set_target_properties(uih_fake_mono PROPERTIES OUTPUT_NAME mono-2.0-bdwgc PREFIX "")
+else()
+    set_target_properties(uih_fake_mono PROPERTIES OUTPUT_NAME monobdwgc-2.0)
+endif()
+set_target_properties(uih_fake_il2cpp PROPERTIES OUTPUT_NAME GameAssembly PREFIX "")
+foreach(fake mono il2cpp)
+    set_target_properties(uih_fake_${fake} PROPERTIES
+                          RUNTIME_OUTPUT_DIRECTORY $<1:${CMAKE_CURRENT_BINARY_DIR}/fake_${fake}>
+                          LIBRARY_OUTPUT_DIRECTORY $<1:${CMAKE_CURRENT_BINARY_DIR}/fake_${fake}>)
+endforeach()
 
 if(WIN32)
     add_executable(uih_host host.cpp host_vulkan.cpp c_api.c)
@@ -58,7 +82,10 @@ if(WIN32)
     uih_add_host_test(remote --api d3d11 --remote)
     uih_add_host_test(remote_memory --api d3d11 --remote-memory)
     uih_add_host_test(remote_advanced --api d3d11 --remote-advanced)
-    uih_add_host_test(remote_c_api --api d3d11 --remote --c-api)
+    # The objects of a Unity game, on the fake runtime; calls need aiAdvancedFeatures.
+    uih_add_host_test(remote_mono --api d3d11 --remote-advanced --engine $<TARGET_FILE:uih_fake_mono>)
+    uih_add_host_test(remote_il2cpp --api d3d11 --remote-advanced --engine $<TARGET_FILE:uih_fake_il2cpp>)
+    uih_add_host_test(remote_mono_memory --api d3d11 --remote-memory --engine $<TARGET_FILE:uih_fake_mono>)
     # Recovery from a crash of the overlay needs structured exception handling.
     if(MSVC)
         foreach(api d3d9 d3d10 d3d11 d3d12 vulkan opengl)
@@ -198,9 +225,22 @@ else()
         uih_add_remote_test(preload_glx_remote --api opengl)
         uih_add_remote_test(preload_egl_remote --api opengl --egl)
         uih_add_remote_test(preload_vulkan_remote --api vulkan)
-        # The same tools, registered through the C interface.
-        uih_add_host_test(preload_glx_remote_c_api --api opengl --remote)
-        set_tests_properties(preload_glx_remote_c_api PROPERTIES ENVIRONMENT "LD_PRELOAD=${UIH_REMOTE_PRELOAD};UIH_TEST_C_TOOLS=1;${UIH_SANITIZER_OPTIONS}")
+        # The objects of a Unity game, on the fake runtime.
+        uih_add_remote_test(preload_glx_remote_mono --api opengl --engine $<TARGET_FILE:uih_fake_mono>)
+        uih_add_remote_test(preload_vulkan_remote_il2cpp --api vulkan --engine $<TARGET_FILE:uih_fake_il2cpp>)
+        # A real Mono runtime, as a Unity player embeds its own, running
+        # tests/mono/Game.cs: when the system has Mono and its C# compiler.
+        find_program(UIH_MCS mcs)
+        find_library(UIH_MONO_RUNTIME NAMES libmonosgen-2.0.so.1)
+        if(UIH_MCS AND UIH_MONO_RUNTIME)
+            set(UIH_GAME_DLL ${CMAKE_CURRENT_BINARY_DIR}/mono/Game.dll)
+            add_custom_command(OUTPUT ${UIH_GAME_DLL}
+                               COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/mono
+                               COMMAND ${UIH_MCS} -target:library -out:${UIH_GAME_DLL} ${CMAKE_CURRENT_SOURCE_DIR}/mono/Game.cs
+                               DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/mono/Game.cs)
+            add_custom_target(uih_mono_game ALL DEPENDS ${UIH_GAME_DLL})
+            uih_add_remote_test(preload_glx_remote_real_mono --api opengl --mono ${UIH_MONO_RUNTIME} ${UIH_GAME_DLL})
+        endif()
 
         # The hook with a probe of the mouse wheel, for the input scenario.
         add_library(uih_input_preload SHARED input_preload.cpp)

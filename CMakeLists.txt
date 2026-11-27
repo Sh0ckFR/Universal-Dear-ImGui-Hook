@@ -80,11 +80,8 @@ else()
 endif()
 add_library(uih::imgui ALIAS uih_imgui)
 
-add_library(uih STATIC src/uih.cpp src/vulkan.cpp src/remote.cpp src/memory.cpp src/code.cpp src/advanced.cpp src/c_api.cpp src/tools.cpp
-            src/timing.cpp src/zydis_build.c)
-target_include_directories(uih PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${UIH_THIRD_PARTY}/zydis)
-# Zydis, the disassembler of src/code.cpp, is third-party code: its warnings are not ours.
-set_source_files_properties(src/zydis_build.c PROPERTIES COMPILE_OPTIONS $<IF:$<C_COMPILER_ID:MSVC>,/W0,-w>)
+add_library(uih STATIC src/uih.cpp src/vulkan.cpp src/remote.cpp src/memory.cpp src/advanced.cpp src/c_api.cpp src/tools.cpp src/timing.cpp src/engine.cpp)
+target_include_directories(uih PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 if(WIN32)
     target_sources(uih PRIVATE
         src/windows/platform.cpp

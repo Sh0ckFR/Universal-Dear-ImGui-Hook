@@ -184,6 +184,10 @@ bool HiddenFromApplication(UINT msg, LPARAM lParam) {
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     ScopedCall call;
+    // An engine call of the assistant, on the main thread of the game.
+    remote::RunGameThreadCalls();
+    if (msg != 0 && msg == remote::GameThreadMessage())
+        return 0;
     WNDPROC original = nullptr;
     bool unicode = false;
     bool handled = false;

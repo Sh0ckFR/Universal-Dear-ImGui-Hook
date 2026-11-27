@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <type_traits>
@@ -237,6 +238,14 @@ struct LoadedModule {
     bool main;
 };
 std::vector<LoadedModule> LoadedModules();
+// The memory that the modules map, sorted: the segments of each on Linux,
+// as the span of a module can hold other memory; the loader of glibc 2.28
+// leaves the gap between its code and its data free for mmap().
+struct AddressRange {
+    uintptr_t base;
+    size_t size;
+};
+std::vector<AddressRange> ModuleMemory();
 // Copies memory of the process without faulting; false when part of it is not readable.
 bool ReadMemory(uintptr_t address, void* out, size_t size);
 // Writes memory of the process, code included.
@@ -254,6 +263,8 @@ std::string FormatValue(const uint8_t* bytes, ValueType type);
 bool EncodeValue(const std::string& text, ValueType type, uint8_t* bytes);
 // The modules sorted by address, for LocateAddress().
 std::vector<LoadedModule> SortedModules();
+// Whether `address` is in one of the sorted `ranges`, such as ModuleMemory().
+bool InRanges(const std::vector<AddressRange>& ranges, uintptr_t address);
 // module+offset of `address`, or "-" outside the modules.
 std::string LocateAddress(uintptr_t address, const std::vector<LoadedModule>& sortedModules);
 // An address: hexadecimal, module+offset, module-offset, and [expression] for
@@ -314,6 +325,24 @@ std::string WriteCode(uintptr_t address, const void* data, size_t size, uintptr_
 // "name" or "name+0x12" of the exported or dynamic symbol `address` is in, empty when none is known.
 std::string SymbolAt(uintptr_t address);
 
+// Objects of the game's engine, src/engine.cpp: false when `command` is not engine.
+bool HandleEngine(const std::string& command, const std::string& rest, std::vector<uint8_t>& payload, std::string& answer);
+// Runs the engine call waiting for the game's main thread, if any: called by
+// the window procedure on Windows and by the X event hooks on Linux.
+void RunGameThreadCalls();
+// Calls `visit` with the readable memory of [base, base + size), region by
+// region, in pieces of at most 1 MB that overlap by `overlap` bytes, which
+// may be fewer; stops when `visit` returns false. Modules have unreadable
+// gaps between their segments on some systems, such as Linux on ARM64.
+void ForEachReadable(uintptr_t base, size_t size, size_t overlap, const std::function<bool(uintptr_t, const uint8_t*, size_t)>& visit);
+// Implemented once per platform, for the engine commands:
+// a module loaded in the process by its file name, such as mono-2.0-bdwgc.dll; null when it is not.
+void* FindModule(const char* name);
+// An exported function of a module FindModule() found.
+void* ModuleSymbol(void* module, const char* name);
+// Makes the game's main thread call RunGameThreadCalls() soon; false when it cannot.
+bool WakeGameThread();
+
 // Advanced features, Config::aiAdvancedFeatures, src/advanced.cpp:
 // switches of the "AI Advanced Features" window, on until the player turns them off.
 bool InputAllowed();
@@ -329,6 +358,10 @@ void Tick();
 bool HandleTools(const std::string& command, const std::string& rest, std::vector<uint8_t>& payload, std::string& answer);
 // Every frame of the overlay: runs the tool the assistant called, if any.
 void RunTools();
+// The elements of the JSON array `text`, strings decoded and other values as
+// written; false when it is not one array.
+bool ParseJsonArray(const std::string& text, std::vector<std::string>& values, std::vector<bool>* strings = nullptr);
+std::string JsonQuote(const std::string& text);
 // Once the overlay is gone: ends the instruction watch and the scan of the window.
 void StopAdvanced();
 // Implemented once per platform: the instructions that write `size` bytes at

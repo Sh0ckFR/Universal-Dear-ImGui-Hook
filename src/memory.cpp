@@ -577,6 +577,11 @@ std::vector<LoadedModule> SortedModules() {
     return modules;
 }
 
+bool InRanges(const std::vector<AddressRange>& ranges, uintptr_t address) {
+    auto after = std::upper_bound(ranges.begin(), ranges.end(), address, [](uintptr_t value, const AddressRange& range) { return value < range.base; });
+    return after != ranges.begin() && address - std::prev(after)->base < std::prev(after)->size;
+}
+
 bool ParseValueType(std::string name, ValueType& type) { return ParseType(std::move(name), type); }
 
 const char* ValueTypeName(ValueType type) {
