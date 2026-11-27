@@ -30,7 +30,7 @@ The overlay can also let an AI assistant such as Claude Code [see and play the g
 - [API](#api)
 - [How it works](#how-it-works)
 - [Building](#building)
-- [Tests](#tests)
+- [Tests](#tests), and the [games, APIs and cost of the overlay](docs/COMPATIBILITY.md)
 - [Contributing](#contributing)
 - [Limitations](#limitations)
 - [Credits](#credits), [Support](#support), [License](#license)
@@ -42,13 +42,13 @@ Sections marked with ▶ expand on click. What changed in each version is listed
 - **Chat with Claude in the game**: a [chat window over the game](#talk-to-claude-from-the-game) where you tell Claude what to do. It looks at the game, plays it, reads or changes its memory, and answers in the chat.
 - **One library for every API**: the backend is picked from the first API that presents a frame. Inject before or after the game initializes its graphics.
 - **AI remote control**: through [MCP](#remote-control-by-an-ai-assistant), an assistant such as Claude Code sees the game, shows messages to the player, presses keys and clicks. Your menu can give it [tools of your own](#tools-of-your-own), such as *teleport* or *spawn an item*, which it calls like the built-in ones. With the [advanced features](#advanced-features-and-the-ai-advanced-features-window), it also types text, drags the mouse, waits for the screen to change, pauses or slows down the game while it thinks, follows pointer chains, freezes values and finds the code that writes them, and the *AI Advanced Features* window shows everything it does.
-- **Menu input**: `INSERT`, or L3 + R3 on a controller, opens the menu; `F11` removes the overlay and unloads the DLL. Both keys are [settings](#settings). While the menu is open, the game receives no keyboard, mouse or controller input (on Linux, no key or button presses and no motion), and an XInput controller navigates the menu.
+- **Menu input**: `INSERT`, or L3 + R3 on a controller, opens the menu; `F11` removes the overlay and unloads the DLL. Both keys are [settings](#settings). While the menu is open, the game receives no keyboard, mouse or controller input (on Linux, no key or button presses and no motion, on X11 and native Wayland alike), and an XInput controller navigates the menu.
 - **The overlay can't crash the game** (MSVC builds on Windows, and Linux): an access violation or a C++ exception in the overlay, whether in a renderer backend or in your menu code, removes the overlay instead of taking the game down. The menu key brings it back.
 - **Images and frame capture**: `uih::CreateTexture()` turns RGBA pixels into an image for `ImGui::Image()`, and `uih::CaptureFrame()` copies the game's frame, without the overlay, on every backend.
 - **Multiple windows**: when the game presents to more than one window or swap chain, the overlay stays on one of them and follows the focus.
 - **Readable on any display**: the interface follows the game window's DPI, or a fixed scale, with correct colors on sRGB, floating-point and HDR10 back buffers, where the overlay is as bright as the SDR content Windows shows.
 - **No injector needed**: the DLL can be loaded as `dinput8.dll`, and the Linux library with `LD_PRELOAD`.
-- **No dependencies**: Dear ImGui, MinHook and the Vulkan headers are vendored, and the C and C++ runtimes are linked statically.
+- **No dependencies**: Dear ImGui, MinHook, Zydis and the Vulkan headers are vendored, and the C and C++ runtimes are linked statically.
 - **Tested in real games**: on every commit, the CI loads the library into [DDNet](https://ddnet.org/) and a [Godot](https://godotengine.org/) project on Windows and Linux, with Direct3D 11, Direct3D 12, Vulkan and OpenGL, and plays them through the MCP server on Linux. It also runs the Windows build of Godot under Wine with the DLL as `dinput8.dll`, with OpenGL, Direct3D 11 and Vulkan.
 
 ## Quick start
@@ -285,7 +285,7 @@ The bridge runs Claude Code headless (`claude -p`) with the tools of `remote/uih
 
 ## Remote control by an AI assistant
 
-The library can let an AI assistant such as [Claude Code](https://claude.com/claude-code) see the game, show messages to the player, press keys and click, and optionally read and write the game's memory. The assistant speaks the [Model Context Protocol](https://modelcontextprotocol.io) (MCP) with `remote/uih_mcp.py` over standard input and output, and the script talks to the library over a local named pipe (Windows) or Unix socket (Linux). It works with every graphics API, and on Linux with X11 and XWayland games.
+The library can let an AI assistant such as [Claude Code](https://claude.com/claude-code) see the game, show messages to the player, press keys and click, and optionally read and write the game's memory. The assistant speaks the [Model Context Protocol](https://modelcontextprotocol.io) (MCP) with `remote/uih_mcp.py` over standard input and output, and the script talks to the library over a local named pipe (Windows) or Unix socket (Linux). It works with every graphics API, and on Linux with X11, XWayland and native Wayland games.
 
 ```mermaid
 flowchart LR
@@ -321,6 +321,7 @@ On Linux, use `python3 /path/to/Universal-Dear-ImGui-Hook/remote/uih_mcp.py`. Wi
 - *Find my money in memory and set it to 99999.* (with `remoteMemory`)
 - *Type "gg" in the chat, then wait for the next round to start.* (with `aiAdvancedFeatures`)
 - *Find my health, keep it at 100, and find a pointer to it that survives a restart.* (with both)
+- *Find the instruction that takes my health away, show me the code around it, and patch it out.* (with both)
 
 ### Tools
 
@@ -380,7 +381,10 @@ and, with `remoteMemory` too:
 | `memory_pointer` | Follows a pointer chain, `[[game.exe+1a2b]+10]+8`, and shows each pointer it reads |
 | `memory_pointer_scan` | Finds the pointers to an address, those stored in a module first: `[game.exe+offset]+delta` finds the value again after a restart |
 | `memory_watch`, `memory_freeze` | A watch list of values, each with a type and a label; a frozen value is written again every frame |
-| `memory_what_writes` | The instructions that write a value, or read it, with their hit counts: hardware breakpoints on every thread, like a debugger's data breakpoint |
+| `memory_what_writes` | The instructions that write a value, or read it, decoded, with their hit counts: hardware breakpoints on every thread, like a debugger's data breakpoint |
+| `memory_disassemble` | x86 and x64 instructions at an address, and optionally those before it, with module+offset, bytes, exported functions, and the module+offset and symbol of the addresses they branch to or read |
+| `memory_patch`, `memory_unpatch` | Changes the game's code, such as `nop` over the instruction that takes health away, and puts the original bytes back; removing the overlay restores every patch |
+| `memory_signature` | A byte pattern unique in its module, with `??` over the offsets that change when the game is rebuilt: `memory_pattern` finds the code again after an update |
 
 The example menu then shows an **AI Advanced Features** button, which opens a window provided by the library, `uih::DrawAIAdvancedFeatures()`:
 
@@ -389,7 +393,8 @@ The example menu then shows an **AI Advanced Features** button, which opens a wi
 - two switches that pause the assistant's input (keys, clicks, typing, mouse) or its memory tools, without rebuilding, and the speed of the game, to resume a game the assistant paused;
 - **Watch list**: the values watched by the assistant or the player, updated live, with a checkbox to freeze each one, a value to write, and a form to add one;
 - **Pointers**: a pointer chain followed as you type it, and a pointer scan whose results go to the watch list in one click;
-- **What writes**: the instruction watch on an address, with each instruction, its hit count and the bytes before it.
+- **What writes**: the instruction watch on an address, with each instruction, decoded, its hit count and the bytes before it;
+- **Patches**: the code the assistant patched, with a button that restores each patch, or all of them.
 
 ### Tools of your own
 
@@ -412,15 +417,17 @@ uih::RegisterTool("teleport", "Moves the player to x, y, z in world units, and r
 <summary>Good to know: security, focus, limits</summary>
 
 - **Any program you run can use the pipe or the socket**, so the remote control is off by default. Other machines cannot, nor, on Linux, other users. Turn it on for single-player games only: anti-cheat systems detect injected DLLs.
-- **While you type to the assistant, the game does not have the focus.** Keys and clicks then reach it as window messages, or X11 events on Linux, which games that read the keyboard or mouse state directly (DirectInput, raw input) do not see, and neither does the overlay menu on Linux. With the focus, a click moves the player's cursor. Click the game window after sending your request, or let the assistant play on a second screen.
+- **While you type to the assistant, the game does not have the focus.** Keys and clicks then reach it as window messages, or X11 events on Linux, which games that read the keyboard or mouse state directly (DirectInput, raw input) do not see, and neither does the overlay menu on Linux. With the focus, a click moves the player's cursor, except at a point another window covers, where it goes as a window message. Click the game window after sending your request, or let the assistant play on a second screen.
 - While the overlay menu is open, the game receives no keys: the assistant can close it with `insert`.
 - The assistant plays turn by turn, a screenshot and a few keys at a time: fine for menus, puzzles and slow games, not for reflexes.
-- On Linux, keys and clicks go through the X server's XTEST extension; without it, they are sent as events to the window. Native Wayland games get neither.
+- On Linux, keys and clicks go through the X server's XTEST extension; without it, they are sent as events to the window. Native Wayland games get them as Wayland events, handed to the listeners of their pointer and keyboard the next time they read their events: the compositor's pointer does not move, and a game that reads no events, such as one stopped by `game_speed 0`, gets them once it runs again (the command answers an error after one second).
 - One game per pipe or socket name: a second game started with the same name logs that the remote control is unavailable.
 - `unloadKey` stops the remote control along with the overlay.
 - With `remoteMemory`, any program you run can also read and write the game's memory through the pipe or the socket; on Linux, that bypasses Yama's ptrace restrictions for programs of your user. A value scan also finds copies of the value: change it in the game and narrow the scan until one address is left.
 - Typed text reaches games that read text input, as chat boxes do; games that read the keys themselves see only Enter and Tab, so use `press_key` for them. On Linux, a character missing from the keyboard layout is mapped to a free keycode while it is typed, which the X server's other applications see too.
 - `memory_what_writes` sets debug register 3 of every thread of the game on Windows: a debugger attached to the game, or a game that uses that register, sees the change. On Linux, it asks the kernel for a hardware breakpoint on each thread (perf events), which unprivileged processes get while `kernel.perf_event_paranoid` is 2 or lower. Ubuntu sets 4, so run `sudo sysctl kernel.perf_event_paranoid=2` once per boot. Threads started later are watched within half a second.
+- `memory_patch` changes code that the game's threads may be running. On Windows, they are suspended while the bytes change, and the patch waits for none of them to be inside those bytes; on Linux, they keep running, and a patch of up to 8 bytes within an aligned 8-byte word is written at once. A thread that returns into the middle of patched bytes, from a call they hold, still runs a cut instruction. Code generated at run time, by a JIT, may be generated again over a patch.
+- `memory_disassemble` and `memory_signature` decode x86 and x64 code only: on ARM64 Linux, they answer that the processor is not supported, and `memory_patch` does not check where the instructions end.
 - Screenshots of HDR back buffers, with more than 10 bits per channel, fail.
 - `engine_instances` lists the objects of the exact class: ask for each subclass by its name. Destroyed Unity objects are left out. An object is recognized by its header and checked against its fields, so for a class with no reference or boolean field, and not a Unity object, a freed object whose memory was not reused yet can still be listed.
 - On Unreal Engine, the library finds the name table and the object array by their contents and checks every offset it uses against objects all games have, but it was tested on layouts built from Epic's engine headers (5.8 and 4.22), not on shipped games: a game whose engine was modified, or whose object array is encrypted, gets an error. It reads properties of every type and writes numbers, enums, bools and object references, not strings; it does not call functions, and does not list the values of enums.
@@ -484,6 +491,23 @@ void start_overlay(void) {
 ```
 
 `uih_capture_frame()` hands the pixels to a callback instead of filling a `std::vector`, and `uih_create_texture()` returns the `ImTextureData*` as a `void*`. No exception leaves these functions.
+
+[Tools of your own](#tools-of-your-own) work the same way. The callback answers through `uih_tool_answer()`, or through `uih_tool_fail()` for an error. `uih_tool_argument()` copies a value into your buffer and returns its length, as `snprintf()` does. There is nothing to free:
+
+```c
+static void teleport(const char* arguments, uih_tool_result* result, void* context) {
+    char x[32];
+    uih_tool_argument(arguments, "x", x, sizeof(x));
+    if (!move_player(atof(x)))
+        uih_tool_fail(result, "the player cannot move there");
+    else
+        uih_tool_answer(result, "moved");
+}
+
+uih_register_tool("teleport", "Moves the player to x.",
+                  "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"}},\"required\":[\"x\"]}",
+                  teleport, NULL);
+```
 
 ## How it works
 
@@ -576,6 +600,8 @@ Some tests press real keys and move the mouse. They are skipped when the host wi
 
 [tests/README.md](tests/README.md) describes every scenario, how to run the tests without a GPU or under the validation and debug layers, the Linux tests, the real-game tests and what the CI checks.
 
+[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) lists the games, graphics APIs and toolchains the CI tests on every commit. It also gives the cost of the overlay, measured with `uih_host --bench`: at most 0.07 ms per frame on an RTX 4070 SUPER, whatever the API, with the menu open or closed.
+
 ## Contributing
 
 Bug reports, fixes and features are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) gives the principles and rules of the project, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) maps where the code is and how it works. Report security problems privately, as [SECURITY.md](SECURITY.md) explains.
@@ -591,20 +617,29 @@ Bug reports, fixes and features are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) 
 - MinGW-w64 builds of the DLL survive C++ exceptions in the overlay, but not access violations, since MinGW-w64 has no structured exception handling. The released DLLs are built with MSVC.
 
 **Linux**
-- Input is read from the X server, so native Wayland windows get no menu input (run SDL games with `SDL_VIDEODRIVER=x11`). The wheel scrolls the menu in games that read the mouse buttons from the X server. Input methods are not handled, and a pointer the game has grabbed stays grabbed while the menu is open.
+- Input is read from the X server, or, for native Wayland games (SDL with `SDL_VIDEODRIVER=wayland`, GLFW, Godot with `--display-driver wayland`, Vulkan or EGL on a `wl_surface`), from the listeners of their `wl_pointer` and `wl_keyboard`. The wheel scrolls the menu in games that read the mouse buttons from the X server, and in Wayland games. Input methods are not handled, and a pointer the game has grabbed stays grabbed while the menu is open.
+- On Wayland, a pointer the game locked (`zwp_locked_pointer_v1`) stays locked while the menu is open: its relative motion moves the menu's cursor instead, which the compositor does not draw. Keys are read with the game's keymap through libxkbcommon, opened at run time, or with the US layout when it is not installed. Listeners set with `wl_proxy_add_dispatcher`, and those of a protocol version newer than the library knows, are not read, nor input that a game reads on an event queue of its own from inside its presents. The menu is drawn at a scale of 1 on Wayland.
 - 32-bit games, OpenGL ES, and games that link their GL or Vulkan loader statically are not supported.
-- The remote control sends no keys or clicks to native Wayland games.
 - `game_speed` needs the library preloaded, since it stands for `clock_gettime()`. A paused game that sleeps until a time it computed from its own clock may spin a core until it runs again.
 
 ## Credits
 
-Built with [Dear ImGui](https://github.com/ocornut/imgui), [MinHook](https://github.com/TsudaKageyu/minhook), [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) and [stb_image](https://github.com/nothings/stb) (the example's picture).
+Built with [Dear ImGui](https://github.com/ocornut/imgui), [MinHook](https://github.com/TsudaKageyu/minhook), [Zydis](https://github.com/zyantific/zydis) (the disassembler of the memory tools), [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) and [stb_image](https://github.com/nothings/stb) (the example's picture).
 
-| Who | What |
+- **The libraries it is built with**: [Dear ImGui](https://github.com/ocornut/imgui) by Omar Cornut and its contributors, the interface this whole project exists to draw; [MinHook](https://github.com/TsudaKageyu/minhook) by Tsuda Kageyu, which places every hook on Windows; the [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) of the Khronos Group; [stb_image](https://github.com/nothings/stb) by Sean Barrett, for the example's picture.
+- **What the CI runs on**: [Mesa](https://www.mesa3d.org/)'s llvmpipe and lavapipe, and [mesa-dist-win](https://github.com/pal1000/mesa-dist-win) by pal1000, which let every graphics API render without a GPU; [DDNet](https://ddnet.org/) and [Godot](https://godotengine.org/), open source games that the CI plays on every commit; and [Wine](https://www.winehq.org/), on which it runs the Windows build as a Linux or Steam Deck player does.
+- **The projects that explored the same problem**: [kiero](https://github.com/Rebzzel/kiero) by Rebzzel, where this project started, and [UniversalHookX](https://github.com/bruhmoment21/UniversalHookX), [hudhook](https://github.com/veeenu/hudhook) (in Rust) and [HydraHook](https://github.com/nefarius/HydraHook) (for DirectX): have a look at them too, one may fit your project better.
+- **The [Model Context Protocol](https://modelcontextprotocol.io)**, an open standard that lets any assistant use the remote control.
+
+| Contributor | What |
 | --- | --- |
-| [Sh0ckFR](https://github.com/Sh0ckFR), [Revan600](https://github.com/Revan600) | ImGui and input hooks |
-| [Rebzzel](https://github.com/Rebzzel) | Initial work on the kiero library (no longer used) |
-| [primemb](https://github.com/primemb) | Bug fixes |
+| [Sh0ckFR](https://github.com/Sh0ckFR) | Author and maintainer |
+| [Revan600](https://github.com/Revan600) | ImGui and input hooks |
+| [Rebzzel](https://github.com/Rebzzel) | The kiero library, the original base of the hooks |
+| [primemb](https://github.com/primemb) | Dear ImGui and kiero updates, input hook improvements |
+| [SirMestre](https://github.com/SirMestre) | Fix of the buffer count type |
+
+Thanks as well to everyone who reported a bug, tested a game or starred the repository.
 
 ## Support
 

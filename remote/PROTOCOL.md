@@ -43,7 +43,12 @@ Each command is one line; each answer starts with `ok` or `error <reason>`. Some
 | `watch remove <id>`, `watch clear` | `ok` |
 | `freeze <id> [value]`, `unfreeze <id>` | `ok`; `freeze` keeps the current value by default |
 | `writes start <address> [1\|2\|4\|8] [write\|access]`, `writes stop` | `ok` |
-| `writes results` | `ok <bytes>`, then lines `<next instruction> <module+offset> <hits> <16 bytes before it>` |
+| `writes results` | `ok <bytes>`, then lines `<next instruction> <module+offset> <hits> <16 bytes before it>`, followed on x86 and x64 by ` ; <address> <instruction>`, the instruction that hit, decoded |
+| `disasm <address> [count] [before]` | `ok <bytes> <address>`, then lines `<address> <module+offset> <symbol or -> <bytes> <instruction>`: `count` instructions from the address, 20 by default and at most 200, after `before` instructions that lead to it, at most 50 |
+| `patch <address> <hex bytes>` | `ok <id>`, or `ok <id> cuts <instruction> <end>` when the patch ends inside an instruction of the code, which goes on to `<end>` |
+| `unpatch <id>\|all` | `ok`, `ok changed` when the game changed the bytes since and they were left as they are; `ok <count>` for `all` |
+| `patches` | `ok <bytes>`, then lines `<id> <address> <module+offset> <original bytes> <patched bytes>` |
+| `signature <address> [length]` | `ok <bytes>`, then a line `<module> <pattern>`: a pattern of at least `length` bytes, at most 128, found once in the module, for `pattern` |
 | `tools` | `ok <bytes>`, then a JSON array of the tools the game registered with `uih::RegisterTool()`: `{"name", "description", "inputSchema"}` |
 | `tool <name> [JSON object]` | `ok <bytes>`, then the text the tool returned; the arguments, `{}` by default, are one line of JSON |
 | `chat poll` | `ok <bytes>`, then what the player did in the chat since the last poll: lines `message <text>`, `reset` (new conversation) or `cancel` (stop the answer) |

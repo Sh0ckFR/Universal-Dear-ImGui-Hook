@@ -1,4 +1,5 @@
-// Dear ImGui platform backend polling the X server on its own connection.
+// Dear ImGui platform backend polling the X server on its own connection,
+// or reading the Wayland events of the application (wayland.cpp).
 #include "internal.h"
 
 #include <unistd.h>
@@ -207,6 +208,9 @@ bool TestKey(const uint8_t* keys, int keycode) {
     return (keys[keycode >> 3] & (1 << (keycode & 7))) != 0;
 }
 
+// Native Wayland applications: the overlay reads the events of the application.
+bool OnWayland() { return g_window == XCB_NONE && wayland::Active(); }
+
 ImGuiKey ToImGuiKey(xcb_keysym_t keysym) {
     if (keysym >= 'a' && keysym <= 'z')
         return static_cast<ImGuiKey>(ImGuiKey_A + (keysym - 'a'));
@@ -265,6 +269,7 @@ unsigned int Character(int keycode, uint16_t modifiers) {
 void Attach(NativeWindow window) {
     g_window = XCB_NONE;
     g_focusKnown = false;
+    wayland::Attach();
     if (!window || !Connect())
         return;
     Reply<xcb_get_window_attributes_reply_t> attributes(xcb_get_window_attributes_reply(g_connection, xcb_get_window_attributes(g_connection, window), nullptr));
@@ -275,6 +280,7 @@ void Attach(NativeWindow window) {
 }
 
 void Detach() {
+    wayland::Detach();
     Disconnect();
     g_unavailable = false;
     g_window = XCB_NONE;
@@ -288,7 +294,7 @@ void Detach() {
 void OnMenuToggled(bool) {}
 
 NativeWindow FindProcessWindow(uint32_t, uint32_t) {
-    if (!Connect())
+    if (wayland::Active() || !Connect())
         return XCB_NONE;
     xcb_window_t focus = FocusOwner();
     return IsWindowId(focus) && OwnedByProcess(focus) ? focus : static_cast<xcb_window_t>(XCB_NONE);
@@ -297,6 +303,7 @@ NativeWindow FindProcessWindow(uint32_t, uint32_t) {
 void SetSurfaceSize(uint32_t width, uint32_t height) {
     g_width = width;
     g_height = height;
+    wayland::SetSurfaceSize(width, height);
 }
 
 bool WindowSize(NativeWindow window, uint32_t& width, uint32_t& height) {
@@ -318,6 +325,10 @@ void NewFrame() {
     g_lastFrame = now;
     io.DisplaySize = ImVec2(static_cast<float>(g_width), static_cast<float>(g_height));
 
+    if (OnWayland()) {
+        wayland::NewFrame();
+        return;
+    }
     if (!Connect())
         return;
     DrainEvents();
@@ -376,13 +387,15 @@ void NewFrame() {
 }
 
 bool IsKeyDown(int keysym) {
+    if (OnWayland())
+        return wayland::IsKeyDown(keysym);
     for (int keycode = g_minKeycode; keycode < kKeycodes; ++keycode)
         if (TestKey(g_keys, keycode) && (Keysym(keycode, 0) == static_cast<xcb_keysym_t>(keysym) || Keysym(keycode, 1) == static_cast<xcb_keysym_t>(keysym)))
             return true;
     return false;
 }
 
-bool IsFocused() { return g_focused; }
+bool IsFocused() { return OnWayland() ? wayland::IsFocused() : g_focused; }
 
 bool HasFocus(NativeWindow window) {
     if (!g_connection || window == XCB_NONE)
@@ -392,6 +405,8 @@ bool HasFocus(NativeWindow window) {
 }
 
 bool KeyDownInApplication(int keysym) {
+    if (wayland::Active())
+        return wayland::KeyDownInApplication(keysym);
     if (!Connect())
         return false;
     DrainEvents();
@@ -413,6 +428,8 @@ float Scale() { return g_scale; }
 uint8_t XInputOpcode() { return g_xinputOpcode; }
 
 bool OwnConnection(const void* connection) { return connection == g_ownConnection.load(); }
+
+ImGuiKey KeysymToImGuiKey(uint32_t keysym) { return ToImGuiKey(keysym); }
 
 void AddWheel(int x, int y) {
     g_wheelX += x;

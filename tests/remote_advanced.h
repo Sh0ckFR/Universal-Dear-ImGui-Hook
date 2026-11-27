@@ -169,6 +169,12 @@ std::string CheckRemoteAdvanced(Client& client) {
         return "the instruction watch did not find the instruction of the host that writes the value";
     if (atoi(hits.c_str() + hits.find(' ', line + 1) + 1) != 5)
         return "the instruction watch did not count the 5 writes";
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+    // The instruction itself, decoded: a mov to the value.
+    size_t decoded = hits.find(" ; 0x", line);
+    if (decoded == std::string::npos || decoded > hits.find('\n', line) || hits.compare(hits.find(' ', decoded + 3) + 1, 4, "mov ") != 0)
+        return "the instruction watch does not decode the instruction that writes the value";
+#endif
     if (stopped != "ok" || after != hits)
         return "the instruction watch went on after writes stop";
     std::string misaligned = client.Request("writes start " + HexAddress(reinterpret_cast<const volatile char*>(&g_remoteWritten) + 1) + " 4");

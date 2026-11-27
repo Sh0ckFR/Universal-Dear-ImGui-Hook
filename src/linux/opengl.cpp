@@ -181,6 +181,7 @@ unsigned int SwapWithDamage(SwapBuffersWithDamageFn swapBuffers, void* display, 
         return 0;
     ScopedCall call;
     ForeignPresentScope presentScope;
+    wayland::GraphicsCall graphics;
     // No rectangle: the whole surface.
     if (BeforeEglSwap(display, surface))
         count = 0;
@@ -259,6 +260,7 @@ UIH_EXPORT unsigned int eglSwapBuffers(void* display, void* surface) {
     static const auto swapBuffers = Next<unsigned int (*)(void*, void*)>(interpose::kEgl, "eglSwapBuffers");
     ScopedCall call;
     ForeignPresentScope presentScope;
+    wayland::GraphicsCall graphics;
     BeforeEglSwap(display, surface);
     return swapBuffers(display, surface);
 }

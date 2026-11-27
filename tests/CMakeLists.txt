@@ -63,8 +63,8 @@ if(WIN32)
     uih_add_host_test(vulkan_second_window_shared --api vulkan --second-window --shared-device)
     # Frames of the overlay are still in flight when it moves to the other swap chain.
     uih_add_host_test(d3d12_second_window_shared --api d3d12 --second-window --shared-device --gpu-latency 50)
-    uih_add_host_test(d3d11_composition --api d3d11 --composition)
-    uih_add_host_test(d3d12_composition --api d3d12 --composition)
+    uih_add_host_test(d3d11_composition --api d3d11 --composition --capture)
+    uih_add_host_test(d3d12_composition --api d3d12 --composition --capture)
     uih_add_host_test(opengl --api opengl)
     foreach(api d3d9 d3d9ex d3d10 d3d11 d3d12 vulkan opengl)
         uih_add_host_test(${api}_resize --api ${api} --resize --capture)
@@ -127,6 +127,8 @@ if(WIN32)
     uih_add_host_test(d3d12_float --api d3d12 --format float --capture)
     uih_add_host_test(d3d12_hdr10 --api d3d12 --format hdr10 --capture --inject-at 0)
     uih_add_host_test(d3d11_c_api --api d3d11 --c-api --capture)
+    # The measure only runs: the CI renders without a GPU.
+    uih_add_host_test(d3d11_bench --api d3d11 --bench 200)
     uih_add_host_test(vulkan_srgb --api vulkan --format srgb --capture)
     uih_add_host_test(vulkan_srgb_early --api vulkan --format srgb --capture --inject-at 0 --settle 3000)
     uih_add_host_test(opengl_srgb --api opengl --format srgb --capture)
@@ -155,6 +157,25 @@ else()
     target_include_directories(uih_host PRIVATE ${UIH_THIRD_PARTY}/vulkan/include)
     target_compile_definitions(uih_host PRIVATE VK_NO_PROTOTYPES)
     target_link_libraries(uih_host PRIVATE PkgConfig::UIH_HOST Threads::Threads ${CMAKE_DL_LIBS})
+
+    # A native Wayland application, built when the Wayland development files
+    # are installed. Its tests run in Weston with tests/wayland.sh.
+    pkg_check_modules(UIH_WAYLAND IMPORTED_TARGET wayland-client wayland-egl)
+    pkg_get_variable(UIH_WAYLAND_PROTOCOLS wayland-protocols pkgdatadir)
+    find_program(UIH_WAYLAND_SCANNER wayland-scanner)
+    if(UIH_WAYLAND_FOUND AND UIH_WAYLAND_PROTOCOLS AND UIH_WAYLAND_SCANNER)
+        set(xdg_shell ${UIH_WAYLAND_PROTOCOLS}/stable/xdg-shell/xdg-shell.xml)
+        set(generated ${CMAKE_CURRENT_BINARY_DIR}/wayland)
+        file(MAKE_DIRECTORY ${generated})
+        add_custom_command(OUTPUT ${generated}/xdg-shell-client-protocol.h ${generated}/xdg-shell-protocol.c
+            COMMAND ${UIH_WAYLAND_SCANNER} client-header ${xdg_shell} ${generated}/xdg-shell-client-protocol.h
+            COMMAND ${UIH_WAYLAND_SCANNER} private-code ${xdg_shell} ${generated}/xdg-shell-protocol.c
+            DEPENDS ${xdg_shell})
+        add_executable(uih_host_wayland host_wayland.cpp host_vulkan.cpp ${generated}/xdg-shell-protocol.c ${generated}/xdg-shell-client-protocol.h)
+        target_include_directories(uih_host_wayland PRIVATE ${UIH_THIRD_PARTY}/vulkan/include ${generated})
+        target_compile_definitions(uih_host_wayland PRIVATE VK_NO_PROTOTYPES)
+        target_link_libraries(uih_host_wayland PRIVATE PkgConfig::UIH_WAYLAND PkgConfig::UIH_HOST Threads::Threads ${CMAKE_DL_LIBS})
+    endif()
 
     if(TARGET uih_example)
         set(UIH_PRELOAD $<TARGET_FILE:uih_example>)
@@ -235,6 +256,21 @@ else()
             uih_add_host_test(preload_${api}_input --api ${api} --input x11)
             set_tests_properties(preload_${api}_input PROPERTIES ENVIRONMENT "LD_PRELOAD=${UIH_INPUT_PRELOAD};${UIH_SANITIZER_OPTIONS}")
         endforeach()
+
+        # The Wayland application, in Weston: ctest -L wayland under tests/wayland.sh.
+        if(TARGET uih_host_wayland)
+            function(uih_add_wayland_test name preload)
+                add_test(NAME ${name} COMMAND uih_host_wayland ${ARGN})
+                set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120 RUN_SERIAL TRUE LABELS wayland
+                                     ENVIRONMENT "LD_PRELOAD=${preload};UIH_DEBUG=1;${UIH_SANITIZER_OPTIONS}")
+            endfunction()
+            foreach(api opengl vulkan)
+                uih_add_wayland_test(wayland_${api} "${UIH_PRELOAD}" --api ${api})
+                uih_add_wayland_test(wayland_${api}_reload "${UIH_PRELOAD}" --api ${api} --reload)
+                uih_add_wayland_test(wayland_${api}_input "${UIH_INPUT_PRELOAD}" --api ${api} --input wayland)
+                uih_add_wayland_test(wayland_${api}_remote "${UIH_REMOTE_PRELOAD}" --api ${api} --remote)
+            endforeach()
+        endif()
         # The hook with a render callback that faults, for the fault scenario.
         add_library(uih_fault_preload SHARED fault_preload.cpp)
         target_link_libraries(uih_fault_preload PRIVATE uih)

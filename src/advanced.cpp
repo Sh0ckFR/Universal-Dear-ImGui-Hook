@@ -11,6 +11,7 @@
 //   writes start <address> [1|2|4|8] [write|access]  -> ok
 //   writes stop                         -> ok
 //   writes results                      -> ok <bytes>, then lines: <address of the next instruction> <module+offset> <hits> <16 bytes before it>
+//                                          [ ; <address of the instruction> <instruction>]  (decoded on x86 and x64)
 //   chat poll                           -> ok <bytes>, then what the player did in the chat since: lines
 //                                          message <text>, reset (new conversation) or cancel (stop the answer)
 //   chat say <text>                     -> ok   (an answer of Claude, also at the top of the screen while the chat is hidden)
@@ -322,7 +323,9 @@ std::string HitsText() {
         if (ReadMemory(hit.next - sizeof(before), before, sizeof(before)))
             for (size_t i = 0; i < sizeof(before); ++i)
                 snprintf(bytes + i * 3, 4, i + 1 < sizeof(before) ? "%02x " : "%02x", before[i]);
-        text += Hex(hit.next) + " " + LocateAddress(hit.next, modules) + " " + std::to_string(hit.count) + " " + bytes + "\n";
+        std::string instruction = InstructionBefore(hit.next);
+        text += Hex(hit.next) + " " + LocateAddress(hit.next, modules) + " " + std::to_string(hit.count) + " " + bytes +
+                (instruction.empty() ? "" : " ; " + instruction) + "\n";
     }
     return text;
 }
@@ -768,7 +771,7 @@ void DrawWrites() {
     static const char* const kSizes[] = {"1 byte", "2 bytes", "4 bytes", "8 bytes"};
     static std::string error;
 
-    ImGui::TextWrapped("Finds the code that changes a value, as the data breakpoint of a debugger does: then patch it with memory_write, "
+    ImGui::TextWrapped("Finds the code that changes a value, as the data breakpoint of a debugger does: then patch it with memory_patch, "
                        "or ask the assistant to.");
     ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14.0f);
     ImGui::InputTextWithHint("##address", "address of the value", address, sizeof(address));
@@ -803,10 +806,11 @@ void DrawWrites() {
         std::lock_guard<std::mutex> lock(g_mutex);
         modules = Modules();
     }
-    if (!ImGui::BeginTable("writes", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable))
+    if (!ImGui::BeginTable("writes", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable))
         return;
     ImGui::TableSetupColumn("After the instruction");
     ImGui::TableSetupColumn("Hits", ImGuiTableColumnFlags_WidthFixed);
+    ImGui::TableSetupColumn("Instruction");
     ImGui::TableSetupColumn("Bytes before");
     ImGui::TableHeadersRow();
     for (const InstructionHit& hit : hits) {
@@ -818,6 +822,10 @@ void DrawWrites() {
         ImGui::TableNextColumn();
         ImGui::Text("%llu", static_cast<unsigned long long>(hit.count));
         ImGui::TableNextColumn();
+        std::string instruction = InstructionBefore(hit.next);
+        size_t space = instruction.find(' ');
+        ImGui::TextUnformatted(space == std::string::npos ? "" : instruction.c_str() + space + 1);
+        ImGui::TableNextColumn();
         uint8_t before[16] = {};
         if (ReadMemory(hit.next - sizeof(before), before, sizeof(before))) {
             char bytes[16 * 3 + 1] = {};
@@ -825,6 +833,67 @@ void DrawWrites() {
                 snprintf(bytes + i * 3, 4, "%02x ", before[i]);
             ImGui::TextUnformatted(bytes);
         }
+    }
+    ImGui::EndTable();
+}
+
+// The code the assistant patched, each patch with a button that restores it.
+void DrawPatches() {
+    static std::string status;
+    std::vector<CodePatch> patches = CodePatches();
+    ImGui::TextWrapped("The code of the game the assistant changed with memory_patch. Restoring a patch puts the original bytes back, "
+                       "as removing the overlay does for all of them.");
+    if (patches.empty()) {
+        ImGui::TextDisabled("No patch.");
+    } else if (ImGui::Button("Restore all")) {
+        status.clear();
+        for (const CodePatch& patch : patches) {
+            std::string error = RestorePatch(patch.id);
+            if (!error.empty() && error != "changed")
+                status = error;
+        }
+        patches = CodePatches();
+    }
+    if (!status.empty())
+        ImGui::TextWrapped("%s", status.c_str());
+    if (patches.empty() || !ImGui::BeginTable("patches", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable))
+        return;
+    std::vector<LoadedModule> modules;
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        modules = Modules();
+    }
+    ImGui::TableSetupColumn("Address");
+    ImGui::TableSetupColumn("Original bytes");
+    ImGui::TableSetupColumn("Patched bytes");
+    ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed);
+    ImGui::TableHeadersRow();
+    auto hex = [](const std::vector<uint8_t>& bytes) {
+        std::string text;
+        char byte[4];
+        for (uint8_t b : bytes) {
+            snprintf(byte, sizeof(byte), "%02x ", b);
+            text += byte;
+        }
+        return text;
+    };
+    for (const CodePatch& patch : patches) {
+        ImGui::PushID(patch.id);
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::Text("%s", LocateAddress(patch.address, modules).c_str());
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s", Hex(patch.address).c_str());
+        ImGui::TableNextColumn();
+        ImGui::TextWrapped("%s", hex(patch.original).c_str());
+        ImGui::TableNextColumn();
+        ImGui::TextWrapped("%s", hex(patch.patched).c_str());
+        ImGui::TableNextColumn();
+        if (ImGui::SmallButton("Restore")) {
+            std::string error = RestorePatch(patch.id);
+            status = error == "changed" ? "The game changed those bytes since the patch: they were left as they are." : error;
+        }
+        ImGui::PopID();
     }
     ImGui::EndTable();
 }
@@ -947,9 +1016,9 @@ void DrawAIAdvancedFeatures(bool* open) {
             DrawActivity();
             ImGui::EndTabItem();
         }
-        const char* const kMemoryTabs[] = {"Watch list", "Pointers", "What writes"};
-        void (*const kDraw[])() = {DrawWatchList, DrawPointers, DrawWrites};
-        for (int i = 0; i < 3; ++i) {
+        const char* const kMemoryTabs[] = {"Watch list", "Pointers", "What writes", "Patches"};
+        void (*const kDraw[])() = {DrawWatchList, DrawPointers, DrawWrites, DrawPatches};
+        for (int i = 0; i < 4; ++i) {
             if (!ImGui::BeginTabItem(kMemoryTabs[i]))
                 continue;
             if (MemoryOn())

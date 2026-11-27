@@ -255,7 +255,13 @@ void Uninstall() {
 
 } // namespace
 
-const Renderer kDxgiRenderer = {"DXGI", L"dxgi.dll", Install, Uninstall, Teardown};
+// Once the application loads Direct3D, not on dxgi.dll, which this library
+// imports and so is always loaded: a Vulkan game would get a Direct3D device
+// it never asked for, created while it sets up Vulkan. Under Wine that device
+// creates an OpenGL context, and glXCreateContextAttribsARB() deadlocks with
+// the game's vkGetPhysicalDeviceSurfaceSupportKHR() in libxcb, on Wine's
+// shared X connection: the game froze before its first frame.
+const Renderer kDxgiRenderer = {"DXGI", {L"d3d10.dll", L"d3d10_1.dll", L"d3d11.dll", L"d3d12.dll"}, Install, Uninstall, Teardown};
 
 DXGI_FORMAT RenderTargetFormat(DXGI_FORMAT format) {
     switch (format) {
