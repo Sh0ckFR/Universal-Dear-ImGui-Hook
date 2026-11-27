@@ -177,11 +177,15 @@ jobs:
         run: build\vs\${{ matrix.platform }}\Release\uih_host.exe --api d3d11 --warp
       - name: Proxy test
         run: build\vs\${{ matrix.platform }}\Release\uih_host.exe --proxy build\vs\${{ matrix.platform }}\Release\Universal-ImGui-Hook.dll
-      - name: Engine commands on the fake Unity runtimes
+      - name: Engine commands on the fake Unity runtimes and Unreal Engine games
         run: |
           build\vs\${{ matrix.platform }}\Release\uih_host.exe --api d3d11 --warp --remote-advanced --engine build\vs\${{ matrix.platform }}\Release\fake_mono\mono-2.0-bdwgc.dll
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           build\vs\${{ matrix.platform }}\Release\uih_host.exe --api d3d11 --warp --remote-advanced --engine build\vs\${{ matrix.platform }}\Release\fake_il2cpp\GameAssembly.dll
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          build\vs\${{ matrix.platform }}\Release\uih_host.exe --api d3d11 --warp --remote-advanced --unreal 5
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          build\vs\${{ matrix.platform }}\Release\uih_host.exe --api d3d11 --warp --remote-memory --unreal 4
 
   mingw:
     name: MinGW-w64 ${{ matrix.arch }} (${{ matrix.os }})

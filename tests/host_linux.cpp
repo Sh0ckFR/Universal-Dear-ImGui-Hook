@@ -553,6 +553,7 @@ bool g_engineLoaded = false;
 uint64_t g_engineThread = 0;
 RealMono g_mono;
 bool g_monoLoaded = false;
+FakeUnreal g_unreal;
 
 int RunRemote(Display* display, Window window, Host& host, const std::string& name) {
     int presses = 0;
@@ -638,6 +639,8 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
                 engineFailure = CheckRemoteEngine(client, g_engine, true, g_engineThread);
             else if (g_monoLoaded)
                 engineFailure = CheckRealMono(client, g_mono, true);
+            else if (g_unreal.generation)
+                engineFailure = CheckRemoteUnreal(client, g_unreal, true);
             else if (client.Request("engine info") != "ok none")
                 engineFailure = "engine info answers without a Unity runtime";
             // Last: chat say replaces the message with one of a few seconds.
@@ -999,11 +1002,12 @@ int main(int argc, char** argv) {
         else if (arg == "--engine" && i + 1 < argc) options.engine = argv[++i];
         else if (arg == "--mono" && i + 2 < argc) options.mono = argv[++i], options.monoAssembly = argv[++i];
         else if (arg == "--mono-root" && i + 1 < argc) options.monoRoot = argv[++i];
+        else if (arg == "--unreal" && i + 1 < argc) options.unreal = atoi(argv[++i]);
         else if (arg == "--input" && i + 1 < argc) options.input = argv[++i];
         else if (arg == "--fault") options.fault = "env";
     }
     if (options.api != "opengl" && options.api != "vulkan") {
-        printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--transfer-only] [--vulkan-library path] [--menu-key keysym] [--unload-key keysym] [--resize] [--reload] [--second-window] [--recreate-context] [--bound-framebuffer] [--swap-with-damage] [--remote [--engine fake-runtime] [--mono runtime Game.dll [--mono-root dir]]]\n");
+        printf("usage: LD_PRELOAD=Universal-ImGui-Hook.so uih_host --api opengl|vulkan [--egl] [--lookup] [--device-proc-addr] [--transfer-only] [--vulkan-library path] [--menu-key keysym] [--unload-key keysym] [--resize] [--reload] [--second-window] [--recreate-context] [--bound-framebuffer] [--swap-with-damage] [--remote [--engine fake-runtime] [--mono runtime Game.dll [--mono-root dir]] [--unreal 4|5]]\n");
         return 2;
     }
     setvbuf(stdout, nullptr, _IOLBF, 0);
@@ -1022,6 +1026,8 @@ int main(int argc, char** argv) {
             return Fail(error.c_str());
         g_monoLoaded = true;
     }
+    if (options.unreal && !StartFakeUnreal(options.unreal, g_unreal))
+        return Fail("--unreal takes 4 or 5");
     Display* display = XOpenDisplay(nullptr);
     if (!display)
         return Skip("no X server");
