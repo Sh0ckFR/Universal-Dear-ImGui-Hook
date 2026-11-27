@@ -120,18 +120,15 @@ int32_t Int(uintptr_t address, int32_t fallback = -1) {
 
 // The readable memory that no module maps, sorted, where the engine allocates.
 struct Heap {
-    std::vector<MemoryRegion> regions;
+    std::vector<AddressRange> regions;
+    std::vector<AddressRange> modules;
 
-    Heap() : regions(MemoryRegions()) {
-        regions.erase(std::remove_if(regions.begin(), regions.end(), [](const MemoryRegion& r) { return r.image; }), regions.end());
-        std::sort(regions.begin(), regions.end(), [](const MemoryRegion& a, const MemoryRegion& b) { return a.base < b.base; });
+    Heap() : modules(ModuleMemory()) {
+        for (const MemoryRegion& region : MemoryRegions())
+            regions.push_back({region.base, region.size});
+        std::sort(regions.begin(), regions.end(), [](const AddressRange& a, const AddressRange& b) { return a.base < b.base; });
     }
-    bool Contains(uintptr_t address) const {
-        if (!address || address % P)
-            return false;
-        auto region = std::upper_bound(regions.begin(), regions.end(), address, [](uintptr_t value, const MemoryRegion& r) { return value < r.base; });
-        return region != regions.begin() && address - std::prev(region)->base < std::prev(region)->size;
-    }
+    bool Contains(uintptr_t address) const { return address && address % P == 0 && InRanges(regions, address) && !InRanges(modules, address); }
 };
 
 // Text --------------------------------------------------------------------
