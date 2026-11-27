@@ -28,8 +28,8 @@ foreach(fake mono il2cpp)
 endforeach()
 
 if(WIN32)
-    add_executable(uih_host host.cpp host_vulkan.cpp c_api.c)
-    target_link_libraries(uih_host PRIVATE uih minhook d3d9 d3d10 d3d11 d3d12 dxgi dcomp opengl32 dinput8 dxguid)
+    add_executable(uih_host host.cpp host_vulkan.cpp c_api.c fake_unreal.cpp)
+    target_link_libraries(uih_host PRIVATE uih minhook d3d9 d3d10 d3d11 d3d12 dxgi opengl32 dinput8 dxguid)
     target_compile_definitions(uih_host PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 
     # A controller the tests drive, in its own directory so that only the
@@ -86,6 +86,9 @@ if(WIN32)
     uih_add_host_test(remote_mono --api d3d11 --remote-advanced --engine $<TARGET_FILE:uih_fake_mono>)
     uih_add_host_test(remote_il2cpp --api d3d11 --remote-advanced --engine $<TARGET_FILE:uih_fake_il2cpp>)
     uih_add_host_test(remote_mono_memory --api d3d11 --remote-memory --engine $<TARGET_FILE:uih_fake_mono>)
+    # The objects of an Unreal Engine 5.8 and 4.22 game, laid out in the host.
+    uih_add_host_test(remote_unreal5 --api d3d11 --remote-memory --unreal 5)
+    uih_add_host_test(remote_unreal4 --api d3d11 --remote-advanced --unreal 4)
     # Recovery from a crash of the overlay needs structured exception handling.
     if(MSVC)
         foreach(api d3d9 d3d10 d3d11 d3d12 vulkan opengl)
@@ -150,7 +153,7 @@ else()
     pkg_check_modules(UIH_HOST REQUIRED IMPORTED_TARGET x11 xtst gl egl)
 
     # The host does not link the hook: the tests preload the example library.
-    add_executable(uih_host host_linux.cpp host_vulkan.cpp)
+    add_executable(uih_host host_linux.cpp host_vulkan.cpp fake_unreal.cpp)
     target_include_directories(uih_host PRIVATE ${UIH_THIRD_PARTY}/vulkan/include)
     target_compile_definitions(uih_host PRIVATE VK_NO_PROTOTYPES)
     target_link_libraries(uih_host PRIVATE PkgConfig::UIH_HOST Threads::Threads ${CMAKE_DL_LIBS})
@@ -228,6 +231,8 @@ else()
         # The objects of a Unity game, on the fake runtime.
         uih_add_remote_test(preload_glx_remote_mono --api opengl --engine $<TARGET_FILE:uih_fake_mono>)
         uih_add_remote_test(preload_vulkan_remote_il2cpp --api vulkan --engine $<TARGET_FILE:uih_fake_il2cpp>)
+        uih_add_remote_test(preload_glx_remote_unreal5 --api opengl --unreal 5)
+        uih_add_remote_test(preload_vulkan_remote_unreal4 --api vulkan --unreal 4)
         # A real Mono runtime, as a Unity player embeds its own, running
         # tests/mono/Game.cs: when the system has Mono and its C# compiler.
         find_program(UIH_MCS mcs)

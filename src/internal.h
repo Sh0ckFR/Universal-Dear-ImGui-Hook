@@ -335,6 +335,9 @@ void RunGameThreadCalls();
 // may be fewer; stops when `visit` returns false. Modules have unreadable
 // gaps between their segments on some systems, such as Linux on ARM64.
 void ForEachReadable(uintptr_t base, size_t size, size_t overlap, const std::function<bool(uintptr_t, const uint8_t*, size_t)>& visit);
+// Unreal Engine games, src/unreal.cpp: runs the engine command `sub` when
+// the game is one, false otherwise.
+bool HandleUnreal(const std::string& sub, const std::string& arguments, std::vector<uint8_t>& payload, std::string& answer);
 // Implemented once per platform, for the engine commands:
 // a module loaded in the process by its file name, such as mono-2.0-bdwgc.dll; null when it is not.
 void* FindModule(const char* name);
