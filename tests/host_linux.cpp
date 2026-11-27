@@ -702,8 +702,7 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
             if (!client.Open())
                 return;
             info = client.Request("info");
-            // Long enough to outlast the checks below under the sanitizers.
-            text = client.Request("text 300 hello\\nworld");
+            text = client.Request("text 60 hello\\nworld");
             screenshot = client.Request("screenshot 400");
             if (screenshot == "ok 400 300") {
                 rgb.resize(400 * 300 * 3);
@@ -719,6 +718,9 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
             if (advancedFailure.empty())
                 advancedFailure = CheckRemoteCode(client, PreloadedFunction("glXSwapBuffers"), "glXSwapBuffers", "this is the code of the overlay itself");
             toolsFailure = CheckRemoteTools(client);
+            // chat say replaced the message with its own, shown a few seconds
+            // only: the checks since then can take longer under the sanitizers.
+            client.Request("text 60 hello\\nworld");
         },
         frame);
     for (int i = 0; i < 10; ++i)
