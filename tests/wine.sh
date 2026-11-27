@@ -24,8 +24,10 @@ UIH_DEBUG=1 WINEDLLOVERRIDES="dinput8=n,b" WINEDEBUG=+debugstr,+loaddll wine "$g
 pid=$!
 trap 'wineserver -k 2>/dev/null || true; rm -f "$(dirname "$game")/dinput8.dll"' EXIT
 
+# On a failure, where each thread of the game is: a hang shows what it waits for.
 fail() {
     echo "FAIL: $1"
+    timeout 120 winedbg --command "bt all" 2>&1 | grep -v dbghelp || true
     cat "$log"
     exit 1
 }

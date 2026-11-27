@@ -87,6 +87,7 @@ VkSurfaceKHR CreateSurface(PFN_vkGetInstanceProcAddr getInstanceProcAddr, VkInst
     X(vkGetPhysicalDeviceSurfaceSupportKHR)      \
     X(vkGetPhysicalDeviceSurfaceFormatsKHR)      \
     X(vkGetPhysicalDeviceSurfaceCapabilitiesKHR) \
+    X(vkGetPhysicalDeviceSurfacePresentModesKHR) \
     X(vkCreateDevice)                            \
     X(vkGetDeviceProcAddr)
 
@@ -265,6 +266,16 @@ struct VulkanHost : Host {
         swapchainInfo.preTransform = capabilities.currentTransform;
         swapchainInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
         swapchainInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+        // With --bench, the frames are not held to the refresh rate.
+        if (options.benchFrames > 0) {
+            uint32_t modeCount = 0;
+            vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &modeCount, nullptr);
+            std::vector<VkPresentModeKHR> modes(modeCount);
+            vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &modeCount, modes.data());
+            for (VkPresentModeKHR wanted : {VK_PRESENT_MODE_MAILBOX_KHR, VK_PRESENT_MODE_IMMEDIATE_KHR})
+                if (swapchainInfo.presentMode == VK_PRESENT_MODE_FIFO_KHR && std::find(modes.begin(), modes.end(), wanted) != modes.end())
+                    swapchainInfo.presentMode = wanted;
+        }
         swapchainInfo.clipped = VK_TRUE;
         Settle(options);
         if (vkCreateSwapchainKHR(device, &swapchainInfo, nullptr, &swapchain) != VK_SUCCESS)

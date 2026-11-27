@@ -20,13 +20,13 @@ The internals of Universal-Dear-ImGui-Hook, for contributors and the curious. To
 | `src/linux/` | Symbol interposition, GLX, EGL, X11 input and the game's events (`events.cpp`), remote control (`remote.cpp`), instruction watch (`breakpoints.cpp`), code patches and dynamic symbols (`code.cpp`), `exports.map` |
 | `remote/` | `uih_mcp.py`, the MCP server of the remote control and its DLL injector; `uih_chat.py`, the bridge between the in-game chat and Claude Code; [`PROTOCOL.md`](../remote/PROTOCOL.md) |
 | `example/` | The library that gets built: `config.cpp` (settings), `menu.cpp` (the widget tour), `image.cpp` and `image.rc` (`imgui.png` embedded), `dllmain.cpp`, `proxy.cpp`, `preload.cpp` |
-| `tests/` | `uih_host`, `uih_game`, `game.sh` and `game_mcp.py` for real games, the Godot project they run, the `FetchContent` consumer, `check_docs.py` for the Markdown files: see [`tests/README.md`](../tests/README.md) |
+| `tests/` | `uih_host`, `uih_game`, `game.sh` and `game_mcp.py` for real games, the Godot project they run, the `FetchContent` consumer, `check_docs.py` for the Markdown files, `check_sources.py` for the sources of the two build systems: see [`tests/README.md`](../tests/README.md) |
 | `vs/`, `Universal-ImGui-Hook.sln` | Visual Studio projects |
 | `third_party/` | Dear ImGui, MinHook, Zydis 4.1.1 and Zycore (amalgamated by its `assets/amalgamate.py`, without the encoder), Vulkan headers, stb_image (example only) |
 
 ## Startup
 
-`Start()` launches a worker thread. On Windows, it hooks every graphics and input DLL already loaded, then the others as they load (`LdrRegisterDllNotification`). The hooks are placed with MinHook on functions found through dummy objects: a hidden window, a D3D device, a Vulkan device per GPU.
+`Start()` launches a worker thread. On Windows, it hooks every graphics and input DLL already loaded, then the others as they load (`LdrRegisterDllNotification`). The hooks are placed with MinHook on functions found through dummy objects: a hidden window, a D3D device, a Vulkan device per GPU. The DXGI hooks wait for a Direct3D 10, 11 or 12 DLL, not for `dxgi.dll`, which the library itself imports: a Vulkan game would otherwise get a dummy D3D device while it sets up Vulkan. Under Wine, that device creates an OpenGL context, which deadlocks in libxcb with the game's Vulkan surface queries on the same X connection and freezes the game before its first frame.
 
 Your code can place its own hooks with the same MinHook (link `minhook`): the library only removes its own, including when `unloadKey` or an exception removes the overlay. Call `MH_Initialize()` before `Start()` to keep MinHook initialized after `Stop()`; otherwise `Stop()` uninitializes it. Unloading the DLL with `unloadKey` always uninitializes it.
 

@@ -132,6 +132,6 @@ void NoTeardown() {}
 
 } // namespace
 
-const Renderer kDirectInputHooks = {"DirectInput", L"dinput8.dll", Install, Uninstall, NoTeardown};
+const Renderer kDirectInputHooks = {"DirectInput", {L"dinput8.dll"}, Install, Uninstall, NoTeardown};
 
 } // namespace uih::detail

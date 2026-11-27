@@ -88,11 +88,21 @@ bool IsWatchedModule(const UNICODE_STRING* name) {
     if (!name || !name->Buffer)
         return false;
     for (const RendererSlot& slot : g_renderers) {
-        const wchar_t* module = slot.renderer->module;
-        size_t length = wcslen(module);
-        if (name->Length == length * sizeof(wchar_t) && _wcsnicmp(name->Buffer, module, length) == 0)
-            return true;
+        for (const wchar_t* module : slot.renderer->modules) {
+            if (!module)
+                break;
+            size_t length = wcslen(module);
+            if (name->Length == length * sizeof(wchar_t) && _wcsnicmp(name->Buffer, module, length) == 0)
+                return true;
+        }
     }
+    return false;
+}
+
+bool ModuleLoaded(const Renderer* renderer) {
+    for (const wchar_t* module : renderer->modules)
+        if (module && GetModuleHandleW(module))
+            return true;
     return false;
 }
 
@@ -106,7 +116,7 @@ void CALLBACK OnDllNotification(ULONG reason, const void* data, void*) {
 
 void InstallLoadedRenderers() {
     for (RendererSlot& slot : g_renderers) {
-        if (slot.attempted || !RendererWanted(slot.renderer) || !GetModuleHandleW(slot.renderer->module))
+        if (slot.attempted || !RendererWanted(slot.renderer) || !ModuleLoaded(slot.renderer))
             continue;
         slot.attempted = true;
         slot.installed = slot.renderer->Install();

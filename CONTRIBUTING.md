@@ -14,6 +14,7 @@ Bug reports, fixes and features are welcome. Open an [issue](https://github.com/
 - A fix comes with a `uih_host` scenario that fails without it. [tests/README.md](tests/README.md) lists the scenarios.
 - Run the CTest suite on Windows; the CI covers Linux.
 - A change of behavior updates the README, and `python tests/check_docs.py` passes.
+- A new source file goes in `CMakeLists.txt` and in the project of `vs/` that builds it: `python tests/check_sources.py` checks it.
 
 ## Getting started
 

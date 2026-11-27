@@ -30,7 +30,7 @@ The overlay can also let an AI assistant such as Claude Code [see and play the g
 - [API](#api)
 - [How it works](#how-it-works)
 - [Building](#building)
-- [Tests](#tests)
+- [Tests](#tests), and the [games, APIs and cost of the overlay](docs/COMPATIBILITY.md)
 - [Contributing](#contributing)
 - [Limitations](#limitations)
 - [Credits](#credits), [Support](#support), [License](#license)
@@ -402,7 +402,7 @@ uih::RegisterTool("teleport", "Moves the player to x, y, z in world units, and r
 <summary>Good to know: security, focus, limits</summary>
 
 - **Any program you run can use the pipe or the socket**, so the remote control is off by default. Other machines cannot, nor, on Linux, other users. Turn it on for single-player games only: anti-cheat systems detect injected DLLs.
-- **While you type to the assistant, the game does not have the focus.** Keys and clicks then reach it as window messages, or X11 events on Linux, which games that read the keyboard or mouse state directly (DirectInput, raw input) do not see, and neither does the overlay menu on Linux. With the focus, a click moves the player's cursor. Click the game window after sending your request, or let the assistant play on a second screen.
+- **While you type to the assistant, the game does not have the focus.** Keys and clicks then reach it as window messages, or X11 events on Linux, which games that read the keyboard or mouse state directly (DirectInput, raw input) do not see, and neither does the overlay menu on Linux. With the focus, a click moves the player's cursor, except at a point another window covers, where it goes as a window message. Click the game window after sending your request, or let the assistant play on a second screen.
 - While the overlay menu is open, the game receives no keys: the assistant can close it with `insert`.
 - The assistant plays turn by turn, a screenshot and a few keys at a time: fine for menus, puzzles and slow games, not for reflexes.
 - On Linux, keys and clicks go through the X server's XTEST extension; without it, they are sent as events to the window. Native Wayland games get neither.
@@ -473,6 +473,23 @@ void start_overlay(void) {
 ```
 
 `uih_capture_frame()` hands the pixels to a callback instead of filling a `std::vector`, and `uih_create_texture()` returns the `ImTextureData*` as a `void*`. No exception leaves these functions.
+
+[Tools of your own](#tools-of-your-own) work the same way. The callback answers through `uih_tool_answer()`, or through `uih_tool_fail()` for an error. `uih_tool_argument()` copies a value into your buffer and returns its length, as `snprintf()` does. There is nothing to free:
+
+```c
+static void teleport(const char* arguments, uih_tool_result* result, void* context) {
+    char x[32];
+    uih_tool_argument(arguments, "x", x, sizeof(x));
+    if (!move_player(atof(x)))
+        uih_tool_fail(result, "the player cannot move there");
+    else
+        uih_tool_answer(result, "moved");
+}
+
+uih_register_tool("teleport", "Moves the player to x.",
+                  "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"}},\"required\":[\"x\"]}",
+                  teleport, NULL);
+```
 
 ## How it works
 
@@ -565,6 +582,8 @@ Some tests press real keys and move the mouse. They are skipped when the host wi
 
 [tests/README.md](tests/README.md) describes every scenario, how to run the tests without a GPU or under the validation and debug layers, the Linux tests, the real-game tests and what the CI checks.
 
+[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) lists the games, graphics APIs and toolchains the CI tests on every commit. It also gives the cost of the overlay, measured with `uih_host --bench`: at most 0.07 ms per frame on an RTX 4070 SUPER, whatever the API, with the menu open or closed.
+
 ## Contributing
 
 Bug reports, fixes and features are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) gives the principles and rules of the project, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) maps where the code is and how it works. Report security problems privately, as [SECURITY.md](SECURITY.md) explains.
@@ -589,11 +608,20 @@ Bug reports, fixes and features are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) 
 
 Built with [Dear ImGui](https://github.com/ocornut/imgui), [MinHook](https://github.com/TsudaKageyu/minhook), [Zydis](https://github.com/zyantific/zydis) (the disassembler of the memory tools), [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) and [stb_image](https://github.com/nothings/stb) (the example's picture).
 
-| Who | What |
+- **The libraries it is built with**: [Dear ImGui](https://github.com/ocornut/imgui) by Omar Cornut and its contributors, the interface this whole project exists to draw; [MinHook](https://github.com/TsudaKageyu/minhook) by Tsuda Kageyu, which places every hook on Windows; the [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) of the Khronos Group; [stb_image](https://github.com/nothings/stb) by Sean Barrett, for the example's picture.
+- **What the CI runs on**: [Mesa](https://www.mesa3d.org/)'s llvmpipe and lavapipe, and [mesa-dist-win](https://github.com/pal1000/mesa-dist-win) by pal1000, which let every graphics API render without a GPU; [DDNet](https://ddnet.org/) and [Godot](https://godotengine.org/), open source games that the CI plays on every commit; and [Wine](https://www.winehq.org/), on which it runs the Windows build as a Linux or Steam Deck player does.
+- **The projects that explored the same problem**: [kiero](https://github.com/Rebzzel/kiero) by Rebzzel, where this project started, and [UniversalHookX](https://github.com/bruhmoment21/UniversalHookX), [hudhook](https://github.com/veeenu/hudhook) (in Rust) and [HydraHook](https://github.com/nefarius/HydraHook) (for DirectX): have a look at them too, one may fit your project better.
+- **The [Model Context Protocol](https://modelcontextprotocol.io)**, an open standard that lets any assistant use the remote control.
+
+| Contributor | What |
 | --- | --- |
-| [Sh0ckFR](https://github.com/Sh0ckFR), [Revan600](https://github.com/Revan600) | ImGui and input hooks |
-| [Rebzzel](https://github.com/Rebzzel) | Initial work on the kiero library (no longer used) |
-| [primemb](https://github.com/primemb) | Bug fixes |
+| [Sh0ckFR](https://github.com/Sh0ckFR) | Author and maintainer |
+| [Revan600](https://github.com/Revan600) | ImGui and input hooks |
+| [Rebzzel](https://github.com/Rebzzel) | The kiero library, the original base of the hooks |
+| [primemb](https://github.com/primemb) | Dear ImGui and kiero updates, input hook improvements |
+| [SirMestre](https://github.com/SirMestre) | Fix of the buffer count type |
+
+Thanks as well to everyone who reported a bug, tested a game or starred the repository.
 
 ## Support
 
