@@ -63,6 +63,8 @@ struct Options {
     std::string mono;
     std::string monoAssembly;
     std::string monoRoot;
+    // The objects of an Unreal Engine game in the host: 4 or 5, tests/fake_unreal.h.
+    int unreal = 0;
     bool egl = false;
     bool lookup = false;
     // Changes the size of the window and of the back buffers while the menu is open.

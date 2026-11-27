@@ -349,18 +349,18 @@ Addresses are hexadecimal or `module+offset`, such as `game.exe+1a2b3c`. With `a
 
 ### Engine tools
 
-With `remoteMemory`, the assistant also sees the objects of Unity games, by their classes and fields instead of bytes, through the runtime of their scripts: Mono or IL2CPP. The library finds the runtime's library in the game and calls its C API, which it does not link.
+With `remoteMemory`, the assistant also sees the objects of Unity and Unreal Engine games, by their classes and fields instead of bytes. On Unity, the library finds the runtime of the game's scripts, Mono or IL2CPP, and calls its C API, which it does not link. On Unreal Engine 4 and 5, it finds the engine's name table and object array in the game's memory, and reads the classes and properties from them.
 
 | Tool | Effect |
 | --- | --- |
-| `engine_info` | The engine, its scripting runtime and its version, such as Unity 2022.3.10f1 with IL2CPP |
-| `engine_classes` | The assemblies of the game's scripts, or their classes whose name contains a filter, such as `player` in `Assembly-CSharp` |
+| `engine_info` | The engine, its scripting runtime and its version, such as Unity 2022.3.10f1 with IL2CPP, or Unreal Engine 5.3 |
+| `engine_classes` | The assemblies of the game's scripts (the packages on Unreal), or their classes whose name contains a filter, such as `player` in `Assembly-CSharp` |
 | `engine_class` | A class: its parents, its fields with their type and offset (or static, const), inherited ones included, and its methods with their parameters |
-| `engine_instances` | The live objects of a class, such as every `Game.Player`, found by a scan of the memory checked against the layout of the class |
+| `engine_instances` | The live objects of a class, such as every `Game.Player`, found by a scan of the memory checked against the layout of the class, or in the object array on Unreal |
 | `engine_field` | Reads a field of an object or a static field, and writes it when given a value: numbers, booleans, strings, enums, structs such as `Vector3` (`position.x`), references to other objects |
-| `engine_call` | Calls a method on the game's main thread and returns its result, or the exception it threw. Needs `aiAdvancedFeatures` too |
+| `engine_call` | Calls a method on the game's main thread and returns its result, or the exception it threw: Unity only. Needs `aiAdvancedFeatures` too |
 
-Ask, for example: *Find the player object, tell me its health, and set its speed to 10.* The assistant lists the classes of `Assembly-CSharp`, describes the player's class, finds its instance and reads or writes the fields. Unreal Engine games are not supported yet.
+Ask, for example: *Find the player object, tell me its health, and set its speed to 10.* The assistant lists the classes of `Assembly-CSharp`, describes the player's class, finds its instance and reads or writes the fields.
 
 ### Advanced features and the AI Advanced Features window
 
@@ -423,6 +423,7 @@ uih::RegisterTool("teleport", "Moves the player to x, y, z in world units, and r
 - `memory_what_writes` sets debug register 3 of every thread of the game on Windows: a debugger attached to the game, or a game that uses that register, sees the change. On Linux, it asks the kernel for a hardware breakpoint on each thread (perf events), which unprivileged processes get while `kernel.perf_event_paranoid` is 2 or lower. Ubuntu sets 4, so run `sudo sysctl kernel.perf_event_paranoid=2` once per boot. Threads started later are watched within half a second.
 - Screenshots of HDR back buffers, with more than 10 bits per channel, fail.
 - `engine_instances` lists the objects of the exact class: ask for each subclass by its name. Destroyed Unity objects are left out. An object is recognized by its header and checked against its fields, so for a class with no reference or boolean field, and not a Unity object, a freed object whose memory was not reused yet can still be listed.
+- On Unreal Engine, the library finds the name table and the object array by their contents and checks every offset it uses against objects all games have, but it was tested on layouts built from Epic's engine headers (5.8 and 4.22), not on shipped games: a game whose engine was modified, or whose object array is encrypted, gets an error. It reads properties of every type and writes numbers, enums, bools and object references, not strings; it does not call functions, and does not list the values of enums.
 - `engine_call` waits for the game's main thread: on Windows, the thread of its window, which runs the call in its next message; on Linux, the thread reading its X events. A game whose main thread is stuck, such as during a loading screen, answers after 10 seconds with an error. Structs cannot be passed as arguments.
 
 </details>

@@ -1188,6 +1188,7 @@ bool g_engineLoaded = false;
 uint64_t g_engineThread = 0;
 RealMono g_mono;
 bool g_monoLoaded = false;
+FakeUnreal g_unreal;
 
 // The commands of remote/uih_mcp.py while the menu is open: the screenshot
 // shows the game without the overlay, the message is drawn, and the keys reach
@@ -1225,6 +1226,8 @@ int RemoteScenario(bool memory, bool advanced, Frame&& frame) {
                 engineFailure = CheckRemoteEngine(client, g_engine, advanced, g_engineThread);
             else if (g_monoLoaded)
                 engineFailure = CheckRealMono(client, g_mono, advanced);
+            else if (g_unreal.generation)
+                engineFailure = CheckRemoteUnreal(client, g_unreal, advanced);
             else if (client.Request("engine info") != (memory ? "ok none" : "error memory access is off: set config.remoteMemory in example/config.cpp and rebuild the library"))
                 engineFailure = "engine info answers without a Unity runtime, or while remoteMemory is off";
             if (memory)
@@ -2566,12 +2569,13 @@ int main(int argc, char** argv) {
         else if (arg == "--engine" && i + 1 < argc) options.engine = argv[++i];
         else if (arg == "--mono" && i + 2 < argc) options.mono = argv[++i], options.monoAssembly = argv[++i];
         else if (arg == "--mono-root" && i + 1 < argc) options.monoRoot = argv[++i];
+        else if (arg == "--unreal" && i + 1 < argc) options.unreal = atoi(argv[++i]);
     }
     if (!options.proxy.empty())
         return RunProxyMode(options);
     uih::Backend expected = ExpectedBackend(options.api);
     if (expected == uih::Backend::None) {
-        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--own-hooks before|after] [--fault access|exception|draw] [--second-window [--shared-device]] [--composition] [--capture-frame] [--remote [--remote-memory] [--remote-advanced] [--engine fake-runtime] [--mono runtime Game.dll [--mono-root dir]]] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--c-api] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
+        printf("usage: uih_host --api d3d9|d3d9ex|d3d10|d3d11|d3d12|vulkan|opengl [--inject-at N] [--scale S] [--resize] [--reload] [--remove] [--own-hooks before|after] [--fault access|exception|draw] [--second-window [--shared-device]] [--composition] [--capture-frame] [--remote [--remote-memory] [--remote-advanced] [--engine fake-runtime] [--mono runtime Game.dll [--mono-root dir]] [--unreal 4|5]] [--textures N] [--remove-device] [--transfer-only] [--ignore-suboptimal] [--render-thread] [--resubclass] [--c-api] [--recreate-context] [--switch-api api] [--slow-frame ms] [--gpu-latency ms] [--bound-framebuffer] [--warp] [--capture] [--device-proc-addr] [--decoy-queue] [--format srgb|float] [--settle ms] [--input raw|directinput] [--gamepad fake-xinput.dll] [--dll path [--menu-key vk] [--unload-key vk]] [--preview path]\n       uih_host --proxy path\n");
         return 2;
     }
 
@@ -2600,6 +2604,8 @@ int main(int argc, char** argv) {
             return Fail(error.c_str());
         g_monoLoaded = true;
     }
+    if (options.unreal && !StartFakeUnreal(options.unreal, g_unreal))
+        return Fail("--unreal takes 4 or 5");
     if (options.remote)
         g_remoteHostProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(CountRemoteKeys)));
     PumpMessages();

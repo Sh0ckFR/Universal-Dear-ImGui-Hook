@@ -300,41 +300,45 @@ TOOLS += [
     },
 ]
 
-CLASS = {"type": "string", "description": "Namespace.Name, such as Game.Player, or Name alone when no other class has it; Outer/Inner "
-         "for a nested class; Assembly-CSharp:Game.Player to pick the assembly."}
+CLASS = {"type": "string", "description": "Unity: Namespace.Name, such as Game.Player, or Name alone when no other class has it; "
+         "Outer/Inner for a nested class; Assembly-CSharp:Game.Player to pick the assembly. Unreal: the name without its prefix, such as "
+         "PlayerCharacter_C or Pawn; /Script/Engine:Actor to pick the package."}
 OBJECT = {"type": "string", "description": "Address of an object, from engine_instances or a field that refers to one."}
 
 TOOLS += [
     {
         "name": "engine_info",
-        "description": "Tells which engine runs the game, for the engine_ tools: Unity with Mono or IL2CPP, and its version. The engine "
-        "tools see the game's objects by their classes and fields, where memory_ tools see bytes." + MEMORY_NOTE,
+        "description": "Tells which engine runs the game, for the engine_ tools: Unity with Mono or IL2CPP, or Unreal Engine 4 or 5, "
+        "and its version. The engine tools see the game's objects by their classes and fields, where memory_ tools see bytes." + MEMORY_NOTE,
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
         "name": "engine_classes",
         "description": "Without arguments, lists the assemblies of the game's scripts with their number of classes; the game's own "
-        "code is usually in Assembly-CSharp. With a filter or an assembly, lists the classes whose full name contains the filter, "
-        "case-insensitive, at most 1000." + MEMORY_NOTE,
+        "code is usually in Assembly-CSharp on Unity, and in /Script/<game> and the /Game/ packages of its blueprints on Unreal. With a "
+        "filter or an assembly, lists the classes (and on Unreal the structs and enums) whose name contains the filter, case-insensitive, "
+        "at most 1000." + MEMORY_NOTE,
         "inputSchema": {
             "type": "object",
             "properties": {
                 "filter": {"type": "string", "description": "Part of the class name, such as player or inventory."},
-                "assembly": {"type": "string", "description": "Only the classes of this assembly, such as Assembly-CSharp."},
+                "assembly": {"type": "string", "description": "Only the classes of this assembly, such as Assembly-CSharp, or of this "
+                             "Unreal package, such as /Script/Engine."},
             },
         },
     },
     {
         "name": "engine_class",
         "description": "Describes a class: its parents, its fields with their type and offset in the object (or static, const), "
-        "inherited fields included, and its methods with their parameters." + MEMORY_NOTE,
+        "inherited fields included, and its methods with their parameters. On Unreal: its properties and its functions." + MEMORY_NOTE,
         "inputSchema": {"type": "object", "properties": {"class": CLASS}, "required": ["class"]},
     },
     {
         "name": "engine_instances",
         "description": "Finds the live objects of a class, such as every Game.Player, by scanning the game's memory for their header "
-        "and checking each against the layout of the class: the addresses for engine_field and engine_call. Objects of subclasses are "
-        "listed under their own class; destroyed Unity objects are left out." + MEMORY_NOTE,
+        "and checking each against the layout of the class: the addresses for engine_field and engine_call. On Unity, objects of "
+        "subclasses are listed under their own class, and destroyed objects are left out. On Unreal, the objects come from the engine's "
+        "object array, those of subclasses included, with their class and name; default objects are left out." + MEMORY_NOTE,
         "inputSchema": {
             "type": "object",
             "properties": {"class": CLASS, "count": {"type": "integer", "description": "100 by default.", "minimum": 1, "maximum": 1000}},
@@ -345,7 +349,8 @@ TOOLS += [
         "name": "engine_field",
         "description": "Reads a field of an object, or a static field without an object, with its type: numbers, booleans, strings, "
         "enums as numbers, structs such as Vector3 with their fields, references as the address and class of the object. With a "
-        "value, writes it first. Reach the fields of a struct with a dot: position.x." + MEMORY_NOTE,
+        "value, writes it first. Reach the fields of a struct with a dot: position.x. Unreal properties belong to objects: give one; "
+        "the library writes numbers, enums, bools and object references there." + MEMORY_NOTE,
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -362,7 +367,7 @@ TOOLS += [
         "name": "engine_call",
         "description": "Calls a method of the game's scripts, on its main thread, such as Player.Heal(50) or GameManager.LoadLevel(2), "
         "and returns its result, or the exception it threw. Risky: the method runs as the game would run it, so a wrong call can break "
-        "the game's state. Arguments are numbers, booleans, strings, null or object addresses; structs cannot be passed." +
+        "the game's state. Arguments are numbers, booleans, strings, null or object addresses; structs cannot be passed. Unity only." +
         MEMORY_NOTE + ADVANCED_NOTE,
         "inputSchema": {
             "type": "object",
@@ -714,7 +719,12 @@ def engine_tool(name, args):
         answer, _ = request("engine info")
         words = answer.split()
         if words[1] == "none":
-            return "The game runs no engine whose objects the library knows: the engine tools see Unity games, with Mono or IL2CPP."
+            return ("The game runs no engine whose objects the library knows: the engine tools see Unity games, with Mono or IL2CPP, "
+                    "and Unreal Engine 4 and 5 games.")
+        if words[1] == "unreal":
+            version = words[3] if words[3] != "-" else words[2][2:]
+            return (f"Unreal Engine {version} ({words[4]}). The engine's classes are in packages such as /Script/Engine, the game's own "
+                    "in /Script/<game> and, for its blueprints, under /Game/: list them with engine_classes.")
         version = f" {words[3]}" if words[3] != "-" else ""
         return (f"{words[1].capitalize()}{version} with {'IL2CPP' if words[2] == 'il2cpp' else 'Mono'} ({words[4]}). "
                 "The game's scripts are usually in the assembly Assembly-CSharp: list its classes with engine_classes.")

@@ -1406,7 +1406,10 @@ bool HandleEngine(const std::string& command, const std::string& rest, std::vect
     std::string error;
     Runtime* runtime = FindRuntime(error);
     if (!runtime) {
-        answer = sub == "info" || error.rfind("error ", 0) == 0 ? error : "error the game runs no engine whose objects the library knows: Unity with Mono or IL2CPP";
+        if (error == "ok none" && HandleUnreal(sub, arguments, payload, answer))
+            return true;
+        answer = sub == "info" || error.rfind("error ", 0) == 0 ? error
+                                                                : "error the game runs no engine whose objects the library knows: Unity with Mono or IL2CPP, Unreal Engine 4 or 5";
         return true;
     }
     if (sub == "info") {
