@@ -395,8 +395,10 @@ void ReleaseAllForImGui() {
 void ForgetLocked(const Proxy* proxy) {
     auto it = g_wrapped.find(proxy);
     if (it != g_wrapped.end()) {
-        if (it->second.kind == Kind::Pointer || it->second.kind == Kind::Keyboard)
+        if (it->second.kind == Kind::Pointer || it->second.kind == Kind::Keyboard) {
             --g_devices;
+            Log("Stopped reading the input of a %s", it->second.kind == Kind::Pointer ? "wl_pointer" : "wl_keyboard");
+        }
         g_wrapped.erase(it);
     }
     if (g_pointer == proxy)

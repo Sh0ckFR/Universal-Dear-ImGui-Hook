@@ -335,7 +335,7 @@ jobs:
         with:
           packages: >-
             ninja-build pkg-config libxcb1-dev libx11-dev libxtst-dev libgl-dev libegl-dev libwayland-dev wayland-protocols
-            weston xvfb xdotool libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libvulkan1 mesa-vulkan-drivers
+            weston xvfb xdotool x11-utils libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libvulkan1 mesa-vulkan-drivers
       - name: Configure
         run: cmake --preset linux -DUIH_BUILD_TESTS=ON -DUIH_SANITIZE=${{ matrix.sanitize }}
       - name: Build
@@ -344,6 +344,14 @@ jobs:
         run: |
           ctest --test-dir build/linux -N -L wayland | tee tests.txt
           grep -q "Total Tests: 8" tests.txt
+      - name: Diagnose (temporary)
+        shell: bash
+        run: |
+          cat > diag.sh <<'SCRIPT'
+          xwininfo -root -tree | head -20
+          WAYLAND_DEBUG=1 timeout 20 build/linux/tests/uih_host_wayland --api vulkan 2>&1 | grep -E "FAIL|PASS|client:|wl_keyboard|wl_seat|xdg_toplevel|wl_pointer@[0-9]+\.(enter|leave)" | head -60
+          SCRIPT
+          xvfb-run -a -s "-screen 0 1280x720x24" sh tests/wayland.sh sh diag.sh || true
       - name: Test
         shell: bash
         run: |

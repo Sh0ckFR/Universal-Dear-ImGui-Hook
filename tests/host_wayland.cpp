@@ -30,8 +30,11 @@
 
 namespace {
 
+void PrintClientState();
+
 int Fail(const std::string& message) {
     printf("FAIL: %s\n", message.c_str());
+    PrintClientState();
     return 1;
 }
 
@@ -76,10 +79,22 @@ struct Client {
     uint32_t buttonsHeld = 0;
     double x = 0, y = 0;
     Seen seen;
+    uint32_t capabilities = 0;
+    int pointerEnters = 0;
+    int keyboardEnters = 0;
+    int keyboardLeaves = 0;
+    bool activated = false;
 } g_client;
+
+void PrintClientState() {
+    printf("client: seat capabilities %u, pointer %s (%d enters, inside %d), keyboard %s (%d enters, %d leaves, focus %d), toplevel activated %d\n",
+           g_client.capabilities, g_client.pointer ? "yes" : "no", g_client.pointerEnters, g_client.pointerInside, g_client.keyboard ? "yes" : "no",
+           g_client.keyboardEnters, g_client.keyboardLeaves, g_client.keyboardFocus, g_client.activated);
+}
 
 void PointerEnter(void*, wl_pointer*, uint32_t, wl_surface*, wl_fixed_t x, wl_fixed_t y) {
     g_client.pointerInside = true;
+    ++g_client.pointerEnters;
     g_client.x = wl_fixed_to_double(x);
     g_client.y = wl_fixed_to_double(y);
 }
@@ -124,8 +139,15 @@ const wl_pointer_listener kPointerListener = {PointerEnter, PointerLeave, Pointe
                                               PointerFrame, PointerAxisSource, PointerAxisStop, PointerAxisDiscrete};
 
 void KeyboardKeymap(void*, wl_keyboard*, uint32_t, int32_t fd, uint32_t) { close(fd); }
-void KeyboardEnter(void*, wl_keyboard*, uint32_t, wl_surface*, wl_array*) { g_client.keyboardFocus = true; }
-void KeyboardLeave(void*, wl_keyboard*, uint32_t, wl_surface*) { g_client.keyboardFocus = false; }
+void KeyboardEnter(void*, wl_keyboard*, uint32_t, wl_surface*, wl_array*) {
+    g_client.keyboardFocus = true;
+    ++g_client.keyboardEnters;
+}
+
+void KeyboardLeave(void*, wl_keyboard*, uint32_t, wl_surface*) {
+    g_client.keyboardFocus = false;
+    ++g_client.keyboardLeaves;
+}
 
 void KeyboardKey(void*, wl_keyboard*, uint32_t, uint32_t, uint32_t key, uint32_t state) {
     if (key > KEY_MAX)
@@ -147,6 +169,7 @@ const wl_keyboard_listener kKeyboardListener = {KeyboardKeymap, KeyboardEnter, K
 
 // The compositor adds and removes the devices of the seat as the X server's come and go.
 void SeatCapabilities(void*, wl_seat* seat, uint32_t capabilities) {
+    g_client.capabilities = capabilities;
     bool hasPointer = capabilities & WL_SEAT_CAPABILITY_POINTER;
     bool hasKeyboard = capabilities & WL_SEAT_CAPABILITY_KEYBOARD;
     if (hasPointer && !g_client.pointer) {
@@ -178,7 +201,14 @@ void Configure(void*, xdg_surface* surface, uint32_t serial) {
 }
 const xdg_surface_listener kXdgSurfaceListener = {Configure};
 
-void ToplevelConfigure(void*, xdg_toplevel*, int32_t, int32_t, wl_array*) {}
+void ToplevelConfigure(void*, xdg_toplevel*, int32_t, int32_t, wl_array* states) {
+    g_client.activated = false;
+    for (size_t i = 0; states && i + sizeof(uint32_t) <= states->size; i += sizeof(uint32_t)) {
+        uint32_t state = 0;
+        memcpy(&state, static_cast<const char*>(states->data) + i, sizeof(state));
+        g_client.activated = g_client.activated || state == XDG_TOPLEVEL_STATE_ACTIVATED;
+    }
+}
 void ToplevelClose(void*, xdg_toplevel*) {}
 const xdg_toplevel_listener kToplevelListener = {ToplevelConfigure, ToplevelClose};
 
