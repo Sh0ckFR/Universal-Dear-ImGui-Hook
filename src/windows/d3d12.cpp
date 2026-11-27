@@ -671,6 +671,6 @@ void ReleaseRemovedQueues() {
 }
 
 const DxgiPresenter kD3D12Presenter = {Backend::D3D12, Probe, Render, PreResize, Teardown};
-const Renderer kD3D12QueueRenderer = {"D3D12", L"d3d12.dll", InstallQueueHook, UninstallQueueHook, NoTeardown};
+const Renderer kD3D12QueueRenderer = {"D3D12", {L"d3d12.dll"}, InstallQueueHook, UninstallQueueHook, NoTeardown};
 
 } // namespace uih::detail

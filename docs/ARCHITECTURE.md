@@ -25,7 +25,7 @@ The internals of Universal-Dear-ImGui-Hook, for contributors and the curious. To
 
 ## Startup
 
-`Start()` launches a worker thread. On Windows, it hooks every graphics and input DLL already loaded, then the others as they load (`LdrRegisterDllNotification`). The hooks are placed with MinHook on functions found through dummy objects: a hidden window, a D3D device, a Vulkan device per GPU.
+`Start()` launches a worker thread. On Windows, it hooks every graphics and input DLL already loaded, then the others as they load (`LdrRegisterDllNotification`). The hooks are placed with MinHook on functions found through dummy objects: a hidden window, a D3D device, a Vulkan device per GPU. The DXGI hooks wait for a Direct3D 10, 11 or 12 DLL, not for `dxgi.dll`, which the library itself imports: a Vulkan game would otherwise get a dummy D3D device while it sets up Vulkan. Under Wine, that device creates an OpenGL context, which deadlocks in libxcb with the game's Vulkan surface queries on the same X connection and freezes the game before its first frame.
 
 Your code can place its own hooks with the same MinHook (link `minhook`): the library only removes its own, including when `unloadKey` or an exception removes the overlay. Call `MH_Initialize()` before `Start()` to keep MinHook initialized after `Stop()`; otherwise `Stop()` uninitializes it. Unloading the DLL with `unloadKey` always uninitializes it.
 

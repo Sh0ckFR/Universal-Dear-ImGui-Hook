@@ -123,6 +123,6 @@ void Uninstall() {
 
 } // namespace
 
-const Renderer kOpenGLRenderer = {"OpenGL", L"opengl32.dll", Install, Uninstall, Teardown};
+const Renderer kOpenGLRenderer = {"OpenGL", {L"opengl32.dll"}, Install, Uninstall, Teardown};
 
 } // namespace uih::detail
