@@ -227,10 +227,6 @@ struct MemoryRegion {
     uintptr_t base;
     size_t size;
     bool writable;
-    // Mapped from an executable or a library, or its .bss. The span of a
-    // module can hold other memory: the loader of glibc 2.28 leaves the gap
-    // between its code and its data free for mmap().
-    bool image = false;
 };
 // Readable memory of the process, without device memory.
 std::vector<MemoryRegion> MemoryRegions();
@@ -242,6 +238,14 @@ struct LoadedModule {
     bool main;
 };
 std::vector<LoadedModule> LoadedModules();
+// The memory that the modules map, sorted: the segments of each on Linux,
+// as the span of a module can hold other memory; the loader of glibc 2.28
+// leaves the gap between its code and its data free for mmap().
+struct AddressRange {
+    uintptr_t base;
+    size_t size;
+};
+std::vector<AddressRange> ModuleMemory();
 // Copies memory of the process without faulting; false when part of it is not readable.
 bool ReadMemory(uintptr_t address, void* out, size_t size);
 // Writes memory of the process, code included.
@@ -259,6 +263,8 @@ std::string FormatValue(const uint8_t* bytes, ValueType type);
 bool EncodeValue(const std::string& text, ValueType type, uint8_t* bytes);
 // The modules sorted by address, for LocateAddress().
 std::vector<LoadedModule> SortedModules();
+// Whether `address` is in one of the sorted `ranges`, such as ModuleMemory().
+bool InRanges(const std::vector<AddressRange>& ranges, uintptr_t address);
 // module+offset of `address`, or "-" outside the modules.
 std::string LocateAddress(uintptr_t address, const std::vector<LoadedModule>& sortedModules);
 // An address: hexadecimal, module+offset, module-offset, and [expression] for

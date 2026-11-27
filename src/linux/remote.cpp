@@ -863,16 +863,11 @@ std::vector<MemoryRegion> MemoryRegions() {
         // Device memory, such as the GPU's, and the kernel's pages.
         if (permissions[0] != 'r' || strncmp(path, "/dev/", 5) == 0 || strncmp(path, "[vvar", 5) == 0 || strncmp(path, "[vsyscall]", 10) == 0)
             continue;
-        bool unnamed = path[0] == '\0' || path[0] == '\n';
-        bool anonymous = unnamed || path[0] == '[';
-        bool writable = permissions[1] == 'w';
-        // The .bss of a module: unnamed memory right after its writable data.
-        bool bss = unnamed && writable && !regions.empty() && regions.back().image && regions.back().writable &&
-                   regions.back().base + regions.back().size == start;
-        if (anonymous && !bss && end - start > kLargeAnonymous)
-            AddResidentRuns(regions, start, end, writable);
+        bool anonymous = path[0] == '\0' || path[0] == '\n' || path[0] == '[';
+        if (anonymous && end - start > kLargeAnonymous)
+            AddResidentRuns(regions, start, end, permissions[1] == 'w');
         else
-            regions.push_back({start, end - start, writable, !anonymous || bss});
+            regions.push_back({start, end - start, permissions[1] == 'w'});
     }
     fclose(maps);
     return regions;
@@ -908,6 +903,28 @@ std::vector<LoadedModule> LoadedModules() {
         },
         &modules);
     return modules;
+}
+
+// The PT_LOAD segments, in whole pages; their .bss included.
+std::vector<AddressRange> ModuleMemory() {
+    std::vector<AddressRange> ranges;
+    dl_iterate_phdr(
+        [](dl_phdr_info* info, size_t, void* context) {
+            const uintptr_t page = static_cast<uintptr_t>(sysconf(_SC_PAGESIZE));
+            auto* list = static_cast<std::vector<AddressRange>*>(context);
+            for (int i = 0; i < info->dlpi_phnum; ++i) {
+                const auto& header = info->dlpi_phdr[i];
+                if (header.p_type != PT_LOAD || !header.p_memsz)
+                    continue;
+                uintptr_t start = (info->dlpi_addr + header.p_vaddr) & ~(page - 1);
+                uintptr_t end = (info->dlpi_addr + header.p_vaddr + header.p_memsz + page - 1) & ~(page - 1);
+                list->push_back({start, end - start});
+            }
+            return 0;
+        },
+        &ranges);
+    std::sort(ranges.begin(), ranges.end(), [](const AddressRange& a, const AddressRange& b) { return a.base < b.base; });
+    return ranges;
 }
 
 bool ReadMemory(uintptr_t address, void* out, size_t size) {
