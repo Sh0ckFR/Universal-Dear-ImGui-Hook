@@ -1219,7 +1219,7 @@ int RemoteScenario(bool memory, bool advanced, Frame&& frame) {
                 if (!client.Read(rgb.data(), rgb.size()))
                     rgb.clear();
             }
-            text = client.Request("text 60 hello\\nworld");
+            text = client.Request("text 600 hello\\nworld");
             unknownKey = client.Request("key nokey 50");
             toolsFailure = CheckRemoteTools(client, [] { return ImGui::GetFrameCount(); });
             if (g_engineLoaded)
