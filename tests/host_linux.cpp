@@ -3,6 +3,7 @@
 #include "remote_memory.h"
 #include "remote_advanced.h"
 #include "remote_time.h"
+#include "remote_code.h"
 #include "remote_tools.h"
 
 #include <EGL/egl.h>
@@ -616,6 +617,27 @@ int64_t GameMs() {
     return static_cast<int64_t>(now.tv_sec) * 1000 + now.tv_nsec / 1000000;
 }
 
+// A function of the preloaded library. dlsym(RTLD_DEFAULT) would find the
+// stub in the procedure linkage table of an executable built without PIE.
+void* PreloadedFunction(const char* name) {
+    std::string preload = getenv("LD_PRELOAD") ? getenv("LD_PRELOAD") : "";
+    for (size_t start = 0; start < preload.size();) {
+        size_t end = preload.find_first_of(": ", start);
+        if (end == std::string::npos)
+            end = preload.size();
+        std::string path = preload.substr(start, end - start);
+        start = end + 1;
+        if (path.find("uih_remote_preload") == std::string::npos)
+            continue;
+        void* library = dlopen(path.c_str(), RTLD_LAZY | RTLD_NOLOAD);
+        void* function = library ? dlsym(library, name) : nullptr;
+        if (library)
+            dlclose(library);
+        return function;
+    }
+    return nullptr;
+}
+
 int RunRemote(Display* display, Window window, Host& host, const std::string& name) {
     int presses = 0;
     int releases = 0;
@@ -692,7 +714,13 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
             advancedFailure = CheckRemoteAdvanced(client);
             if (advancedFailure.empty())
                 advancedFailure = CheckRemoteTime(client, GameMs);
+            // The preloaded library stands for glXSwapBuffers().
+            if (advancedFailure.empty())
+                advancedFailure = CheckRemoteCode(client, PreloadedFunction("glXSwapBuffers"), "glXSwapBuffers", "this is the code of the overlay itself");
             toolsFailure = CheckRemoteTools(client);
+            // chat say replaced the message with its own, shown a few seconds
+            // only: the checks since then can take longer under the sanitizers.
+            client.Request("text 60 hello\\nworld");
         },
         frame);
     for (int i = 0; i < 10; ++i)

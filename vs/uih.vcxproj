@@ -27,7 +27,7 @@
   <Import Project="common.props" />
   <ItemDefinitionGroup>
     <ClCompile>
-      <AdditionalIncludeDirectories>$(UihRoot)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(UihRoot)src;$(UihRoot)third_party\zydis;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <WarningLevel>Level4</WarningLevel>
       <ConformanceMode>true</ConformanceMode>
@@ -38,6 +38,11 @@
     <ClCompile Include="..\src\vulkan.cpp" />
     <ClCompile Include="..\src\remote.cpp" />
     <ClCompile Include="..\src\memory.cpp" />
+    <ClCompile Include="..\src\code.cpp" />
+    <ClCompile Include="..\src\zydis_build.c">
+      <!-- Zydis, the disassembler of src\code.cpp, is third-party code. -->
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+    </ClCompile>
     <ClCompile Include="..\src\advanced.cpp" />
     <ClCompile Include="..\src\c_api.cpp" />
     <ClCompile Include="..\src\tools.cpp" />
@@ -51,6 +56,10 @@
       <ObjectFileName>$(IntDir)windows_remote.obj</ObjectFileName>
     </ClCompile>
     <ClCompile Include="..\src\windows\breakpoints.cpp" />
+    <ClCompile Include="..\src\windows\code.cpp">
+      <!-- src\code.cpp compiles to code.obj too. -->
+      <ObjectFileName>$(IntDir)windows_code.obj</ObjectFileName>
+    </ClCompile>
     <ClCompile Include="..\src\windows\xinput.cpp" />
     <ClCompile Include="..\src\windows\d3d9.cpp" />
     <ClCompile Include="..\src\windows\dxgi.cpp" />
