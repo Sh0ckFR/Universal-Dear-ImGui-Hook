@@ -31,7 +31,8 @@ inline void* VirtualMethod(void* object, size_t index) {
 
 struct Renderer {
     const char* name;
-    const wchar_t* module;
+    // Install() runs once one of these modules is loaded.
+    const wchar_t* modules[4];
     bool (*Install)();
     void (*Uninstall)();
     void (*Teardown)();
