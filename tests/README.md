@@ -109,10 +109,12 @@ The [CI](../.github/workflows/build.yml) runs on every pull request, on `master`
 | DDNet, Godot on Windows | The DLL injected into the same games once they render, without a GPU: DDNet with OpenGL and Vulkan, Godot with Direct3D 12, Vulkan and Direct3D 11 (its OpenGL renderer through ANGLE) |
 | Godot under Wine | The released x64 DLL as `dinput8.dll` next to the Windows build of Godot, run with `WINEDLLOVERRIDES="dinput8=n,b"` under Wine 11 and Xvfb (`tests/wine.sh`), with OpenGL, Direct3D 11 (ANGLE on Wine's Direct3D) and Vulkan on llvmpipe and lavapipe: Wine must load the DLL, the backend become active, `INSERT` show the menu on screen and `F11` remove it while the game keeps running |
 | FetchContent consumer | The repository as a CMake dependency |
-| Docs | `tests/check_docs.py` on every Markdown file: relative links and anchors, tables, control characters, code spans |
+| Docs and sources | `tests/check_docs.py` on every Markdown file: relative links and anchors, tables, control characters, code spans; `tests/check_sources.py`: CMake and the Visual Studio solution build the same sources |
 
 Pushing a `v*` tag publishes the MSVC and Linux portable libraries as a release once every job above has passed, with their SHA256 in `SHA256SUMS` and a build provenance attestation. The message of an annotated tag becomes the highlights of the release notes: see [CONTRIBUTING.md](../CONTRIBUTING.md#releases).
 
 ## Documentation
 
 `python tests/check_docs.py` checks the Markdown files as the CI does, without fetching external links: relative links to missing files or anchors, table rows cut off from their table or with the wrong number of cells, tabs and other control characters, unclosed code spans and unbalanced `<details>` blocks.
+
+`python tests/check_sources.py` checks that `CMakeLists.txt` and the projects of `vs/` build the same sources: each source of `src/` in both (`src/linux/` in CMake only), the Windows sources of `example/` and of `uih_host` in both, and no file named by either that does not exist. A source added to one build system only links on one side and fails on the other.

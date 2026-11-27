@@ -4,6 +4,10 @@
 
 #include "uih.h"
 
+#include <cstring>
+#include <stdexcept>
+#include <string>
+
 static_assert(static_cast<int>(uih::Backend::OpenGL) == UIH_BACKEND_OPENGL, "the backends of uih.h and uih_c.h must match");
 static_assert(uih::GamepadY == UIH_GAMEPAD_Y && uih::GamepadL3 == UIH_GAMEPAD_L3, "the buttons of uih.h and uih_c.h must match");
 
@@ -110,6 +114,75 @@ void uih_draw_ai_advanced_features(bool* open) {
         uih::DrawAIAdvancedFeatures(open);
     } catch (...) {
     }
+}
+
+} // extern "C"
+
+struct uih_tool_result {
+    std::string text;
+    std::string error;
+    bool failed = false;
+};
+
+extern "C" {
+
+void uih_tool_answer(uih_tool_result* result, const char* text) {
+    if (!result)
+        return;
+    try {
+        result->text = text ? text : "";
+        result->failed = false;
+    } catch (...) {
+    }
+}
+
+void uih_tool_fail(uih_tool_result* result, const char* message) {
+    if (!result)
+        return;
+    try {
+        result->error = message && *message ? message : "the tool failed";
+        result->failed = true;
+    } catch (...) {
+    }
+}
+
+bool uih_register_tool(const char* name, const char* description, const char* parameters, uih_tool_callback call, void* context) {
+    if (!call)
+        return false;
+    try {
+        return uih::RegisterTool(name, description, parameters, [call, context](const std::string& arguments) {
+            uih_tool_result result;
+            call(arguments.c_str(), &result, context);
+            if (result.failed)
+                throw std::runtime_error(result.error);
+            return result.text;
+        });
+    } catch (...) {
+        return false;
+    }
+}
+
+void uih_unregister_tool(const char* name) {
+    try {
+        uih::UnregisterTool(name);
+    } catch (...) {
+    }
+}
+
+size_t uih_tool_argument(const char* arguments, const char* key, char* buffer, size_t size) {
+    std::string value;
+    try {
+        if (arguments && key)
+            value = uih::ToolArgument(arguments, key);
+    } catch (...) {
+        value.clear();
+    }
+    if (buffer && size > 0) {
+        size_t copied = value.size() < size - 1 ? value.size() : size - 1;
+        memcpy(buffer, value.data(), copied);
+        buffer[copied] = '\0';
+    }
+    return value.size();
 }
 
 } // extern "C"

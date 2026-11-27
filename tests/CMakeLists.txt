@@ -58,6 +58,7 @@ if(WIN32)
     uih_add_host_test(remote --api d3d11 --remote)
     uih_add_host_test(remote_memory --api d3d11 --remote-memory)
     uih_add_host_test(remote_advanced --api d3d11 --remote-advanced)
+    uih_add_host_test(remote_c_api --api d3d11 --remote --c-api)
     # Recovery from a crash of the overlay needs structured exception handling.
     if(MSVC)
         foreach(api d3d9 d3d10 d3d11 d3d12 vulkan opengl)
@@ -94,6 +95,7 @@ if(WIN32)
     uih_add_host_test(d3d11_srgb --api d3d11 --format srgb --capture)
     uih_add_host_test(d3d11_float --api d3d11 --format float --capture)
     uih_add_host_test(d3d12_float --api d3d12 --format float --capture)
+    uih_add_host_test(d3d12_hdr10 --api d3d12 --format hdr10 --capture --inject-at 0)
     uih_add_host_test(d3d11_c_api --api d3d11 --c-api --capture)
     # The measure only runs: the CI renders without a GPU.
     uih_add_host_test(d3d11_bench --api d3d11 --bench 200)
@@ -177,6 +179,9 @@ else()
         uih_add_remote_test(preload_glx_remote --api opengl)
         uih_add_remote_test(preload_egl_remote --api opengl --egl)
         uih_add_remote_test(preload_vulkan_remote --api vulkan)
+        # The same tools, registered through the C interface.
+        uih_add_host_test(preload_glx_remote_c_api --api opengl --remote)
+        set_tests_properties(preload_glx_remote_c_api PROPERTIES ENVIRONMENT "LD_PRELOAD=${UIH_REMOTE_PRELOAD};UIH_TEST_C_TOOLS=1;${UIH_SANITIZER_OPTIONS}")
 
         # The hook with a probe of the mouse wheel, for the input scenario.
         add_library(uih_input_preload SHARED input_preload.cpp)

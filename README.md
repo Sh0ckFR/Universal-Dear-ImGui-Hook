@@ -467,6 +467,23 @@ void start_overlay(void) {
 
 `uih_capture_frame()` hands the pixels to a callback instead of filling a `std::vector`, and `uih_create_texture()` returns the `ImTextureData*` as a `void*`. No exception leaves these functions.
 
+[Tools of your own](#tools-of-your-own) work the same way. The callback answers through `uih_tool_answer()`, or through `uih_tool_fail()` for an error. `uih_tool_argument()` copies a value into your buffer and returns its length, as `snprintf()` does. There is nothing to free:
+
+```c
+static void teleport(const char* arguments, uih_tool_result* result, void* context) {
+    char x[32];
+    uih_tool_argument(arguments, "x", x, sizeof(x));
+    if (!move_player(atof(x)))
+        uih_tool_fail(result, "the player cannot move there");
+    else
+        uih_tool_answer(result, "moved");
+}
+
+uih_register_tool("teleport", "Moves the player to x.",
+                  "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"}},\"required\":[\"x\"]}",
+                  teleport, NULL);
+```
+
 ## How it works
 
 In short: `Start()` hooks the present function of each graphics API (`Present`, `vkQueuePresentKHR`, `*SwapBuffers`), found through dummy objects with MinHook on Windows and by symbol interposition on Linux. In each present, the overlay runs your `render` callback and draws the ImGui data on the game's back buffer. While the menu is open, the game's input functions report nothing, and faults in the overlay are caught so they remove the overlay instead of crashing the game.
@@ -582,13 +599,22 @@ Bug reports, fixes and features are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) 
 
 ## Credits
 
-Built with [Dear ImGui](https://github.com/ocornut/imgui), [MinHook](https://github.com/TsudaKageyu/minhook), [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) and [stb_image](https://github.com/nothings/stb) (the example's picture).
+This project stands on the work of the open source community, and thanks everyone behind it:
 
-| Who | What |
+- **The libraries it is built with**: [Dear ImGui](https://github.com/ocornut/imgui) by Omar Cornut and its contributors, the interface this whole project exists to draw; [MinHook](https://github.com/TsudaKageyu/minhook) by Tsuda Kageyu, which places every hook on Windows; the [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) of the Khronos Group; [stb_image](https://github.com/nothings/stb) by Sean Barrett, for the example's picture.
+- **What the CI runs on**: [Mesa](https://www.mesa3d.org/)'s llvmpipe and lavapipe, and [mesa-dist-win](https://github.com/pal1000/mesa-dist-win) by pal1000, which let every graphics API render without a GPU; [DDNet](https://ddnet.org/) and [Godot](https://godotengine.org/), open source games that the CI plays on every commit; and [Wine](https://www.winehq.org/), on which it runs the Windows build as a Linux or Steam Deck player does.
+- **The projects that explored the same problem**: [kiero](https://github.com/Rebzzel/kiero) by Rebzzel, where this project started, and [UniversalHookX](https://github.com/bruhmoment21/UniversalHookX), [hudhook](https://github.com/veeenu/hudhook) (in Rust) and [HydraHook](https://github.com/nefarius/HydraHook) (for DirectX): have a look at them too, one may fit your project better.
+- **The [Model Context Protocol](https://modelcontextprotocol.io)**, an open standard that lets any assistant use the remote control.
+
+| Contributor | What |
 | --- | --- |
-| [Sh0ckFR](https://github.com/Sh0ckFR), [Revan600](https://github.com/Revan600) | ImGui and input hooks |
-| [Rebzzel](https://github.com/Rebzzel) | Initial work on the kiero library (no longer used) |
-| [primemb](https://github.com/primemb) | Bug fixes |
+| [Sh0ckFR](https://github.com/Sh0ckFR) | Author and maintainer |
+| [Revan600](https://github.com/Revan600) | ImGui and input hooks |
+| [Rebzzel](https://github.com/Rebzzel) | The kiero library, the original base of the hooks |
+| [primemb](https://github.com/primemb) | Dear ImGui and kiero updates, input hook improvements |
+| [SirMestre](https://github.com/SirMestre) | Fix of the buffer count type |
+
+Thanks as well to everyone who reported a bug, tested a game or starred the repository.
 
 ## Support
 
