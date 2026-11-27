@@ -87,10 +87,10 @@ std::string WriteCode(uintptr_t address, const void* data, size_t size, uintptr_
 
 std::string SymbolAt(uintptr_t address) {
     Dl_info info{};
-    const ElfW(Sym)* symbol = nullptr;
-    if (!dladdr1(reinterpret_cast<void*>(address), &info, reinterpret_cast<void**>(&symbol), RTLD_DL_SYMENT) || !info.dli_sname ||
-        !info.dli_saddr || !symbol)
+    void* entry = nullptr;
+    if (!dladdr1(reinterpret_cast<void*>(address), &info, &entry, RTLD_DL_SYMENT) || !info.dli_sname || !info.dli_saddr || !entry)
         return "";
+    const auto* symbol = static_cast<const ElfW(Sym)*>(entry);
     uintptr_t start = reinterpret_cast<uintptr_t>(info.dli_saddr);
     uintptr_t length = symbol->st_size ? symbol->st_size : 1;
     if (address < start || address - start >= length)
