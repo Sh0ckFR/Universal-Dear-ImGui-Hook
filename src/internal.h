@@ -343,24 +343,6 @@ std::string RunOnGameThread(std::function<std::string()> work);
 // The most classes `engine classes` lists on this thread, 1000 by default;
 // the Engine tab of the AI Advanced Features window lists them all.
 size_t& EngineListLimit();
-// engine search <text> [functions|properties|all], src/engine.cpp, for the
-// engines of src/engine.cpp and src/unreal.cpp: the text, lowercase, split at
-// "::" into a part of the class and a part of the member, and what it searches.
-struct EngineSearch {
-    std::string owner;
-    std::string member;
-    bool functions = true;
-    bool properties = true;
-};
-bool ParseEngineSearch(const std::string& arguments, EngineSearch& search, std::string& error);
-// How well a member of `owner` named `name` matches: 0 its name is the text,
-// 1 it starts with it, 2 it contains it, -1 it does not match.
-int EngineSearchRank(const EngineSearch& search, const std::string& owner, const std::string& name);
-// A line of the answer: <function|property> <package> <Class>::<Name> <detail>,
-// the middle word quoted when it has spaces.
-std::string EngineSearchLine(bool function, const std::string& package, const std::string& owner, const std::string& name, const std::string& detail);
-// The most results a search lists: 1000, or fewer when EngineListLimit() is lower.
-size_t EngineSearchLimit();
 // Calls `visit` with the readable memory of [base, base + size), region by
 // region, in pieces of at most 1 MB that overlap by `overlap` bytes, which
 // may be fewer; stops when `visit` returns false. Modules have unreadable

@@ -24,8 +24,6 @@
 //   engine assemblies                 -> lines <package> <types>
 //   engine classes <filter|*> [pkg]   -> lines <package> <class>
 //   engine class <class>              -> the class, its properties with their offset, its functions; the values of an enum
-//   engine search <text> [functions|properties|all] -> lines function <package> <Class>::<Name> <signature>,
-//                                        or property <package> <Class>::<Name> <offset> <type>
 //   engine get <class> <prop|*> <obj> -> <type> <value>, or every property with *
 //   engine set <class> <prop> <obj> <value> -> <type> <value>, as read back
 //   engine instances <class> [count]  -> lines <address> <class> <name>
@@ -67,24 +65,6 @@ struct TypeCache {
     bool valid = false;
 };
 TypeCache g_types;
-
-// The names of the functions and properties of every class and struct, for
-// engine search: made again only when the list of the types changed.
-struct Member {
-    // In MemberIndex::types.
-    size_t type = 0;
-    uintptr_t address = 0;
-    bool function = false;
-    std::string name;
-};
-
-struct MemberIndex {
-    bool valid = false;
-    size_t key = 0;
-    std::vector<TypeEntry> types;
-    std::vector<Member> members;
-};
-MemberIndex g_members;
 
 // Memory ------------------------------------------------------------------
 
@@ -1156,68 +1136,6 @@ int32_t PropertyOffset(Unreal& ue, const Property& property, std::string& suffix
     return offset;
 }
 
-// <offset> <type>[ (bit <mask>)], for engine search.
-std::string PropertyDetail(Unreal& ue, const Property& property) {
-    std::string suffix;
-    char head[32];
-    snprintf(head, sizeof(head), "0x%x ", static_cast<unsigned>(PropertyOffset(ue, property, suffix)));
-    return head + TypeName(ue, property) + suffix;
-}
-
-const MemberIndex& Members(Unreal& ue) {
-    const std::vector<TypeEntry>& types = Types(ue);
-    size_t key = types.size();
-    for (const TypeEntry& type : types)
-        key = key * 31 + type.object;
-    if (g_members.valid && g_members.key == key)
-        return g_members;
-    g_members = MemberIndex();
-    g_members.types = types;
-    for (size_t i = 0; i < types.size(); ++i) {
-        const TypeEntry& type = types[i];
-        if (strcmp(type.kind, "enum") == 0)
-            continue;
-        for (const Property& property : OwnProperties(ue, type.object))
-            g_members.members.push_back({i, property.address, false, property.name});
-        if (strcmp(type.kind, "class") == 0)
-            for (uintptr_t function : Functions(ue, type.object))
-                g_members.members.push_back({i, function, true, ObjectName(ue, function)});
-    }
-    g_members.valid = true;
-    g_members.key = key;
-    return g_members;
-}
-
-std::string Search(Unreal& ue, const std::string& rest, std::vector<uint8_t>& payload) {
-    EngineSearch search;
-    std::string error;
-    if (!ParseEngineSearch(rest, search, error))
-        return error;
-    DiscoverReflection(ue);
-    const MemberIndex& index = Members(ue);
-    std::vector<std::pair<int, size_t>> found;
-    for (size_t i = 0; i < index.members.size(); ++i) {
-        const Member& member = index.members[i];
-        if (!(member.function ? search.functions : search.properties))
-            continue;
-        int rank = EngineSearchRank(search, index.types[member.type].name, member.name);
-        if (rank >= 0)
-            found.push_back({rank, i});
-    }
-    std::stable_sort(found.begin(), found.end(), [](const std::pair<int, size_t>& a, const std::pair<int, size_t>& b) { return a.first < b.first; });
-    size_t limit = EngineSearchLimit();
-    std::string text;
-    for (size_t i = 0; i < found.size() && i < limit; ++i) {
-        const Member& member = index.members[found[i].second];
-        const TypeEntry& owner = index.types[member.type];
-        std::string detail = member.function ? FunctionSignature(ue, member.address) : PropertyDetail(ue, Describe(ue, member.address, owner.object));
-        text += EngineSearchLine(member.function, owner.package, owner.name, member.name, detail);
-    }
-    if (found.size() > limit)
-        text += "+" + std::to_string(found.size() - limit) + " more\n";
-    return Payload(text, payload);
-}
-
 std::string PropertyLine(Unreal& ue, const Property& property) {
     std::string suffix;
     char head[32];
@@ -2041,8 +1959,6 @@ bool HandleUnreal(const std::string& sub, const std::string& arguments, std::vec
         answer = ListTypes(*ue, arguments, payload);
     else if (sub == "class")
         answer = DescribeType(*ue, arguments, payload);
-    else if (sub == "search")
-        answer = Search(*ue, arguments, payload);
     else if (sub == "get")
         answer = GetValue(*ue, arguments, payload);
     else if (sub == "set")

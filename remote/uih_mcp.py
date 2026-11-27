@@ -329,24 +329,6 @@ TOOLS += [
         },
     },
     {
-        "name": "engine_search",
-        "description": "Finds the methods and fields (on Unreal, the functions and properties) whose name contains a text, "
-        "case-insensitive, in every class of the game: each as Class::Name with its signature, or with its offset (or static, const) "
-        "and type, and its assembly or package. Those named exactly so come first, then those whose name starts with the text; at "
-        "most 1000. Use it to find a function to call or a property to read when its class is unknown, such as health or "
-        "GetPlayerCharacter. Class::Name searches the members of the classes whose name contains Class." + MEMORY_NOTE,
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "text": {"type": "string", "description": "Part of the name, such as heal, or Player::health; it may have spaces, "
-                         "such as Health Max."},
-                "kind": {"type": "string", "enum": ["all", "functions", "properties"], "description": "all (the default), "
-                         "functions (methods), or properties (fields)."},
-            },
-            "required": ["text"],
-        },
-    },
-    {
         "name": "engine_class",
         "description": "Describes a class: its parents, its fields with their type and offset in the object (or static, const), "
         "inherited fields included, and its methods with their parameters. On Unreal: its properties and its functions." + MEMORY_NOTE,
@@ -916,13 +898,6 @@ def engine_tool(name, args):
         return (f"The SDK is in {lines[0]}\n" + "\n".join(lines[1:]) +
                 "\nInclude it in the DLL's code (C++17), call uesdk::WaitForInit() on a thread of the DLL, then call the game's "
                 "functions inside uesdk::GameThread::Run(), and uesdk::Shutdown() before the DLL unloads.")
-    if name == "engine_search":
-        text = str(args.get("text", "") or "").strip()
-        kind = str(args.get("kind", "") or "all").strip().lower()
-        if kind not in ("all", "functions", "properties"):
-            raise GameError("Give the kind as all, functions or properties.")
-        _, data = request(f"engine search {engine_word(text, 'text')} {kind}", payload=text_payload)
-        return data.decode("utf-8", "replace") or f"No {'function or property' if kind == 'all' else kind[:-1]} is named so."
     if name == "engine_classes":
         filter_text = str(args.get("filter", "") or "").strip()
         assembly = str(args.get("assembly", "") or "").strip()

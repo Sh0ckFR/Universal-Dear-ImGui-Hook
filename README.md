@@ -434,7 +434,6 @@ With `remoteMemory`, the assistant also sees the objects of Unity and Unreal Eng
 | --- | --- |
 | `engine_info` | The engine, its scripting runtime and its version, such as Unity 2022.3.10f1 with IL2CPP, or Unreal Engine 5.3 |
 | `engine_classes` | The assemblies of the game's scripts (the packages on Unreal), or their classes whose name contains a filter, such as `player` in `Assembly-CSharp` |
-| `engine_search` | The methods and fields (functions and properties on Unreal) of every class whose name contains a text, such as `heal`: each as `Class::Name` with its signature, or its offset and type, those named exactly so first |
 | `engine_class` | A class: its parents, its fields with their type and offset (or static, const), inherited ones included, and its methods with their parameters |
 | `engine_instances` | The live objects of a class, such as every `Game.Player`, found by a scan of the memory checked against the layout of the class, or in the object array on Unreal |
 | `engine_field` | Reads a field of an object or a static field, and writes it when given a value: numbers, booleans, strings, enums, structs such as `Vector3` (`position.x`), references to other objects |
@@ -522,7 +521,7 @@ The example menu then shows an **AI Advanced Features** button, which opens a wi
 | **Pointers** | A pointer chain followed as you type it, and a pointer scan whose results go to the watch list in one click |
 | **What writes** | The instruction watch on an address, with each instruction, decoded, its hit count and the bytes before it |
 | **Patches** | The code the assistant patched, with a button that restores each patch, or all of them |
-| **Engine** | Unreal Engine games: their classes, structs and enums with a filter, or with **Functions** and **Properties** the members of every class whose name holds it, one click opening its class with the function ready to call or the property among the live values of its first object; a class's parents, properties with offsets, enum values and functions with their signatures; its live objects; the values of an object's properties, updated live and written on Enter; a form that calls a function on the game thread; and the **Dump C++ SDK** button, with the path of the header and a button that copies it |
+| **Engine** | Unreal Engine games: their classes, structs and enums with a filter; a class's parents, properties with offsets, enum values and functions with their signatures; its live objects; the values of an object's properties, updated live and written on Enter; a form that calls a function on the game thread; and the **Dump C++ SDK** button, with the path of the header and a button that copies it |
 
 ### Tools of your own
 
