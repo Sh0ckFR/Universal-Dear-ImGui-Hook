@@ -20,7 +20,7 @@ The internals of Universal-Dear-ImGui-Hook, for contributors and the curious. To
 | `src/linux/` | Symbol interposition, GLX, EGL, X11 input and the game's events (`events.cpp`), remote control (`remote.cpp`), instruction watch (`breakpoints.cpp`), `exports.map` |
 | `remote/` | `uih_mcp.py`, the MCP server of the remote control and its DLL injector; `uih_chat.py`, the bridge between the in-game chat and Claude Code; [`PROTOCOL.md`](../remote/PROTOCOL.md) |
 | `example/` | The library that gets built: `config.cpp` (settings), `menu.cpp` (the widget tour), `image.cpp` and `image.rc` (`imgui.png` embedded), `dllmain.cpp`, `proxy.cpp`, `preload.cpp` |
-| `tests/` | `uih_host`, `uih_game`, `game.sh` and `game_mcp.py` for real games, the Godot project they run, the `FetchContent` consumer, `check_docs.py` for the Markdown files, the fake Unity runtime `fake_unity.cpp` and the C# game `mono/Game.cs` for the engine commands: see [`tests/README.md`](../tests/README.md) |
+| `tests/` | `uih_host`, `uih_game`, `game.sh` and `game_mcp.py` for real games, the Godot project they run, the `FetchContent` consumer, `check_docs.py` for the Markdown files, `check_sources.py` for the sources of the two build systems, the fake Unity runtime `fake_unity.cpp` and the C# game `mono/Game.cs` for the engine commands: see [`tests/README.md`](../tests/README.md) |
 | `vs/`, `Universal-ImGui-Hook.sln` | Visual Studio projects |
 | `third_party/` | Dear ImGui, MinHook, Vulkan headers, stb_image (example only) |
 
