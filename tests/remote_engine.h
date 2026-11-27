@@ -365,14 +365,6 @@ inline std::string ReadTextFile(const std::string& path) {
 // The engine commands on the objects of tests/fake_unreal.cpp, whose layout
 // src/unreal.cpp must find by itself. With `sdkCopy`, the SDK of every
 // package is copied there, for the program that tests it (tests/sdk).
-// UObject::ProcessEvent is found by decoding the code of the game, x86 and x64
-// only: elsewhere, such as on ARM64 Linux, calls answer an error.
-#if defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86)
-constexpr bool kFindsProcessEvent = true;
-#else
-constexpr bool kFindsProcessEvent = false;
-#endif
-
 template <typename Client>
 std::string CheckRemoteUnreal(Client& client, const FakeUnreal& fake, bool advanced, const std::string& sdkCopy = "") {
     auto payload = [&](const std::string& command) {
@@ -478,11 +470,6 @@ std::string CheckRemoteUnreal(Client& client, const FakeUnreal& fake, bool advan
         printf("engine call: %s\n", call.c_str());
         if (call.rfind("error the advanced features are off", 0) != 0)
             return "engine call answers while aiAdvancedFeatures is off";
-    } else if (!kFindsProcessEvent) {
-        std::string call = client.Request("engine call GamePlayer Heal" + alice + " [5]");
-        printf("engine call: %s\n", call.c_str());
-        if (call.rfind("error the library did not find UObject::ProcessEvent", 0) != 0)
-            return "engine call does not say it cannot call functions on this processor";
     } else {
         std::string dave = " " + EngineHex(fake.dave);
         int callsBefore = FakeUnrealCalls();
@@ -529,7 +516,7 @@ std::string CheckRemoteUnreal(Client& client, const FakeUnreal& fake, bool advan
         !has(sdk, "    int32_t GetStats(int32_t Bonus, int32_t& Total, float& Ratio);\n") ||
         !has(sdk, "    void Boost(int32_t& Value);\n") || !has(sdk, "    int32_t& Health_Max() {") ||
         !has(sdk, std::string("struct alignas(") + (five ? "8" : "4") + ") FVector {") ||
-        !has(sdk, "constexpr int kProcessEvent = " + std::to_string(kFindsProcessEvent ? fake.processEvent : -1) + ";"))
+        !has(sdk, "constexpr int kProcessEvent = " + std::to_string(fake.processEvent) + ";"))
         return "engine dump all does not write the SDK of every package";
     if (client.Request("engine dump /Script/Nothing").rfind("error no class, struct or enum is in /Script/Nothing", 0) != 0)
         return "engine dump does not refuse a scope without types";

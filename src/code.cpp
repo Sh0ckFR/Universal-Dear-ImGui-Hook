@@ -634,6 +634,7 @@ bool TestsBitsArm64(uintptr_t function, uint32_t displacement, uint32_t mask, si
     int loaded[32];
     for (int& shift : loaded)
         shift = -1;
+    int64_t reach = 0;
     for (size_t i = 0; i < code.size(); ++i) {
         uint32_t in = code[i];
         uint32_t rt = in & 0x1f;
@@ -661,8 +662,19 @@ bool TestsBitsArm64(uintptr_t function, uint32_t displacement, uint32_t mask, si
             if ((uint64_t{1} << (bit + 8 * loaded[(in >> 5) & 0x1f])) == mask)
                 return true;
         }
-        if (in == 0xd65f03c0 && (i + 1 >= code.size() || code[i + 1] == 0xd503201f || code[i + 1] == 0))
-            break;  // ret, then padding
+        // The furthest instruction a branch seen so far goes to: a ret or b
+        // after it ends the function, whatever the compiler placed next.
+        int64_t target = -1;
+        if ((in & 0xfc000000) == 0x14000000)
+            target = static_cast<int64_t>(i) + (static_cast<int32_t>(in << 6) >> 6);  // b
+        else if ((in & 0xff000010) == 0x54000000 || (in & 0x7e000000) == 0x34000000)
+            target = static_cast<int64_t>(i) + (static_cast<int32_t>(in << 8) >> 13);  // b.cond, cbz, cbnz
+        else if ((in & 0x7e000000) == 0x36000000)
+            target = static_cast<int64_t>(i) + (static_cast<int32_t>(in << 13) >> 18);  // tbz, tbnz
+        if (target > reach)
+            reach = target;
+        if ((in == 0xd65f03c0 || (in & 0xfc000000) == 0x14000000) && static_cast<int64_t>(i) >= reach)
+            break;  // ret, or a tail call
         // Another write of the register forgets it.
         loaded[rt] = -1;
     }
@@ -684,6 +696,7 @@ bool CodeTestsBits(uintptr_t function, uint32_t displacement, uint32_t mask, siz
         loaded.erase(std::remove_if(loaded.begin(), loaded.end(), [&](const std::pair<ZydisRegister, int>& entry) { return entry.first == reg; }),
                      loaded.end());
     };
+    size_t reach = 0;
     for (size_t at = 0; at < std::min(size, length);) {
         Instruction in;
         if (!decoder.Decode(bytes.data() + at, size - at, in))
@@ -691,7 +704,17 @@ bool CodeTestsBits(uintptr_t function, uint32_t displacement, uint32_t mask, siz
         const ZydisDecodedInstruction& d = in.decoded;
         const ZydisDecodedOperand* operands = in.operands;
         size_t next = at + d.length;
-        if (d.mnemonic == ZYDIS_MNEMONIC_INT3 || (d.mnemonic == ZYDIS_MNEMONIC_RET && (next >= size || bytes[next] == 0xcc || bytes[next] == 0x90)))
+        // The furthest byte a branch seen so far goes to: a ret or jmp after it
+        // ends the function, whatever the compiler placed next (MSVC pads with
+        // int3, GCC and Clang with multi-byte nops or the next function).
+        bool jump = d.mnemonic == ZYDIS_MNEMONIC_JMP;
+        if ((jump || d.meta.category == ZYDIS_CATEGORY_COND_BR) && d.operand_count_visible >= 1 &&
+            operands[0].type == ZYDIS_OPERAND_TYPE_IMMEDIATE && operands[0].imm.is_relative) {
+            ZyanU64 target = 0;
+            if (ZYAN_SUCCESS(ZydisCalcAbsoluteAddress(&d, &operands[0], start + at, &target)) && target > start + at)
+                reach = std::max<size_t>(reach, static_cast<size_t>(target - start));
+        }
+        if (d.mnemonic == ZYDIS_MNEMONIC_INT3 || ((d.mnemonic == ZYDIS_MNEMONIC_RET || jump) && next > reach))
             break;
         bool testing = d.mnemonic == ZYDIS_MNEMONIC_TEST || d.mnemonic == ZYDIS_MNEMONIC_BT || d.mnemonic == ZYDIS_MNEMONIC_AND;
         if (testing && d.operand_count_visible >= 2 && operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {

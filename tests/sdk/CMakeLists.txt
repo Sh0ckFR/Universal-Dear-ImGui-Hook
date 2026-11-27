@@ -10,6 +10,12 @@ project(uih_sdk_test LANGUAGES CXX)
 if(NOT UIH_SDK_DIR OR NOT UIH_SDK_OUTPUT)
     message(FATAL_ERROR "give -DUIH_SDK_DIR=<directory of uih_sdk.hpp> -DUIH_SDK_OUTPUT=<directory of the library>")
 endif()
+# The test that dumps the SDK was skipped, such as without Vulkan: nothing to
+# build, and uih_host --sdk-test skips as well.
+if(NOT EXISTS ${UIH_SDK_DIR}/uih_sdk.hpp)
+    message(STATUS "UIH_SDK_SKIPPED: no SDK in ${UIH_SDK_DIR}, the test that dumps it did not run")
+    return()
+endif()
 
 add_library(uih_sdk_test SHARED sdk_test.cpp)
 target_include_directories(uih_sdk_test PRIVATE ${UIH_SDK_DIR})

@@ -1243,6 +1243,9 @@ std::string g_sdkCopy;
 // functions of the game through uesdk::GameThread, on the window's thread.
 template <typename Frame>
 int SdkScenario(const std::string& path, Frame&& frame) {
+    // Not built when the test that dumps its SDK did not run.
+    if (GetFileAttributesA(path.c_str()) == INVALID_FILE_ATTRIBUTES)
+        return Skip("the library of the SDK was not built: the test that dumps the SDK did not run");
     std::string report;
     int failed = -1;
     WhileRendering(

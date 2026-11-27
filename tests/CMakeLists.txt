@@ -41,7 +41,7 @@ function(uih_add_sdk_test generation dump_test api)
                      --build-options -DCMAKE_BUILD_TYPE=${UIH_SDK_CONFIG} -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
                                      -DUIH_SDK_DIR=${dir} -DUIH_SDK_OUTPUT=${dir}/out)
     set_tests_properties(${dump_test} PROPERTIES FIXTURES_SETUP sdk${generation}_header)
-    set_tests_properties(sdk${generation}_build PROPERTIES TIMEOUT 600
+    set_tests_properties(sdk${generation}_build PROPERTIES TIMEOUT 600 SKIP_REGULAR_EXPRESSION UIH_SDK_SKIPPED
                          FIXTURES_REQUIRED sdk${generation}_header FIXTURES_SETUP sdk${generation}_library)
     if(WIN32)
         set(library ${dir}/out/uih_sdk_test.dll)

@@ -580,6 +580,9 @@ void* PreloadedFunction(const char* name) {
 // on a thread of its own while the window renders. On Linux the SDK has no
 // GameThread: the library calls the functions from its thread.
 int RunSdkTest(Display* display, Window window, Host& host, const std::string& path) {
+    // Not built when the test that dumps its SDK was skipped, such as without Vulkan.
+    if (access(path.c_str(), F_OK) != 0)
+        return Skip("the library of the SDK was not built: the test that dumps the SDK did not run");
     XSelectInput(display, window, StructureNotifyMask);
     auto frame = [&] {
         while (XPending(display)) {
@@ -1089,7 +1092,8 @@ int main(int argc, char** argv) {
     Display* display = XOpenDisplay(nullptr);
     if (!display)
         return Skip("no X server");
-    if (!CallerSeenThroughHook())
+    // The SDK's test runs without the hook, as a trainer of a game would.
+    if (options.sdkTest.empty() && !CallerSeenThroughHook())
         return Fail("the hook is not preloaded, or its dlsym() hides the caller from the C library");
 
     VisualID visual = XVisualIDFromVisual(DefaultVisual(display, DefaultScreen(display)));

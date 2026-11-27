@@ -78,8 +78,8 @@ bool Run() {
     ok = Check(dave->Mana() == 50.0f, "Mana(), a property of a blueprint class") && ok;
 
     // Functions, through ProcessEvent on the game thread. The SDK of a game
-    // whose ProcessEvent the library did not find, as on ARM64 Linux where it
-    // does not decode the code, has wrappers that fail with an error.
+    // whose ProcessEvent the library did not find has wrappers that fail with
+    // an error; the fake game's is always found.
     if (uesdk::layout::kProcessEvent < 0) {
         bool called = alice->Heal(5);
         ok = Check(!called && !uesdk::LastError().empty(), "without ProcessEvent, Heal(5) fails: " + uesdk::LastError()) && ok;
