@@ -33,6 +33,8 @@
         xcb_poll_for_event;
         xcb_poll_for_queued_event;
 
+        clock_gettime;
+
     local:
         *;
 };

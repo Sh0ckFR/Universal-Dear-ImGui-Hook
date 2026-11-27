@@ -2,6 +2,7 @@
 #include "host.h"
 #include "remote_memory.h"
 #include "remote_advanced.h"
+#include "remote_time.h"
 #include "remote_tools.h"
 
 #include <EGL/egl.h>
@@ -608,6 +609,13 @@ void WhileRendering(Work&& work, Frame&& frame) {
 // The commands of remote/uih_mcp.py: the screenshot shows the game without
 // the message of the assistant, which the overlay draws, and the keys reach
 // the window through XTEST when it has the focus, as events otherwise.
+// clock_gettime() from the host, as the game's code calls it.
+int64_t GameMs() {
+    timespec now{};
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return static_cast<int64_t>(now.tv_sec) * 1000 + now.tv_nsec / 1000000;
+}
+
 int RunRemote(Display* display, Window window, Host& host, const std::string& name) {
     int presses = 0;
     int releases = 0;
@@ -682,6 +690,8 @@ int RunRemote(Display* display, Window window, Host& host, const std::string& na
             unknownKey = client.Request("key nokey 50");
             memoryFailure = CheckRemoteMemory(client);
             advancedFailure = CheckRemoteAdvanced(client);
+            if (advancedFailure.empty())
+                advancedFailure = CheckRemoteTime(client, GameMs);
             toolsFailure = CheckRemoteTools(client);
         },
         frame);

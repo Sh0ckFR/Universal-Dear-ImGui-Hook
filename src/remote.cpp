@@ -4,7 +4,7 @@
 // pipe (src/windows/remote.cpp) or a Unix socket (src/linux/remote.cpp).
 //
 // One request per line, local clients only:
-//   info                       -> ok <backend> <width>x<height> focused=0|1 menu=0|1 memory=0|1
+//   info                       -> ok <backend> <width>x<height> focused=0|1 menu=0|1 memory=0|1 advanced=0|1 speed=<speed>
 //   screenshot <max size>      -> ok <width> <height>, then width * height RGB bytes
 //   text <seconds> <message>   -> ok         (\n in the message starts a new line)
 //   key <keys> <milliseconds>  -> ok <how the keys were sent>  (keys: space, or left+space held together)
@@ -14,6 +14,7 @@
 //   move <x> <y>               -> ok <how the pointer was moved>
 //   drag <x0> <y0> <x1> <y1> [left|right|middle] [milliseconds]  -> ok <how the drag was sent>
 //   wait <milliseconds> [percent]  -> ok changed|unchanged <milliseconds> <percent of the pixels that changed>
+//   time [<speed>|advance <milliseconds>]  -> ok <speed>   (speed of the game's clocks, src/timing.cpp)
 // and the memory commands of src/memory.cpp and src/advanced.cpp, and the
 // tools of the game, src/tools.cpp.
 // Failures answer: error <reason>
@@ -314,7 +315,23 @@ bool IsInput(const std::string& command) {
     return command == "key" || command == "click" || command == "type" || command == "move" || command == "drag";
 }
 
-bool IsAdvanced(const std::string& command) { return command == "type" || command == "move" || command == "drag" || command == "wait"; }
+bool IsAdvanced(const std::string& command) {
+    return command == "type" || command == "move" || command == "drag" || command == "wait" || command == "time";
+}
+
+std::string Input(const std::string& command, const std::string& rest) {
+    // A game the assistant paused runs while it acts, then pauses again.
+    timing::RunWhilePaused run;
+    if (command == "key")
+        return Keys(rest);
+    if (command == "click")
+        return Click(rest);
+    if (command == "type")
+        return Type(rest);
+    if (command == "move")
+        return Move(rest);
+    return Drag(rest);
+}
 
 std::string Answer(const std::string& command, const std::string& rest, std::vector<uint8_t>& payload) {
     const Config& config = GetConfig();
@@ -324,8 +341,8 @@ std::string Answer(const std::string& command, const std::string& rest, std::vec
         bool focused = false;
         GameWindow(width, height, focused);
         char answer[160];
-        snprintf(answer, sizeof(answer), "ok %s %ux%u focused=%d menu=%d memory=%d advanced=%d", BackendName(ActiveBackend()), width, height, focused,
-                 IsMenuOpen(), config.remoteMemory, config.aiAdvancedFeatures);
+        snprintf(answer, sizeof(answer), "ok %s %ux%u focused=%d menu=%d memory=%d advanced=%d speed=%g", BackendName(ActiveBackend()), width, height,
+                 focused, IsMenuOpen(), config.remoteMemory, config.aiAdvancedFeatures, timing::Speed());
         return answer;
     }
     if (IsAdvanced(command) && !config.aiAdvancedFeatures)
@@ -336,18 +353,14 @@ std::string Answer(const std::string& command, const std::string& rest, std::vec
         return Screenshot(static_cast<uint32_t>(rest.empty() ? 1280 : strtoul(rest.c_str(), nullptr, 10)), payload);
     if (command == "text")
         return Text(rest);
-    if (command == "key")
-        return Keys(rest);
-    if (command == "click")
-        return Click(rest);
-    if (command == "type")
-        return Type(rest);
-    if (command == "move")
-        return Move(rest);
-    if (command == "drag")
-        return Drag(rest);
-    if (command == "wait")
+    if (IsInput(command))
+        return Input(command, rest);
+    if (command == "wait") {
+        timing::RunWhilePaused run;
         return Wait(rest);
+    }
+    if (command == "time")
+        return timing::Command(rest);
     std::string answer;
     if (HandleTools(command, rest, payload, answer) || HandleMemory(command, rest, payload, answer) || HandleAdvanced(command, rest, payload, answer))
         return answer;

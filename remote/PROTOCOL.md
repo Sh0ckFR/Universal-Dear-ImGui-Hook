@@ -10,7 +10,7 @@ Each command is one line; each answer starts with `ok` or `error <reason>`. Some
 
 | Command | Answer |
 | --- | --- |
-| `info` | `ok <API> <width>x<height> focused=0\|1 menu=0\|1 memory=0\|1 advanced=0\|1` |
+| `info` | `ok <API> <width>x<height> focused=0\|1 menu=0\|1 memory=0\|1 advanced=0\|1 speed=<speed>` |
 | `screenshot <max size>` | `ok <width> <height>`, then the RGB pixels, top row first |
 | `text <seconds> <message>` | `ok`; `\n` in the message starts a new line, `0` seconds removes the message |
 | `key <keys> <milliseconds>` | `ok <how the keys were sent>`, once they are released |
@@ -26,6 +26,8 @@ Each command is one line; each answer starts with `ok` or `error <reason>`. Some
 | `move <x> <y>` | `ok <how the cursor moved>`, after it rested there for 50 ms |
 | `drag <x0> <y0> <x1> <y1> [left\|right\|middle] [milliseconds]` | `ok <how the drag was sent>`, once the button is released |
 | `wait <milliseconds> [percent]` | `ok changed\|unchanged <milliseconds> <percent of the pixels that changed>` |
+| `time [speed]` | `ok <speed>`: the speed of the game's clocks, set first when given, from `0` (paused) to `8`, `1` being real time |
+| `time advance <milliseconds>` | `ok 0`, once the game ran in real time for 1 to 10000 milliseconds, after which it is paused |
 | `pointer <address>` | `ok <bytes>`, then one line per pointer read and `address <address> <module+offset>` |
 | `pointers <address> [max offset]` | `ok <bytes>`, then lines `<location> <module+offset> +<offset>`, those in a module first, at most 1000 |
 | `watch add <type> <address> [label]` | `ok <id>` |
@@ -44,6 +46,7 @@ Each command is one line; each answer starts with `ok` or `error <reason>`. Some
 
 - **Escapes.** The `chat` texts escape a new line as `\n`, a tab as `\t` and a backslash as `\\`.
 - **Tools of the game.** `tools` and `tool` answer with `remoteControl` alone. The tool runs in the next frame of the overlay; when none comes within 10 seconds, or the tool takes longer, the command answers `error`. An exception thrown by the tool answers `error <its message>`.
+- **Speed of the game.** `time` slows down or pauses the clocks the game's code reads (`src/timing.cpp`): `QueryPerformanceCounter`, `GetTickCount`, `GetTickCount64` and `timeGetTime` on Windows, `clock_gettime` with the monotonic clocks on Linux, where the library must be preloaded or `time` answers `error`. While the game is paused, `key`, `click`, `type`, `move`, `drag` and `wait` run it in real time until they answer, then pause it again. `Stop()` sets the game back to real time.
 - **Which commands answer.** The memory commands, `modules` to `pattern` (`src/memory.cpp`), answer only with `remoteMemory`. The commands from `type` on answer only with `aiAdvancedFeatures` (`src/remote.cpp`, `src/advanced.cpp`), and those from `pointer` to `writes results` need `remoteMemory` as well. Otherwise they answer `error`.
 - **Types and values.** Types are `i8`, `i16`, `i32`, `i64`, `f32` and `f64`. Floating-point values match when they round to the given value, to as many decimals as it has.
 - **Addresses** are hexadecimal or `module+offset`, such as `game.exe+1a2b3c`. With `aiAdvancedFeatures`, they can also be pointer chains: `[game.exe+1a2b3c]+10` is the address 0x10 bytes after the one stored at `game.exe+1a2b3c`.

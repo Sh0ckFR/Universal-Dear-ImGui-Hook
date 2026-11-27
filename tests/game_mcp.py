@@ -104,7 +104,7 @@ def play(game, assistant, backend, screenshot):
     tools = sorted(tool["name"] for tool in assistant.request("tools/list", {})["tools"])
     expected = sorted(["click", "drag", "game_info", "memory_find", "memory_freeze", "memory_modules", "memory_next", "memory_pattern",
                        "memory_pointer", "memory_pointer_scan", "memory_read", "memory_results", "memory_watch", "memory_what_writes",
-                       "memory_write", "mouse_move", "press_key", "screenshot", "show_text", "type_text", "wait_for_change",
+                       "memory_write", "mouse_move", "press_key", "screenshot", "show_text", "type_text", "wait_for_change", "game_speed",
                        # Registered by tests/remote_preload.cpp with uih::RegisterTool().
                        "test_add", "test_fail"])
     if tools != expected:
@@ -123,6 +123,14 @@ def play(game, assistant, backend, screenshot):
     _, text = assistant.call("wait_for_change", {"timeout_ms": 1000})
     if not text.startswith(("The screen changed after ", "No change within ")):
         raise Failure(f"wait_for_change answered {text}")
+
+    # The game's clocks: the game keeps rendering while paused, so the screenshot below still works.
+    for args, expected_text in (({"speed": 0}, "The game runs paused."), ({"advance_ms": 200}, "The game ran for 200 ms and is paused."),
+                                ({"speed": 0.5}, "The game runs at 0.5 times real time."), ({}, "The game runs at 0.5 times real time."),
+                                ({"speed": 1}, "The game runs in real time.")):
+        _, text = assistant.call("game_speed", args)
+        if text != expected_text:
+            raise Failure(f"game_speed {args} answered {text!r}")
 
     content, text = assistant.call("screenshot", {"max_size": 640})
     image = base64.b64decode(next(item["data"] for item in content if item["type"] == "image"))

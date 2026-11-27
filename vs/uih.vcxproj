@@ -40,8 +40,11 @@
     <ClCompile Include="..\src\memory.cpp" />
     <ClCompile Include="..\src\advanced.cpp" />
     <ClCompile Include="..\src\c_api.cpp" />
+    <ClCompile Include="..\src\tools.cpp" />
+    <ClCompile Include="..\src\timing.cpp" />
     <ClCompile Include="..\src\windows\platform.cpp" />
     <ClCompile Include="..\src\windows\input.cpp" />
+    <ClCompile Include="..\src\windows\clocks.cpp" />
     <ClCompile Include="..\src\windows\dinput.cpp" />
     <ClCompile Include="..\src\windows\remote.cpp">
       <!-- src\remote.cpp compiles to remote.obj too. -->

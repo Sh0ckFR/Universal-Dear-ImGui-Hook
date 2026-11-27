@@ -37,6 +37,7 @@ RendererSlot g_renderers[] = {
     {&kXInput14Hooks},
     {&kXInput13Hooks},
     {&kXInput910Hooks},
+    {&kClockHooks},
 };
 
 std::atomic<HWND> g_window{nullptr};
@@ -115,6 +116,7 @@ DWORD WINAPI Worker(void*) {
     }
 
     input::InstallHooks();
+    clocks::InstallHooks();
 
     // Registered before the first pass: a module loaded meanwhile wakes the loop below.
     HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
@@ -170,6 +172,7 @@ void RemoveHooks(bool uninitialize) {
         g_ownsMinHook = false;
     }
     input::UninstallHooks();
+    clocks::UninstallHooks();
     for (RendererSlot& slot : g_renderers)
         if (slot.attempted)
             slot.renderer->Uninstall();
