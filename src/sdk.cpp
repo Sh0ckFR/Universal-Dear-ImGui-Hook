@@ -1,6 +1,6 @@
 // The C++ SDK of an Unreal Engine game, `engine dump [scope]`: one header,
 // written to the temporary directory, that another DLL includes to use the
-// game's classes and call its functions, as a trainer does. It needs neither
+// game's classes and call its functions, such as a mod or a test. It needs neither
 // this library nor Unreal's headers:
 //   - a small runtime (kRuntime below, copied as it is) finds the name table,
 //     the object array and UObject::ProcessEvent from the offsets recorded at
@@ -1828,7 +1828,7 @@ std::string Generator::Run(const std::string& scopeText, std::vector<uint8_t>& p
             std::to_string(counts[1]) + " structs, " + std::to_string(counts[2]) + " enums, " + std::to_string(functions_) + " functions.\n";
     text += R"SDK(//
 // One header, without Unreal's headers or this library: include it in a DLL
-// loaded into the game, as a trainer does. C++17, MSVC, GCC or Clang.
+// loaded into the game: a mod, a tool or a test. C++17, MSVC, GCC or Clang.
 //
 //   #include "THIS_FILE"
 //   if (!uesdk::WaitForInit(60000))      // from a DLL injected at launch; Init() once the game runs

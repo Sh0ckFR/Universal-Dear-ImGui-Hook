@@ -12,7 +12,7 @@ endfunction()
 
 # The C++ SDK that `engine dump` writes of the fake Unreal game, in the
 # directory sdk<generation>: `dump_test` copies it there, then tests/sdk is
-# built against it by the compiler of this build, as a trainer would be, and
+# built against it by the compiler of this build, as a DLL of a user is, and
 # uih_host --sdk-test runs it against the same fake game.
 get_property(UIH_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
 if(UIH_MULTI_CONFIG)

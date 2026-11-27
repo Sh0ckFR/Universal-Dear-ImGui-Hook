@@ -410,7 +410,7 @@ TOOLS += [
     {
         "name": "engine_dump",
         "description": "Unreal Engine games: writes a C++ header of the game's classes, structs, enums and functions, an SDK for a "
-        "DLL of the player's own, such as a trainer, injected into the game: it includes the header, calls uesdk::WaitForInit(), reads "
+        "DLL of the player's own, such as a mod, a tool or an automated test, injected into the game: it includes the header, calls uesdk::WaitForInit(), reads "
         "the properties through accessors such as player->Health() and calls the functions through wrappers, on the game thread with "
         "uesdk::GameThread::Run(). Returns the full path of the file, in the temporary directory, and what it holds. The header finds "
         "the engine again at each launch and checks it is the same build of the game; dump it again after an update." + MEMORY_NOTE,

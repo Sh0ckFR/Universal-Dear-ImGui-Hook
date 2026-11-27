@@ -1,4 +1,4 @@
-// A trainer of the fake game of tests/fake_unreal.cpp, built against the SDK
+// A test DLL for the fake game of tests/fake_unreal.cpp, built against the SDK
 // that `engine dump all` wrote of it: it reads and writes the properties of
 // its objects through the accessors, and calls their functions through the
 // wrappers, as a DLL injected into a real game does with the SDK of that game.
