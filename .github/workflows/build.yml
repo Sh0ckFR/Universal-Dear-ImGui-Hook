@@ -349,7 +349,7 @@ jobs:
         run: |
           cat > diag.sh <<'SCRIPT'
           xwininfo -root -tree | head -20
-          WAYLAND_DEBUG=1 UIH_DEBUG=1 LD_PRELOAD=$PWD/build/linux/Universal-ImGui-Hook.so timeout 20 build/linux/tests/uih_host_wayland --api vulkan 2>&1 | grep -vE "wl_surface@|wl_buffer@|wl_callback@|wl_display@|wl_registry@|wp_|zwp_linux|wl_shm|wl_drm" | head -120
+          WAYLAND_DEBUG=1 UIH_DEBUG=1 LD_PRELOAD=$PWD/build/linux/Universal-ImGui-Hook.so timeout 20 build/linux/tests/uih_host_wayland --api vulkan 2>&1 | grep -E "wl_keyboard|wl_pointer|uih|FAIL|client:|discarded|rror" | head -120
           WAYLAND_DEBUG=1 timeout 20 build/linux/tests/uih_host_wayland --api vulkan 2>&1 | grep -E "FAIL|PASS|client:|wl_keyboard|wl_seat|xdg_toplevel|wl_pointer@[0-9]+\.(enter|leave)" | head -60
           SCRIPT
           xvfb-run -a -s "-screen 0 1280x720x24" sh tests/wayland.sh sh diag.sh || true

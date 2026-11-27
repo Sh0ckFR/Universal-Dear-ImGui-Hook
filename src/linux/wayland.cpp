@@ -445,6 +445,7 @@ void Forward(Proxy* proxy, int opcode, void* data, Args... args) {
 
 void PointerEnter(void* data, Proxy* pointer, uint32_t serial, Proxy* surface, int32_t x, int32_t y) {
     NoteInputThread();
+    Log("DEBUG %s %p handler %p", "PointerEnter", static_cast<void*>(surface), reinterpret_cast<void*>(Handler(pointer, 0)));
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         g_pointerSurface = surface;
@@ -613,6 +614,7 @@ void KeyboardKeymap(void* data, Proxy* keyboard, uint32_t format, int32_t fd, ui
 
 void KeyboardEnter(void* data, Proxy* keyboard, uint32_t serial, Proxy* surface, Array* keys) {
     NoteInputThread();
+    Log("DEBUG %s %p handler %p", "KeyboardEnter", static_cast<void*>(surface), reinterpret_cast<void*>(Handler(keyboard, 1)));
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         g_keyboardSurface = surface;
